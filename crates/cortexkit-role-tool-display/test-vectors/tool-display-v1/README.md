@@ -15,6 +15,9 @@ existing spelling. Lookup examples describe server behavior, not an app read op.
 - `details.json`: free-form detail objects and standard cut metadata.
 - `writes.json`: limits, wire params, stored/already-stored/conflict/too-large
   answers and invalid params, with the retryable not-ready code.
+- `reads.json`: a management-surface pull request, its unchanged write params
+  reply, final denied/unknown refusals, invalid params, retryable not-ready, and
+  the identifier-only record-ready event without a reader suffix.
 - `views.json`: copied byte for byte from
   `crates/cortexkit-role-tool-provider/test-vectors/tool-provider-v1/views.json`,
   including a manifest and an unknown pin. Both packages validate these bytes,

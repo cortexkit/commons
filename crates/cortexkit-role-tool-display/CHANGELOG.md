@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8
+
+- Add provider management-surface `display.read` and the strict
+  `display_record_ready` bus event body, with opaque record identifiers,
+  constructors, validators, public operation/event/refusal constants and vectors.
+- Define discovery-bound read authorization, verified pulled-writer identity,
+  shared write idempotency, post-commit events without a reader suffix, and at
+  least seven days of provider retention. Providers keep `display.write` during
+  reader rollout; its behavior is unchanged.
+
 ## 0.1.7
 
 - A `peer_message` wake item's `refs.id` follows the opaque-field rule instead of

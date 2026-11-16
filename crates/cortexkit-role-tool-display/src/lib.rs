@@ -27,6 +27,9 @@ pub const APP_SERVER_CAPABILITY: &str = "app-server/v1";
 /// Independent promise to serve display writes and fetch provider views.
 pub const TOOL_DISPLAY_CAPABILITY: &str = "tool-display/v1";
 pub const DISPLAY_WRITE: &str = "display.write";
+pub const DISPLAY_READ: &str = "display.read";
+pub const DISPLAY_RECORD_READY_EVENT: &str = "display_record_ready";
+pub const DISPLAY_RECORD_READY_VERSION: u64 = 1;
 /// The `role.describe` member containing [`DisplayLimits`].
 pub const DESCRIBE_GROUP: &str = "tool_display";
 pub const MAX_RECORD_BYTES: u64 = 16 * 1024;
@@ -37,6 +40,8 @@ pub const INVALID_PARAMS: &str = "invalid_params";
 pub const DISPLAY_WRITE_CONFLICT: &str = "display_write_conflict";
 pub const DISPLAY_TOO_LARGE: &str = "display_too_large";
 pub const DISPLAY_WRITER_UNVERIFIED: &str = "display_writer_unverified";
+pub const DISPLAY_READ_DENIED: &str = "display_read_denied";
+pub const DISPLAY_RECORD_UNKNOWN: &str = "display_record_unknown";
 /// The existing retryable route refusal used while the display server is not ready.
 pub const NOT_READY: &str = subc_protocol::error_codes::MODULE_WARMING;
 
@@ -105,6 +110,52 @@ impl DisplayWrite {
             schema_pin: schema_pin.into(),
             body,
         }
+    }
+}
+
+/// Params for a provider's management-surface `display.read` operation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct DisplayRead {
+    pub record_id: String,
+}
+
+impl DisplayRead {
+    pub fn new(record_id: impl Into<String>) -> Self {
+        Self {
+            record_id: record_id.into(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), InvalidParams> {
+        if !schema::validate_id(&self.record_id) {
+            return Err(InvalidParams::new("record_id"));
+        }
+        Ok(())
+    }
+}
+
+/// Strict bus event body naming a committed record available through `display.read`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct DisplayRecordReady {
+    pub record_id: String,
+}
+
+impl DisplayRecordReady {
+    pub fn new(record_id: impl Into<String>) -> Self {
+        Self {
+            record_id: record_id.into(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), InvalidParams> {
+        if !schema::validate_id(&self.record_id) {
+            return Err(InvalidParams::new("record_id"));
+        }
+        Ok(())
     }
 }
 

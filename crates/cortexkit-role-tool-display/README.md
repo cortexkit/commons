@@ -29,6 +29,9 @@ the `schema` validators check flat records and completions against fixed
 field kinds, none of which is free text.
 `canonical_body`, `idempotency_key`, `validate_write` and `write_outcome` are
 pure helpers. They do not route, persist, fetch views or authorize joins.
+`DisplayRead` names a provider-stored record to pull over its management surface;
+the reply reuses `DisplayWrite`. `DisplayRecordReady` is the strict, identifier-only
+bus event body published after a record commits. Both validate opaque record ids.
 
 `test-vectors/tool-display-v1/` ships with the package and is pinned by
 `SHA256SUMS`. Tests read every JSON vector. The optional `tool.views` operation

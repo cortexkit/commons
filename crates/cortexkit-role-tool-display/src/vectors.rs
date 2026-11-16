@@ -28,6 +28,10 @@ pub const FILES: &[(&str, &str)] = &[
         "writes.json",
         include_str!("../test-vectors/tool-display-v1/writes.json"),
     ),
+    (
+        "reads.json",
+        include_str!("../test-vectors/tool-display-v1/reads.json"),
+    ),
     ("views.json", VIEWS_JSON),
     ("view-tools.json", VIEW_TOOLS_JSON),
     (

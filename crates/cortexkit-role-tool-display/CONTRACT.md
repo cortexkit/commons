@@ -97,6 +97,48 @@ mapped to `invalid_params` naming the field by the serving implementation.
 The same operation also accepts the separate `kind: "wake"` envelope in §8.
 It does not require a tool call key, schema pin or provider view.
 
+### 2.1 Pull read: `display.read`
+
+1. **Op.** A provider serves the named request
+   `{name: "display.read", arguments: {record_id}}` on its management surface
+   (`DISPLAY_READ`, `DisplayRead`). The provider chooses `record_id`, which
+   follows the opaque-field rule in §2. The reply is the exact `DisplayWrite`
+   params it would have sent to `display.write` for that record: `runner`,
+   `call_key`, `kind`, `schema_pin` and `body`, not a new envelope. The same
+   validation and size caps apply; `validate_write` must accept the reply.
+   `DisplayRead::validate` checks the identifier; structural decode failures
+   must be mapped to `invalid_params` naming the field by the provider.
+2. **Caller.** A provider answers only the single live module declaring
+   `tool-display/v1` under §1's discovery rule, matched by the route's attested
+   `Principal::Reserved`. Every other caller is refused `display_read_denied`
+   (final). With zero or several declaring modules, it answers nobody.
+3. **Refusals.** These use subc-protocol's `ErrorBody`:
+   - `display_read_denied` (`DISPLAY_READ_DENIED`), final;
+   - `display_record_unknown` (`DISPLAY_RECORD_UNKNOWN`), final: the record was
+     never stored or is past retention;
+   - `invalid_params`, detail `{field}`;
+   - the existing retryable `module_warming`, while the provider is not ready.
+4. **Writer on the display server.** The display server stores a pulled record
+   with writer `Principal::Reserved` naming the module it called, and only when
+   the daemon's catalog lists that module as daemon-verified. The storage key
+   and idempotency rules are the same as `display.write` in §2: a record arriving
+   by both paths is stored once (`already_stored`), and different canonical body
+   bytes at that key are still `display_write_conflict`.
+5. **Wake event.** After a record commits, the provider publishes one bus event
+   per record on subject `event.<provider>.display_record_ready.v1`: event name
+   `display_record_ready` (`DISPLAY_RECORD_READY_EVENT`), version 1
+   (`DISPLAY_RECORD_READY_VERSION`), with no reader suffix. The body is exactly
+   `{"record_id":"..."}` (`DisplayRecordReady`), with nothing else, and
+   `Nats-Msg-Id` is `record_id`. The event body is strict: readers reject unknown
+   fields, so adding a field later is a readers-first change.
+   `DisplayRecordReady::validate` checks the same opaque identifier rule.
+   The display server acks the event only after it has stored the record or
+   received a final refusal.
+6. **Retention.** A provider keeps each record readable by `display.read` for at
+   least 7 days, the bus EVENT stream's max age.
+7. **Rollout.** Providers keep `display.write` until the display server's reader
+   has run on them. Both paths coexist; `display.write` is unchanged.
+
 ## 3. Records and completions
 
 A record is a **flat object**. Its standard fields precede provider-specific

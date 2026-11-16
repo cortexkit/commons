@@ -2,7 +2,9 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use cortexkit_role_tool_display::{
     canonical_body, check_writer, idempotency_key, not_ready, schema::*, validate_write,
-    write_outcome, DisplayKind, DisplayLimits, DisplayWrite, Principal, RecordSchema, WriteReply,
+    write_outcome, DisplayKind, DisplayLimits, DisplayRead, DisplayRecordReady, DisplayWrite,
+    Principal, RecordSchema, WriteReply, DISPLAY_READ, DISPLAY_READ_DENIED,
+    DISPLAY_RECORD_READY_EVENT, DISPLAY_RECORD_READY_VERSION, DISPLAY_RECORD_UNKNOWN,
     DISPLAY_WRITER_UNVERIFIED, MAX_COMPLETION_BYTES, MAX_DETAIL_BYTES, MAX_RECORD_BYTES,
     MAX_WRITE_FRAME_BYTES,
 };
@@ -33,6 +35,7 @@ fn every_json_vector_is_exercised() {
         "records.json",
         "details.json",
         "writes.json",
+        "reads.json",
         "views.json",
         "view-tools.json",
         "wakes.json",
@@ -160,6 +163,116 @@ fn write_vectors_validate_outcomes_refusals_and_limits() {
     assert!(subc_protocol::error_codes::is_retryable_route_open(
         &not_ready().code
     ));
+}
+
+#[test]
+fn pull_read_vectors_round_trip_requests_replies_events_and_refusals() {
+    let fixture = vector("reads.json");
+    assert_eq!(fixture["request"]["name"], DISPLAY_READ);
+    let read: DisplayRead =
+        serde_json::from_value(fixture["request"]["arguments"].clone()).unwrap();
+    read.validate().unwrap();
+    assert_eq!(read, DisplayRead::new("record:1"));
+    assert_eq!(
+        json!({"name": DISPLAY_READ, "arguments": read}),
+        fixture["request"]
+    );
+
+    let writes = vector("writes.json");
+    assert_eq!(fixture["reply"], writes["write"]);
+    let reply: DisplayWrite = serde_json::from_value(fixture["reply"].clone()).unwrap();
+    let limits: DisplayLimits = serde_json::from_value(writes["limits"].clone()).unwrap();
+    validate_write(&reply, &limits).unwrap();
+    assert_eq!(serde_json::to_value(&reply).unwrap(), fixture["reply"]);
+
+    let event = &fixture["event"];
+    assert_eq!(event["name"], DISPLAY_RECORD_READY_EVENT);
+    assert_eq!(event["version"], DISPLAY_RECORD_READY_VERSION);
+    assert_eq!(
+        event["subject"],
+        format!("event.provider.{DISPLAY_RECORD_READY_EVENT}.v{DISPLAY_RECORD_READY_VERSION}")
+    );
+    let ready: DisplayRecordReady = serde_json::from_value(event["body"].clone()).unwrap();
+    ready.validate().unwrap();
+    assert_eq!(ready, DisplayRecordReady::new("record:1"));
+    assert_eq!(event["headers"]["Nats-Msg-Id"], ready.record_id);
+    assert_eq!(ready.record_id, read.record_id);
+    assert_eq!(serde_json::to_value(&ready).unwrap(), event["body"]);
+    assert_eq!(object(&event["body"]).len(), 1);
+
+    let codes = [
+        DISPLAY_READ_DENIED,
+        DISPLAY_RECORD_UNKNOWN,
+        cortexkit_role_tool_display::INVALID_PARAMS,
+        cortexkit_role_tool_display::NOT_READY,
+    ];
+    assert_eq!(fixture["refusals"].as_array().unwrap().len(), codes.len());
+    for (value, code) in fixture["refusals"].as_array().unwrap().iter().zip(codes) {
+        let refusal: subc_protocol::ErrorBody = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(refusal.code, code);
+        assert_eq!(serde_json::to_value(&refusal).unwrap(), *value);
+        assert_eq!(
+            subc_protocol::error_codes::is_retryable_route_open(&refusal.code),
+            code == cortexkit_role_tool_display::NOT_READY
+        );
+    }
+    assert_eq!(
+        DisplayRead::new("")
+            .validate()
+            .unwrap_err()
+            .refusal()
+            .detail,
+        Some(fixture["refusals"][2]["detail"].clone())
+    );
+}
+
+#[test]
+fn pull_read_identifiers_follow_exact_opaque_field_boundaries() {
+    for valid in ["!".to_owned(), "~".repeat(256), "record:1".to_owned()] {
+        DisplayRead::new(&valid).validate().unwrap();
+        DisplayRecordReady::new(&valid).validate().unwrap();
+    }
+    for invalid in [
+        "".to_owned(),
+        "a".repeat(257),
+        "has space".to_owned(),
+        "has\tcontrol".to_owned(),
+        "has\ncontrol".to_owned(),
+        "has\0control".to_owned(),
+        "has\u{7f}delete".to_owned(),
+        "non-ascii:é".to_owned(),
+    ] {
+        assert_eq!(
+            DisplayRead::new(&invalid).validate().unwrap_err().field,
+            "record_id"
+        );
+        assert_eq!(
+            DisplayRecordReady::new(&invalid)
+                .validate()
+                .unwrap_err()
+                .field,
+            "record_id"
+        );
+    }
+}
+
+#[test]
+fn pull_read_and_record_ready_shapes_reject_extra_or_malformed_fields() {
+    for value in [
+        json!({"record_id":"record:1", "body":{}}),
+        json!({}),
+        json!({"record_id":null}),
+        json!({"record_id":1}),
+        json!({"record_id":["record:1"]}),
+        json!({"record_id":{"id":"record:1"}}),
+        Value::Null,
+    ] {
+        assert!(serde_json::from_value::<DisplayRead>(value.clone()).is_err());
+        assert!(serde_json::from_value::<DisplayRecordReady>(value).is_err());
+    }
+    let duplicate = r#"{"record_id":"record:1","record_id":"record:2"}"#;
+    assert!(serde_json::from_str::<DisplayRead>(duplicate).is_err());
+    assert!(serde_json::from_str::<DisplayRecordReady>(duplicate).is_err());
 }
 
 #[test]
