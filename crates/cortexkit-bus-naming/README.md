@@ -54,8 +54,8 @@ buckets and derive writer/read permissions from these declarations; this crate
 does not provision them or add KV grants by itself.
 
 `aft.views` and `cerebellum.views` are owner-written and readable by `occipital`.
-Each key is the schema pin's lowercase hex digest without its `sha256:` prefix;
-the value is exactly what `tool.views` serves for that pin. Each bucket has a
+Each key is the lowercase hex encoding of the whole schema pin string's UTF-8
+bytes; the value is exactly what `tool.views` serves for that pin. Each bucket has a
 256 KiB value cap, history 1, no TTL, and a 32 MiB total byte cap. This budgets
 128 maximum-sized schema pins per owner, allowing multiple tools and schema
 revisions without unbounded storage. The byte cap is a budget, not a key-count

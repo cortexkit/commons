@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.4
+
+- Raise the `astrocyte.multiplier` bucket's value limit from 8 KiB to 64 KiB
+  (8 MiB for its 128 keys). One plan's report entry carries per-model rate
+  detail and already reaches 16 KiB.
+- Correct the documented `views` bucket key: it is the lowercase hex encoding of
+  the whole schema pin string, not the pin's digest without `sha256:`. This is
+  what every writer and reader already uses; only the text was wrong.
+
 ## 0.4.3
 
 - Remove the retired `prefrontal-routing` module id from the event-consumer and

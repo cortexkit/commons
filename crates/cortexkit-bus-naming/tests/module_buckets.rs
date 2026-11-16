@@ -54,10 +54,10 @@ fn declared_module_buckets_pin_readers_value_caps_and_retention() {
             "astrocyte",
             "multiplier",
             &["striatum"],
-            8_192,
+            65_536,
             1,
             None,
-            1_048_576,
+            8_388_608,
         ),
         ModuleBucket::new(
             "astrocyte",

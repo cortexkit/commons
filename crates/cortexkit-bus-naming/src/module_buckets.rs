@@ -42,9 +42,9 @@ impl ModuleBucket {
 /// Closed bucket declarations; runtime configuration cannot add writers or readers.
 /// Byte caps budget 1,024 status keys, 128 multipliers, 65,536 read marks,
 /// 65,536 changes, 16,384 session-liveness keys, and 128 schema pins per views
-/// bucket at their maximum value size. Each views key is the schema pin's
-/// lowercase hex digest without `sha256:`; its value is exactly what `tool.views`
-/// serves for that pin. Budgeting 128 pins leaves room for multiple tools and
+/// bucket at their maximum value size. Each views key is the lowercase hex
+/// encoding of the whole schema pin string's UTF-8 bytes; its value is exactly
+/// what `tool.views` serves for that pin. Budgeting 128 pins leaves room for multiple tools and
 /// schema revisions while bounding each views bucket to 32 MiB.
 pub const MODULE_BUCKETS: &[ModuleBucket] = &[
     ModuleBucket::new(
@@ -60,10 +60,10 @@ pub const MODULE_BUCKETS: &[ModuleBucket] = &[
         "astrocyte",
         "multiplier",
         &["striatum"],
-        8_192,
+        65_536,
         1,
         None,
-        8_192 * 128,
+        65_536 * 128,
     ),
     ModuleBucket::new(
         "astrocyte",
