@@ -769,6 +769,7 @@ struct World {
     steer_receipt_confirm: bool,
     omit_first_steer_receipt: bool,
     early_held_steer_receipt: Option<Delivered>,
+    early_idle_turn_receipt: bool,
     held_steer_receipts: Mutex<Vec<Option<Delivered>>>,
     /// Counts invalid answers produced by the held-turn steer defects,
     /// so a test can prove its defect actually took effect.
@@ -3214,6 +3215,9 @@ impl Module {
                         "client_message_id": sess.ordered[&id].request["client_message_id"],
                         "delivered_as": { "mode": order::modes::IDLE_START } }),
             )?;
+            if self.world.early_idle_turn_receipt {
+                return Ok(());
+            }
             self.drive(session, &run_id)?;
         }
     }
@@ -6329,6 +6333,35 @@ impl RunnerRoute for FakeRoute {
         let result = self
             .module
             .handle(&self.stamp, &self.session, method, params.clone());
+        if world.early_idle_turn_receipt
+            && matches!(
+                method,
+                ops::SESSION_READ | ops::SESSION_HEAD | ops::RUN_RESULT
+            )
+        {
+            // Return the observation made while the turn was active, but let
+            // its model call and completion progress before the next read.
+            let run_id = {
+                let sessions = self.module.sessions.lock().unwrap();
+                sessions.get(&self.session).and_then(|sess| {
+                    sess.ordered
+                        .values()
+                        .filter_map(|queued| queued.delivery.as_ref())
+                        .find(|delivery| {
+                            delivery.r#as == delivered_as::TURN
+                                && sess
+                                    .run(&delivery.run_id)
+                                    .is_some_and(|run| run.state == "active")
+                        })
+                        .map(|delivery| delivery.run_id.clone())
+                })
+            };
+            if let Some(run_id) = run_id {
+                self.module
+                    .drive(&self.session, &run_id)
+                    .map_err(|Killed| RouteFailure::new("the module was killed"))?;
+            }
+        }
         if self.module.world.serves(groups::FORK_ANSWER) && matches!(result, Ok(Reply::Response(_)))
         {
             fork_answer::apply_plan(self, method, &params);
@@ -6427,6 +6460,10 @@ pub struct FakeSubject {
     pub omit_first_steer_receipt: bool,
     /// Supply a final receipt even during the hold, preserving it after release.
     pub early_held_steer_receipt: Option<Delivered>,
+    /// Report an idle-start turn's delivery before running its model call.
+    /// The first transcript or run-result read observes it active, then
+    /// drives it to completion so subsequent observations see the ending.
+    pub early_idle_turn_receipt: bool,
     /// How long `pause` waits between the suite's polls. `None` only yields,
     /// so the suite's poll bound passes in no time; a duration makes that
     /// bound real time, as on a runner that polls a live process.
@@ -6560,6 +6597,7 @@ impl FakeSubject {
             steer_receipt_confirm: false,
             omit_first_steer_receipt: false,
             early_held_steer_receipt: None,
+            early_idle_turn_receipt: false,
             pause_for: None,
             turn_system: true,
             turn_system_cleared: false,
@@ -6620,6 +6658,7 @@ impl FakeSubject {
                     steer_receipt_confirm: self.steer_receipt_confirm,
                     omit_first_steer_receipt: self.omit_first_steer_receipt,
                     early_held_steer_receipt: self.early_held_steer_receipt.clone(),
+                    early_idle_turn_receipt: self.early_idle_turn_receipt,
                     held_steer_receipts: Mutex::new(Vec::new()),
                     held_steer_break_answers: AtomicUsize::new(0),
                     groups: self

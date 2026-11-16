@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.70
+
+- Wait for a delivered queued send's own run to end before snapshotting its
+  receipt, messages and model calls for `session.promote`. Keep the strict check
+  that promoting the delivered send changes none of those snapshots.
+
 ## 0.17.69
 
 - Pin the runner contract to `=0.8.58` for the `host_refused` send reason and

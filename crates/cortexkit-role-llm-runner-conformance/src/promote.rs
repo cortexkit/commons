@@ -274,7 +274,17 @@ where
                 .release_tool_call(&held.arguments)
                 .await
                 .map_err(|e| e.to_string())?;
-            let before = settled(case, &session.route, &request, "turn").await?;
+            let delivered = settled(case, &session.route, &request, "turn").await?;
+            wait_run_end(
+                case.subject,
+                &session.route,
+                case.declared,
+                None,
+                &delivered,
+            )
+            .await
+            .map_err(|reason| format!("queued send's run did not end: {reason}"))?;
+            let before = receipt(&session.route, &request).await?;
             let messages = read_all(&session.route).await?.1;
             let models = case
                 .subject

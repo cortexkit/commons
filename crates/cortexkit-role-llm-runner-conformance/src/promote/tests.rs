@@ -14,6 +14,15 @@ async fn outcome(
         promote: fault,
         ..Defects::default()
     });
+    outcome_with_subject(name, &mut subject, group, steer).await
+}
+
+async fn outcome_with_subject(
+    name: &str,
+    subject: &mut FakeSubject,
+    group: bool,
+    steer: bool,
+) -> Result<Ending, String> {
     if group {
         subject.capabilities.insert(Capability::SendPromote);
     } else {
@@ -25,18 +34,18 @@ async fn outcome(
         subject.capabilities.remove(&Capability::Steer);
     }
     let root = tempfile::tempdir().unwrap();
-    let mut driver = CrashDriver::new(&subject);
+    let mut driver = CrashDriver::new(subject);
     let handle = driver.spawn(&root.path().join("main")).await.unwrap();
     let declared = subject.capabilities();
     let mint = Mint::default();
     assert!(CASES.iter().any(|spec| spec.name == name));
     let result = if name == REPLAY {
-        restart(&subject, &mut driver, root.path(), &declared, &mint)
+        restart(subject, &mut driver, root.path(), &declared, &mint)
             .await
             .map(|()| Ending::Passed)
     } else {
         Case {
-            subject: &subject,
+            subject,
             handle: &handle,
             declared: &declared,
             mint: &mint,
@@ -45,6 +54,19 @@ async fn outcome(
         .await
     };
     result.map_err(|reason| format!("{name}: {reason}"))
+}
+
+#[tokio::test]
+async fn send_promote_turn_ended_first_waits_for_early_turn_receipt_to_finish() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.early_idle_turn_receipt = true;
+    let result =
+        outcome_with_subject("send_promote_turn_ended_first", &mut subject, true, true).await;
+    assert!(
+        matches!(result, Ok(Ending::Passed)),
+        "{}",
+        result.err().unwrap_or_default()
+    );
 }
 
 #[tokio::test]
