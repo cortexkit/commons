@@ -5,7 +5,7 @@ Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 decoded answer. STREAM_DATA event bodies and referenced output-object contents
 stay unwrapped.
 
-Version 0.2.9 pins `cortexkit-role-media` exactly to 0.1.11. Implement `MediaSubject`
+Version 0.2.10 pins `cortexkit-role-media` exactly to 0.1.11. Implement `MediaSubject`
 in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
@@ -18,8 +18,12 @@ or `SubjectError::refused` with the complete ERROR body on refusal;
 transport/setup failures use `SubjectError::new`. The runner uses
 `cortexkit_role_media::wire::read_reply` and reports `bare_answer` or `extra_keys`
 when the provider omits the envelope or adds top-level keys. Never unwrap or
-fabricate an envelope in the adapter. `configure_engines` installs exactly the
-supplied facts in describe and the manifest declaration. `engine_inputs` records
+fabricate an envelope in the adapter. When implemented, `configure_engines` installs
+exactly the supplied facts in describe and the manifest declaration. Fixed-catalog
+adapters return `SubjectError::unsupported("configure_engines")`; synthetic cases
+(`wire_extension`, `describe_matches_engine_declaration`, `describe_checker_codes`)
+then report `NotApplicable` with a reason, while other cases use the fixed catalog.
+Other configuration errors remain failures. `engine_inputs` records
 each engine attempt, including the actual forwarded bias. A script's failure
 ends one attempt, and its remaining steps are available to the next attempt.
 `hold_engine` prevents new attempts starting; `Pause` blocks one already started.
@@ -33,12 +37,20 @@ keeping their model names and other facts, and runs the same replay, result,
 failure, cancellation, restart and retention assertions without waiting for billing.
 Under the contract's `media.usage.attempt` rule, local work need not write records;
 supplied records must still satisfy the usage rules and are checked, not ignored.
+If describe declares no `usage_feed`, the kit treats local work as writing no record
+and does not call `usage.read`.
 Remote routing/admission cases and vendor usage/feed cases that require a persisted
 job record report `NotApplicable` with a reason. `usage_feed_oversize_entry_acks`
-still runs: it seeds oversized or undecodable bytes directly into the feed rather
-than requiring a job to write a record.
+runs only when describe declares `usage_feed`: it seeds oversized or undecodable
+bytes directly into the feed rather than requiring a job to write a record.
 The mode does not change streaming or realtime engine fixtures or their billing
 requirements.
+
+Output cases that require undeclared engine kinds report `NotApplicable` with the
+missing kinds. Input-limit probes use the transcription engine's declared limits
+and language; a byte limit over 16 MiB reports `NotApplicable` rather than sending
+an unbounded probe. Unsupported-fact checks exercise only declared job kinds and
+require unsupported kinds to name `kind` in their refusal.
 
 `open_stream` opens the real `media.stream_transcribe` request under its route
 principal and returns only after acceptance or an opening ERROR. The request

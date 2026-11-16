@@ -14,6 +14,141 @@ use serde_json::{json, Value};
 const CONTRACT: &str = include_str!("../../cortexkit-role-media/CONTRACT.md");
 
 #[tokio::test]
+async fn media_kit_full_featured_case_count_unchanged() {
+    let mut passed = 0;
+    for &case in CASES {
+        assert_eq!(
+            run_case(&Fake::new(None, true, true), case).await,
+            Outcome::Passed,
+            "{case}"
+        );
+        passed += 1;
+    }
+    assert_eq!(passed, 90, "full-featured case count from 0.2.9");
+}
+
+#[tokio::test]
+async fn media_kit_local_no_usage_feed_does_not_read_usage() {
+    let subject = Fake::new(None, true, true)
+        .with_local_provider(false)
+        .without_usage_feed();
+    assert_eq!(
+        run_case(&subject, "submit_idempotent_on_client_job_id").await,
+        Outcome::Passed
+    );
+    assert_eq!(subject.usage_hook_counts(), (0, 0));
+}
+
+#[tokio::test]
+async fn media_kit_fixed_catalog_non_stream_cases() {
+    let mut passed = 0;
+    let mut not_applicable = 0;
+    for &case in CASES
+        .iter()
+        .filter(|case| !crate::checks::STREAM_REALTIME_CASES.contains(case))
+    {
+        let subject =
+            Fake::new(None, true, true).with_fixed_catalog(Some(32 * 1024 * 1024), Some(3_600_000));
+        match run_case(&subject, case).await {
+            Outcome::Passed => passed += 1,
+            Outcome::NotApplicable(reason) => {
+                assert!(!reason.is_empty(), "{case}");
+                not_applicable += 1;
+            }
+            outcome => panic!("fixed-catalog {case}: {outcome:?}"),
+        }
+        assert_eq!(subject.usage_hook_counts(), (0, 0), "{case}");
+        let engines = subject.engine_declaration().await.unwrap();
+        assert_eq!(engines.len(), 1, "{case}");
+        assert_eq!(engines[0].kind.as_str(), "transcribe", "{case}");
+        assert!(engines[0].local, "{case}");
+    }
+    assert_eq!((passed, not_applicable), (21, 25));
+    assert_eq!(passed + not_applicable, 46);
+}
+
+#[tokio::test]
+async fn media_kit_fixed_catalog_inapplicable_reasons() {
+    for (case, reason) in [
+        ("wire_extension", "configure_engines"),
+        ("describe_matches_engine_declaration", "configure_engines"),
+        ("describe_checker_codes", "configure_engines"),
+        ("input_too_large", "16 MiB"),
+        ("empty_output_is_a_failure", "synthesize, image, video"),
+        ("chunked_result_checksum", "synthesize"),
+        ("usage_feed_oversize_entry_acks", "usage_feed"),
+    ] {
+        let subject =
+            Fake::new(None, true, true).with_fixed_catalog(Some(32 * 1024 * 1024), Some(3_600_000));
+        let outcome = run_case(&subject, case).await;
+        assert!(
+            matches!(outcome, Outcome::NotApplicable(ref message) if message.contains(reason)),
+            "{case}: {outcome:?}"
+        );
+        assert_eq!(subject.usage_hook_counts(), (0, 0), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn media_kit_fixed_catalog_input_limits_follow_describe() {
+    for (bytes, duration) in [
+        (Some(131_072), Some(5_000)),
+        (Some(3 * 1024 * 1024), None),
+        (None, Some(5_000)),
+    ] {
+        let subject = Fake::new(None, true, true).with_fixed_catalog(bytes, duration);
+        assert_eq!(
+            run_case(&subject, "input_too_large").await,
+            Outcome::Passed,
+            "bytes={bytes:?}, duration={duration:?}"
+        );
+        if duration.is_some() {
+            let inputs = subject.engine_inputs("transcribe").await.unwrap();
+            assert_eq!(inputs.len(), 1);
+            assert_eq!(inputs[0]["language"], "ja");
+        }
+        assert_eq!(subject.usage_hook_counts(), (0, 0));
+    }
+    for (bytes, duration, reason) in [
+        (None, None, "no input limits"),
+        (None, Some(u64::MAX), "cannot be exceeded"),
+    ] {
+        let subject = Fake::new(None, true, true).with_fixed_catalog(bytes, duration);
+        let outcome = run_case(&subject, "input_too_large").await;
+        assert!(
+            matches!(outcome, Outcome::NotApplicable(ref message) if message.contains(reason)),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn media_kit_fixed_catalog_undeclared_kind_field_is_checked() {
+    let subject = Fake::new(Some("undeclared_kind_field"), true, true)
+        .with_fixed_catalog(Some(32 * 1024 * 1024), Some(3_600_000));
+    let outcome = run_case(&subject, "submit_refuses_outside_declared_facts").await;
+    assert!(
+        matches!(outcome, Outcome::Failed(ref message) if message.starts_with("submit_refuses_outside_declared_facts:") && message.contains("expected field kind")),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn media_kit_synthetic_setup_errors_are_failures() {
+    for case in [
+        "wire_extension",
+        "describe_matches_engine_declaration",
+        "describe_checker_codes",
+    ] {
+        let subject = Fake::new(Some("configure_engines_failure"), true, true);
+        assert_eq!(
+            run_case(&subject, case).await,
+            Outcome::Failed(format!("{case}: engine configuration failed"))
+        );
+    }
+}
+
+#[tokio::test]
 async fn media_kit_wrapped_reply_envelope_passes() {
     for case in ["reply_envelope", "stream_reply_envelope"] {
         assert_eq!(
@@ -545,7 +680,10 @@ async fn media_kit_core_default_hooks_fail_by_name() {
         assert!(error.refusal.is_none());
     }
     assert!(
-        matches!(run_case(&s,"empty_transcript_is_a_failure").await,Outcome::Failed(v) if v.contains("empty_transcript_is_a_failure") && v.contains("configure_engines"))
+        matches!(run_case(&s,"empty_transcript_is_a_failure").await,Outcome::Failed(v) if v.contains("empty_transcript_is_a_failure") && v.contains("configure_peers"))
+    );
+    assert!(
+        matches!(run_case(&s,"wire_extension").await,Outcome::NotApplicable(v) if v.contains("configure_engines"))
     );
 }
 

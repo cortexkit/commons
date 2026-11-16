@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.10
+
+- Support fixed catalogs through the existing unsupported `configure_engines`
+  hook response. Synthetic-declaration cases become not applicable, with reasons;
+  other cases use the provider's declared catalog.
+- Do not call `usage.read` for local providers that declare no `usage_feed`, and
+  skip direct usage-entry seeding when that group is absent. Declared feeds keep
+  their existing record checks.
+- Derive transcription input-limit probes and language from describe, using
+  uploads for larger probes and reporting limits over the 16 MiB test budget as
+  not applicable.
+- Report output cases for undeclared engine kinds as not applicable. Check
+  unsupported input facts only for declared kinds, and require undeclared kinds
+  to refuse on `kind`.
+- Keep the media contract pin at `=0.1.11`.
+
 ## 0.2.9
 
 - Add the opt-in `Capabilities::with_local_provider(true)` job mode. Job engines

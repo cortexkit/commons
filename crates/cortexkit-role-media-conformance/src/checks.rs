@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use cortexkit_role_media::{
-    describe::{check_describe, Describe, Engine},
+    describe::{check_describe, Describe, Engine, Group, Kind},
     jobs::{check_status, StatusAnswer},
     usage::{
         check_call_usage_records, check_usage_answer, check_usage_record, UsageReadAnswer,
@@ -21,7 +21,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 use crate::{
     fixtures::{sha256, AudioFixture},
     peers::{RecordingRoutingPeer, RecordingVendor},
-    subject::{Agent, MediaSubject, Principals, Request, Script, ScriptStep},
+    subject::{Agent, MediaSubject, Principals, Request, Script, ScriptStep, SubjectError},
 };
 
 pub const CASES: &[&str] = &[
@@ -140,7 +140,7 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
     }
     let routing = RecordingRoutingPeer::new();
     let vendor = RecordingVendor::new();
-    let result: Result<(), String> = async {
+    let result: Result<Option<String>, String> = async {
         let configured = if matches!(
             name,
             "describe_matches_engine_declaration" | "describe_checker_codes"
@@ -149,10 +149,24 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
         } else {
             engines()
         };
-        subject
+        if let Err(error) = subject
             .configure_engines(job_mode_engines(subject, configured))
             .await
-            .map_err(err)?;
+        {
+            if error.refusal.is_some()
+                || error.message != SubjectError::unsupported("configure_engines").message
+            {
+                return Err(err(error));
+            }
+            if matches!(
+                name,
+                "wire_extension" | "describe_matches_engine_declaration" | "describe_checker_codes"
+            ) {
+                return Ok(Some(format!(
+                    "synthetic engine declarations require configure_engines: {error}"
+                )));
+            }
+        }
         subject
             .configure_peers(routing.clone(), vendor.clone())
             .await
@@ -164,6 +178,9 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
             ))
             .await
             .map_err(err)?;
+        if let Some(reason) = declared_inapplicable_reason(subject, name).await? {
+            return Ok(Some(reason));
+        }
         if name == "reply_envelope" {
             let describe = call(subject, "alice", "role.describe", json!({})).await?;
             require(describe["engines"].is_array(), "describe omitted engines")
@@ -178,13 +195,78 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
         if subject.capabilities().local_provider && !STREAM_REALTIME_CASES.contains(&name) {
             records(subject).await?;
         }
-        Ok(())
+        Ok(None)
     }
     .await;
     match result {
-        Ok(()) => Outcome::Passed,
+        Ok(None) => Outcome::Passed,
+        Ok(Some(reason)) => Outcome::NotApplicable(reason),
         Err(reason) => Outcome::Failed(format!("{name}: {reason}")),
     }
+}
+
+async fn describe<S: MediaSubject>(s: &S) -> Result<Describe, String> {
+    serde_json::from_value(call(s, "alice", "role.describe", json!({})).await?).map_err(err)
+}
+
+async fn declared_inapplicable_reason<S: MediaSubject>(
+    s: &S,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let kinds: &[Kind] = match name {
+        "empty_output_is_a_failure" => &[Kind::Synthesize, Kind::Image, Kind::Video],
+        "chunked_result_checksum" => &[Kind::Synthesize],
+        "input_too_large" => &[Kind::Transcribe],
+        "usage_feed_oversize_entry_acks" => {
+            return Ok((!describe(s).await?.groups.contains(&Group::UsageFeed))
+                .then(|| "describe does not declare usage_feed".into()));
+        }
+        _ => return Ok(None),
+    };
+    let declared = describe(s).await?;
+    let missing: Vec<_> = kinds
+        .iter()
+        .filter(|kind| !declared.engines.iter().any(|engine| &engine.kind == *kind))
+        .map(Kind::as_str)
+        .collect();
+    if !missing.is_empty() {
+        return Ok(Some(format!(
+            "describe declares no engine of kind {}",
+            missing.join(", ")
+        )));
+    }
+    if name == "input_too_large" {
+        let engine = transcription_engine(&declared)?;
+        if engine
+            .max_input_bytes
+            .is_some_and(|limit| limit > 16 * 1024 * 1024)
+        {
+            return Ok(Some(
+                "declared max_input_bytes exceeds the 16 MiB test budget".into(),
+            ));
+        }
+        if engine.max_duration_ms == Some(u64::MAX) {
+            return Ok(Some("declared max_duration_ms cannot be exceeded".into()));
+        }
+        if engine.max_input_bytes.is_none() && engine.max_duration_ms.is_none() {
+            return Ok(Some("transcribe engine declares no input limits".into()));
+        }
+    }
+    Ok(None)
+}
+
+fn transcription_engine(declared: &Describe) -> Result<&Engine, String> {
+    declared
+        .engines
+        .iter()
+        .find(|engine| engine.kind == Kind::Transcribe && engine.model == "transcribe")
+        .or_else(|| {
+            declared
+                .engines
+                .iter()
+                .find(|engine| engine.kind == Kind::Transcribe)
+        })
+        .ok_or_else(|| "describe declares no transcribe engine".into())
 }
 
 fn local_inapplicable_reason(name: &str) -> Option<&'static str> {
@@ -392,6 +474,10 @@ async fn feed<S: MediaSubject>(s: &S) -> Result<Value, String> {
     Ok(v)
 }
 async fn records<S: MediaSubject>(s: &S) -> Result<Vec<Value>, String> {
+    // Without a declared feed there is no usage surface to read for local work.
+    if s.capabilities().local_provider && !describe(s).await?.groups.contains(&Group::UsageFeed) {
+        return Ok(Vec::new());
+    }
     let f = feed(s).await?;
     let entries = f["entries"].as_array().ok_or("missing entries")?;
     let mut out = Vec::new();
@@ -567,6 +653,24 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
             expect_status(s, &id, "done").await.map(|_| ())
         }
         "submit_refuses_outside_declared_facts" => {
+            let declared = describe(s).await?;
+            for kind in ["transcribe", "synthesize", "image", "video"] {
+                if !declared
+                    .engines
+                    .iter()
+                    .any(|engine| engine.kind.as_str() == kind)
+                {
+                    refusal(
+                        s,
+                        "alice",
+                        "media.submit",
+                        request(kind, kind),
+                        "unsupported",
+                        Some("kind"),
+                    )
+                    .await?;
+                }
+            }
             for (kind, field, bad) in [
                 ("transcribe", "kind", json!("stream_transcribe")),
                 ("transcribe", "model", json!("absent")),
@@ -580,6 +684,13 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
                 ("image", "input.references[0]", media(b"ref", "image/jpeg")),
                 ("transcribe", "input.bias", json!({"terms":[]})),
             ] {
+                if !declared
+                    .engines
+                    .iter()
+                    .any(|engine| engine.kind.as_str() == kind)
+                {
+                    continue;
+                }
                 let mut req = request(field, kind);
                 if field == "kind" {
                     req["model"] = json!("stream");
@@ -629,51 +740,78 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
             Ok(())
         }
         "input_too_large" => {
-            let mut req = request("stated", "transcribe");
-            req["input"]["audio"]["duration_ms"] = json!(2001);
-            let v = refusal(
-                s,
-                "alice",
-                "media.submit",
-                req,
-                "input_too_large",
-                Some("input.audio"),
-            )
-            .await?;
-            require(
-                v["detail"]["limit"] == "max_duration_ms",
-                "wrong exceeded limit",
-            )?;
-            let mut bytes_req = request("bytes", "transcribe");
-            bytes_req["input"]["audio"] = media(&vec![0; 65_537], "audio/wav");
-            let v = refusal(
-                s,
-                "alice",
-                "media.submit",
-                bytes_req,
-                "input_too_large",
-                Some("input.audio"),
-            )
-            .await?;
-            require(
-                v["detail"]["limit"] == "max_input_bytes" && v["detail"]["class"] == "permanent",
-                "decoded byte limit ignored",
-            )?;
-            s.script_engine(
-                "transcribe",
-                Script::new(vec![ScriptStep::Output(transcript("too long"))])
-                    .with_decoded_duration_ms(2001),
-            )
-            .await
-            .map_err(err)?;
-            let id = submit(s, request("decoded", "transcribe")).await?;
-            let v = expect_status(s, &id, "failed").await?;
-            require(
-                v["failure"]["code"] == "input_too_large"
-                    && v["failure"]["class"] == "permanent"
-                    && v["failure"]["detail"]["limit"] == "max_duration_ms",
-                "decoded duration ignored",
-            )
+            let declared = describe(s).await?;
+            let engine = transcription_engine(&declared)?;
+            let mut base = request("limits", "transcribe");
+            base["model"] = json!(engine.model);
+            if let Some(language) = engine.languages.as_ref().and_then(|langs| langs.first()) {
+                base["input"]["language"] = json!(language);
+            }
+            if let Some(limit) = engine.max_input_bytes {
+                let mut req = base.clone();
+                req["client_job_id"] = json!("bytes");
+                let bytes = vec![0; (limit + 1) as usize];
+                // Upload larger probes so the message budget does not mask the engine limit.
+                req["input"]["audio"] = if bytes.len() > 1_048_576 {
+                    let id = upload(s, &bytes).await?;
+                    for (i, chunk) in bytes.chunks(65_536).enumerate() {
+                        append(s, &id, i * 65_536, chunk).await?;
+                    }
+                    commit(s, &id).await?
+                } else {
+                    media(&bytes, "audio/wav")
+                };
+                let v = refusal(
+                    s,
+                    "alice",
+                    "media.submit",
+                    req,
+                    "input_too_large",
+                    Some("input.audio"),
+                )
+                .await?;
+                require(
+                    v["detail"]["limit"] == "max_input_bytes"
+                        && v["detail"]["class"] == "permanent",
+                    "decoded byte limit ignored",
+                )?;
+            }
+            if let Some(limit) = engine.max_duration_ms {
+                let mut req = base.clone();
+                req["client_job_id"] = json!("stated");
+                req["input"]["audio"]["duration_ms"] = json!(limit + 1);
+                let v = refusal(
+                    s,
+                    "alice",
+                    "media.submit",
+                    req,
+                    "input_too_large",
+                    Some("input.audio"),
+                )
+                .await?;
+                require(
+                    v["detail"]["limit"] == "max_duration_ms"
+                        && v["detail"]["class"] == "permanent",
+                    "wrong exceeded limit",
+                )?;
+                s.script_engine(
+                    &engine.model,
+                    Script::new(vec![ScriptStep::Output(transcript("too long"))])
+                        .with_decoded_duration_ms(limit + 1),
+                )
+                .await
+                .map_err(err)?;
+                base["client_job_id"] = json!("decoded");
+                let id = submit(s, base).await?;
+                let v = expect_status(s, &id, "failed").await?;
+                require(
+                    v["failure"]["code"] == "input_too_large"
+                        && v["failure"]["class"] == "permanent"
+                        && v["failure"]["detail"]["limit"] == "max_duration_ms",
+                    "decoded duration ignored",
+                )?;
+            }
+            Ok(())
         }
         "describe_matches_engine_declaration" | "describe_checker_codes" => {
             let v = call(s, "alice", "role.describe", json!({})).await?;

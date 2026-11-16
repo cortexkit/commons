@@ -62,8 +62,32 @@ struct State {
     retries: bool,
     survives: bool,
     local_records: bool,
+    fixed_catalog: bool,
+    no_usage_feed: bool,
+    usage_reads: usize,
+    seeded_entries: usize,
 }
 impl Fake {
+    pub(super) fn without_usage_feed(mut self) -> Self {
+        self.state.get_mut().unwrap().no_usage_feed = true;
+        self
+    }
+    pub(super) fn with_fixed_catalog(mut self, bytes: Option<u64>, duration: Option<u64>) -> Self {
+        self = self.with_local_provider(false).without_usage_feed();
+        let state = self.state.get_mut().unwrap();
+        state.fixed_catalog = true;
+        let mut engine = crate::checks::engines().remove(0);
+        engine.local = true;
+        engine.max_input_bytes = bytes;
+        engine.max_duration_ms = duration;
+        engine.languages = Some(vec!["ja".into()]);
+        state.engines = vec![engine];
+        self
+    }
+    pub(super) fn usage_hook_counts(&self) -> (usize, usize) {
+        let state = self.state.lock().unwrap();
+        (state.usage_reads, state.seeded_entries)
+    }
     pub(super) fn with_local_provider(mut self, records: bool) -> Self {
         self.capabilities = self.capabilities.with_local_provider(true);
         self.state.get_mut().unwrap().local_records = records;
@@ -316,8 +340,13 @@ impl State {
                             json!({"terms_used":3,"terms_dropped":2,"prompt_used":false})
                         };
                     }
-                    if j.script.decoded_duration_ms.is_some_and(|v| v > 2000)
-                        && !self.fault("input_too_large")
+                    if j.script.decoded_duration_ms.is_some_and(|v| {
+                        self.engines
+                            .iter()
+                            .find(|e| j.request["model"] == e.model)
+                            .and_then(|e| e.max_duration_ms)
+                            .is_some_and(|limit| v > limit)
+                    }) && !self.fault("input_too_large")
                     {
                         let mut f = failed("input_too_large", "permanent");
                         f["detail"] = json!({"field":"input.audio","limit":"max_duration_ms"});
@@ -429,6 +458,20 @@ impl State {
             if !matches!(kind, "transcribe" | "synthesize" | "image" | "video") {
                 return Err(refuse("unsupported", Some("kind")));
             }
+            if !self
+                .engines
+                .iter()
+                .any(|engine| engine.kind.as_str() == kind)
+            {
+                return Err(refuse(
+                    "unsupported",
+                    Some(if self.fault("undeclared_kind_field") {
+                        "model"
+                    } else {
+                        "kind"
+                    }),
+                ));
+            }
             let engine = self
                 .engines
                 .iter()
@@ -499,9 +542,15 @@ impl State {
         {
             return Err(refuse("invalid_params", Some("decision_id")));
         }
+        let engine = self
+            .engines
+            .iter()
+            .find(|engine| req["model"] == engine.model);
+        let duration_limit = engine.and_then(|engine| engine.max_duration_ms);
+        let byte_limit = engine.and_then(|engine| engine.max_input_bytes);
         if req["input"]["audio"]["duration_ms"]
             .as_u64()
-            .is_some_and(|v| v > 2000)
+            .is_some_and(|v| duration_limit.is_some_and(|limit| v > limit))
         {
             let mut e = refuse("input_too_large", Some("input.audio"));
             e.refusal.as_mut().unwrap()["detail"]["limit"] = json!("max_duration_ms");
@@ -526,7 +575,7 @@ impl State {
         if req["kind"] == "transcribe"
             && req["input"]["audio"]["bytes"]
                 .as_u64()
-                .is_some_and(|n| n > 65_536)
+                .is_some_and(|n| byte_limit.is_some_and(|limit| n > limit))
         {
             let mut e = refuse("input_too_large", Some("input.audio"));
             e.refusal.as_mut().unwrap()["detail"]["limit"] = json!("max_input_bytes");
@@ -572,6 +621,12 @@ impl State {
         input
     }
     fn call(&mut self, p: &str, method: &str, params: Value) -> SubjectResult<Value> {
+        if method == "usage.read" {
+            self.usage_reads += 1;
+        }
+        if self.no_usage_feed && matches!(method, "usage.read" | "usage.ack") {
+            return Err(refuse("unsupported", None));
+        }
         match method {
             "media.stream_audio" => {
                 let id = params["stream_id"].as_str().unwrap_or("").to_string();
@@ -584,6 +639,11 @@ impl State {
             | "realtime.call_ended" => self.extra_call(p, method, params),
             "role.describe" => {
                 let mut v = json!({"groups":["jobs","usage_feed","stream_transcribe","realtime","bias_packs"],"jobs_survive_restart":self.survives,"token_max_ttl_ms":500,"call_silence_timeout_s":3,"engines":self.engines});
+                if self.no_usage_feed {
+                    v["groups"] = json!(["jobs"]);
+                    v.as_object_mut().unwrap().remove("token_max_ttl_ms");
+                    v.as_object_mut().unwrap().remove("call_silence_timeout_s");
+                }
                 if self.fault("wire_extension") {
                     for engine in v["engines"].as_array_mut().unwrap() {
                         if engine["kind"] == "future_kind" {
@@ -927,7 +987,20 @@ impl MediaSubject for Fake {
         self.capabilities.clone()
     }
     async fn configure_engines(&self, engines: Vec<Engine>) -> SubjectResult<()> {
-        self.state.lock().unwrap().engines = engines;
+        let mut state = self.state.lock().unwrap();
+        if state.fault("configure_engines_failure") {
+            return Err(SubjectError::new("engine configuration failed"));
+        }
+        if state.fixed_catalog {
+            return Err(SubjectError::unsupported("configure_engines"));
+        }
+        state.engines = engines
+            .into_iter()
+            .filter(|engine| {
+                !state.no_usage_feed
+                    || engine.kind.group() == Some(cortexkit_role_media::describe::Group::Jobs)
+            })
+            .collect();
         Ok(())
     }
     async fn engine_declaration(&self) -> SubjectResult<Vec<Engine>> {
@@ -1066,6 +1139,10 @@ impl MediaSubject for Fake {
     }
     async fn seed_usage_entry(&self, bytes: Vec<u8>) -> SubjectResult<()> {
         let mut st = self.state.lock().unwrap();
+        st.seeded_entries += 1;
+        if st.no_usage_feed {
+            return Err(SubjectError::unsupported("seed_usage_entry"));
+        }
         let raw = if bytes.len() > 262_144 {
             json!({"bytes_b64":"","reason":"oversize","bytes":bytes.len(),"sha256":sha256(&bytes)})
         } else {
