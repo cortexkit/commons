@@ -8,6 +8,11 @@ crate. These files ship in the crate's package; with the crate's
 contents, so a participant that depends on the crate by version loads
 exactly these bytes.
 
+The `requests.json` entries give each request's `method` and `params`, and
+the `replies.json` entries give each op's reply object. On the wire a reply
+object travels inside `{"result": …}` (CONTRACT.md §3); these files show the
+object itself.
+
 | File | What it pins | Checked by |
 |---|---|---|
 | `requests.json` | `requests`: one valid request per op, including `busy` with no refs, the same handle under two kinds (two refs), and `prepare` at the cap of 256 refs; `refused`: requests that do not decode and are refused `invalid_request` (a member on `describe`, an unknown top-level field, 257 refs on `prepare` and on `busy`, an uppercase, short, non-hex or missing `cutId`, a `cutId` on `busy`, `release` without `holder`, a ref with an unknown member or an empty handle, a ref listed twice (on `prepare`, `busy` and `release`), `refs` that is not a list, an unknown op) | the wire test's request round-trip and refusal tests |

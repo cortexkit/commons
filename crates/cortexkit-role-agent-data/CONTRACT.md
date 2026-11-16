@@ -133,6 +133,13 @@ The crate's source files use these words as defined here.
 
 ## 3. Strictness and size
 
+- Every op travels in the same envelope as other module-to-module routes.
+  The request body is `{"method": <op name>, "params": <request>}`. A
+  successful reply body is `{"result": <reply>}`, where `<reply>` is the
+  op's reply object as `replies.json` shows it. A refusal is the daemon's
+  ERROR frame carrying its code (§6.2), never a `result`. A bare reply
+  object without `result` is malformed, and entorhinal refuses the move
+  `participant_unavailable`.
 - Requests and replies are JSON objects. Top-level fields, and every
   sub-object this contract types, are strict: an unknown field is
   `invalid_request`. A request that does not decode for any reason (an

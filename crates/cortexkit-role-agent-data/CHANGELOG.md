@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- State the envelope every op travels in (§3): `{"method", "params"}` out and
+  `{"result": <reply>}` back, with refusals as the daemon's ERROR frame. The
+  vector files show the reply object itself; the README now says so. Text
+  only: no type, vector or wire change for a participant that already wraps.
+
 ## 0.3.0
 
 - Add `participant_failed` for permanent faults in a participant's own data or
