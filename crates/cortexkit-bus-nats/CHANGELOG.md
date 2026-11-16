@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- A subscribe no longer fails on another operation's permission violation on
+  the same connection. Only a denial for that exact subscription subject or a
+  connection-wide authorization failure rejects an otherwise accepted subscribe.
+
 ## 0.5.0
 
 - Adopt bus-naming 0.4 for reader-token event subjects and declared module KV

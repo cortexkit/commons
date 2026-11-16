@@ -8,8 +8,8 @@ use cortexkit_bus_trait::{
 use tokio::sync::broadcast;
 
 use crate::error::{
-    drain_permission_violation, map_connect_error, map_operation_error, permission_violation,
-    wait_for_permission_violation,
+    map_connect_error, map_operation_error, permission_violation,
+    wait_for_subscription_permission_violation,
 };
 use crate::{NatsRegister, NatsStream, NatsWorkQueue, INBOX_ROOT};
 
@@ -148,11 +148,14 @@ impl NatsConnection {
             .flush()
             .await
             .map_err(|error| map_operation_error(subject, error, &mut events))?;
-        if let Some(violation) = drain_permission_violation(&mut events) {
-            return Err(violation.as_denied());
-        }
-        if let Some(violation) =
-            wait_for_permission_violation(&mut events, Duration::from_millis(100)).await
+        // Read only this receiver's copy; other operations still observe their
+        // own permission events through the connection's broadcast.
+        if let Some(violation) = wait_for_subscription_permission_violation(
+            &mut events,
+            subject,
+            Duration::from_millis(100),
+        )
+        .await
         {
             return Err(violation.as_denied());
         }

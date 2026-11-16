@@ -533,6 +533,81 @@ async fn register_round_trips_absence_revisions_snapshot_and_updates() {
 }
 
 #[tokio::test]
+async fn subscribe_ignores_another_operations_publish_denial() {
+    use cortexkit_bus_trait::PermissionViolationSource;
+    use futures_util::StreamExt;
+
+    let Some(server) = TestServer::with_participant_permissions().await else {
+        return;
+    };
+    let participant = connect_user(&server.url, "participant", PARTICIPANT_PUBLIC).await;
+    let admin = connect_admin(&server.url).await;
+    let denied_subject = "denied.publish";
+    let allowed_subject = format!("_INBOX.{PARTICIPANT_PUBLIC}.allowed");
+    let mut violations = participant.permission_violations();
+
+    // Queue the publish without flushing. On this single-threaded runtime the
+    // following subscribe installs its event receiver before either command's
+    // server reply can be handled, so the publish denial falls in its window.
+    participant
+        .client()
+        .publish(denied_subject, Bytes::new())
+        .await
+        .expect("queue publish that the server will deny asynchronously");
+    let mut subscription = participant
+        .subscribe(&allowed_subject)
+        .await
+        .expect("another operation's denial must not fail an allowed subscription");
+
+    let violation = tokio::time::timeout(Duration::from_secs(2), violations.next_violation())
+        .await
+        .expect("publish denial arrives")
+        .expect("read publish denial")
+        .expect("permission event stream remains open");
+    assert_eq!(violation.subject, denied_subject);
+    assert_eq!(
+        violation.reason,
+        "Permissions Violation for Publish to \"denied.publish\""
+    );
+
+    let payload = Bytes::from_static(b"subscription remains live");
+    admin
+        .client()
+        .publish(allowed_subject.clone(), payload.clone())
+        .await
+        .expect("admin publishes to the allowed subscription");
+    admin
+        .client()
+        .flush()
+        .await
+        .expect("flush admin publication");
+    let message = tokio::time::timeout(Duration::from_secs(2), subscription.next())
+        .await
+        .expect("allowed subscription receives a message")
+        .expect("allowed subscription stays open");
+    assert_eq!(message.subject.as_str(), allowed_subject);
+    assert_eq!(message.payload, payload);
+}
+
+#[tokio::test]
+async fn subscribe_denied_subject_returns_its_permission_violation() {
+    let Some(server) = TestServer::with_participant_permissions().await else {
+        return;
+    };
+    let participant = connect_user(&server.url, "participant", PARTICIPANT_PUBLIC).await;
+    let error = participant
+        .subscribe("denied.subscription")
+        .await
+        .expect_err("the server must deny this subscription");
+    assert!(matches!(
+        error,
+        BusError::Denied { subject, reason }
+            if subject == "denied.subscription"
+                && reason == "Permissions Violation for Subscription to \"denied.subscription\""
+    ));
+}
+
+#[tokio::test]
 async fn workload_binding_never_creates_and_server_denials_name_subjects() {
     let Some(server) = TestServer::with_participant_permissions().await else {
         return;
