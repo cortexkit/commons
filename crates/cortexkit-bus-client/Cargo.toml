@@ -1,0 +1,32 @@
+[package]
+name = "cortexkit-bus-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Seedless ck-bus credentials and local NATS connections for Rust modules"
+
+[dependencies]
+async-nats = { version = "0.50", default-features = false, features = ["jetstream", "kv", "nkeys", "nuid", "ring", "server_2_10"] }
+async-trait = "0.1"
+base64 = "0.22"
+bytes = "1"
+cortexkit-bus-naming = { version = "0.4.0", path = "../cortexkit-bus-naming" }
+cortexkit-bus-nats = { version = "0.5.0", path = "../cortexkit-bus-nats" }
+cortexkit-bus-trait = { version = "0.3.1", path = "../cortexkit-bus-trait" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subc-client-rs = "0.40"
+subc-protocol = "0.37"
+thiserror = "2"
+tracing = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry"] }
+cortexkit-bus-testkit = "=0.9.2"
+futures-util = "0.3"
+nkeys = "0.4"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "net", "process", "test-util"] }
