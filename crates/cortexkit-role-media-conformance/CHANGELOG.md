@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.11
+
+- Select unsupported languages, formats, voices, sizes, resolutions and
+  qualities using the engine's declared catalog rather than assuming specific
+  values are unsupported. Skip only the language probe when no language limit
+  is declared or every language candidate is supported; the other fact checks
+  still run. Report the case as not applicable when no fact can be probed.
+- Keep the media contract pin at `=0.1.11`.
+
 ## 0.2.10
 
 - Support fixed catalogs through the existing unsupported `configure_engines`

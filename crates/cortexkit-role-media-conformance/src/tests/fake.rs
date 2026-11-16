@@ -66,6 +66,7 @@ struct State {
     no_usage_feed: bool,
     usage_reads: usize,
     seeded_entries: usize,
+    refused_submit_fields: Vec<String>,
 }
 impl Fake {
     pub(super) fn without_usage_feed(mut self) -> Self {
@@ -82,6 +83,33 @@ impl Fake {
         engine.max_duration_ms = duration;
         engine.languages = Some(vec!["ja".into()]);
         state.engines = vec![engine];
+        self
+    }
+    pub(super) fn with_languages(mut self, languages: Option<&[&str]>) -> Self {
+        self.state.get_mut().unwrap().engines[0].languages =
+            languages.map(|values| values.iter().map(|value| (*value).into()).collect());
+        self
+    }
+    pub(super) fn with_all_fixed_catalog(mut self) -> Self {
+        self = self.with_local_provider(false).without_usage_feed();
+        let state = self.state.get_mut().unwrap();
+        state.fixed_catalog = true;
+        state.engines = crate::checks::engines()
+            .into_iter()
+            .filter(|e| e.kind.group() == Some(cortexkit_role_media::describe::Group::Jobs))
+            .map(|mut e| {
+                e.local = true;
+                e
+            })
+            .collect();
+        self
+    }
+    pub(super) fn refused_submit_fields(&self) -> Vec<String> {
+        self.state.lock().unwrap().refused_submit_fields.clone()
+    }
+    pub(super) fn with_formats(mut self, formats: &[&str]) -> Self {
+        self.state.get_mut().unwrap().engines[0].formats =
+            formats.iter().map(|value| (*value).into()).collect();
         self
     }
     pub(super) fn usage_hook_counts(&self) -> (usize, usize) {
@@ -514,7 +542,19 @@ impl State {
                     engine.qualities.as_ref(),
                 ),
             ] {
-                if value.is_some_and(|v| !allowed.is_some_and(|a| a.iter().any(|s| s == v))) {
+                if value.is_some_and(|v| {
+                    !allowed.is_some_and(|a| {
+                        a.iter().any(|s| match field {
+                            "input.language" => {
+                                cortexkit_role_media::describe::language_matches(s, v)
+                            }
+                            "input.audio.mime" | "input.format" => {
+                                cortexkit_role_media::describe::mime_matches(s, v)
+                            }
+                            _ => s == v,
+                        })
+                    })
+                }) {
                     return Err(refuse("unsupported", Some(field)));
                 }
             }
@@ -1037,10 +1077,20 @@ impl MediaSubject for Fake {
         let answer = if request.method == "media.stream_audio" {
             self.stream_audio_call(principal, request.params).await?
         } else {
-            self.state
-                .lock()
-                .unwrap()
-                .call(principal, &request.method, request.params)?
+            let mut state = self.state.lock().unwrap();
+            let result = state.call(principal, &request.method, request.params);
+            if request.method == "media.submit" {
+                if let Err(error) = &result {
+                    if let Some(field) = error
+                        .refusal
+                        .as_ref()
+                        .and_then(|v| v["detail"]["field"].as_str())
+                    {
+                        state.refused_submit_fields.push(field.to_owned());
+                    }
+                }
+            }
+            result?
         };
         let st = self.state.lock().unwrap();
         if st.fault("reply_envelope") {

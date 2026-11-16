@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use cortexkit_role_media::{
-    describe::{check_describe, Describe, Engine, Group, Kind},
+    describe::{check_describe, language_matches, mime_matches, Describe, Engine, Group, Kind},
     jobs::{check_status, StatusAnswer},
     usage::{
         check_call_usage_records, check_usage_answer, check_usage_record, UsageReadAnswer,
@@ -17,6 +17,7 @@ pub use stream_realtime::CASES as STREAM_REALTIME_CASES;
 /// Wall-clock ceiling for asynchronous scripted work; never advances provider time.
 pub const STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const LANGUAGE_CANDIDATES: &[&str] = &["fr", "de", "es", "ja", "zh", "cy", "ga", "mt"];
 
 use crate::{
     fixtures::{sha256, AudioFixture},
@@ -217,6 +218,12 @@ async fn declared_inapplicable_reason<S: MediaSubject>(
         "empty_output_is_a_failure" => &[Kind::Synthesize, Kind::Image, Kind::Video],
         "chunked_result_checksum" => &[Kind::Synthesize],
         "input_too_large" => &[Kind::Transcribe],
+        "submit_refuses_outside_declared_facts" => {
+            let declared = describe(s).await?;
+            return Ok(outside_fact_probes(&declared)?
+                .is_empty()
+                .then(|| "no declared fact could be probed".into()));
+        }
         "usage_feed_oversize_entry_acks" => {
             return Ok((!describe(s).await?.groups.contains(&Group::UsageFeed))
                 .then(|| "describe does not declare usage_feed".into()));
@@ -253,6 +260,144 @@ async fn declared_inapplicable_reason<S: MediaSubject>(
         }
     }
     Ok(None)
+}
+
+fn outside_fact_probes(declared: &Describe) -> Result<Vec<(&'static str, Value)>, String> {
+    let mut probes = Vec::new();
+    for kind in ["transcribe", "synthesize", "image", "video"] {
+        if !declared
+            .engines
+            .iter()
+            .any(|engine| engine.kind.as_str() == kind)
+        {
+            probes.push(("kind", request(kind, kind)));
+        }
+    }
+    for (kind, field) in [
+        ("transcribe", "kind"),
+        ("transcribe", "model"),
+        ("transcribe", "input.audio.mime"),
+        ("synthesize", "input.format"),
+        ("transcribe", "input.language"),
+        ("synthesize", "input.voice"),
+        ("image", "input.size"),
+        ("video", "input.resolution"),
+        ("image", "input.quality"),
+        ("image", "input.references[0]"),
+        ("transcribe", "input.bias"),
+    ] {
+        let selected = if kind == "transcribe" {
+            transcription_engine(declared).ok()
+        } else {
+            declared
+                .engines
+                .iter()
+                .find(|engine| engine.kind.as_str() == kind)
+        };
+        let Some(engine) = selected else { continue };
+        let format = engine
+            .formats
+            .first()
+            .ok_or_else(|| "declared engine has no formats".to_string())?;
+        let mut req = request(field, kind);
+        req["model"] = json!(engine.model);
+        match kind {
+            "transcribe" => req["input"]["audio"]["mime"] = json!(format),
+            "synthesize" => {
+                req["input"]["format"] = json!(format);
+                if let Some(voice) = engine.voices.as_ref().and_then(|v| v.first()) {
+                    req["input"]["voice"] = json!(voice);
+                }
+            }
+            "image" => {
+                req["input"]["format"] = json!(format);
+                if let Some(size) = engine.sizes.as_ref().and_then(|v| v.first()) {
+                    req["input"]["size"] = json!(size);
+                }
+            }
+            "video" => {
+                req["input"]["format"] = json!(format);
+                if let Some(resolution) = engine.resolutions.as_ref().and_then(|v| v.first()) {
+                    req["input"]["resolution"] = json!(resolution);
+                } else {
+                    req["input"].as_object_mut().unwrap().remove("resolution");
+                }
+            }
+            _ => unreachable!(),
+        }
+        let others: Vec<_> = declared
+            .engines
+            .iter()
+            .filter(|e| e.kind == engine.kind && e.model == engine.model)
+            .collect();
+        let candidate = |values: &[&str], matches: &dyn Fn(&Engine, &str) -> bool| {
+            values
+                .iter()
+                .find(|value| others.iter().all(|e| !matches(e, value)))
+                .map(|value| (*value).to_owned())
+        };
+        let exact = |list: &Option<Vec<String>>, value: &str| {
+            list.as_ref()
+                .is_some_and(|list| list.iter().any(|v| v == value))
+        };
+        let mime = |list: &[String], value: &str| list.iter().any(|v| mime_matches(v, value));
+        let bad = match field {
+            "kind" => Some(json!("stream_transcribe")),
+            "model" => (0..=declared.engines.len())
+                .map(|i| format!("absent-{i}"))
+                .find(|model| {
+                    !declared
+                        .engines
+                        .iter()
+                        .any(|e| e.kind == engine.kind && e.model == *model)
+                })
+                .map(|v| json!(v)),
+            "input.audio.mime" | "input.format" => candidate(
+                &["audio/unknown", "application/octet-stream", "image/jpeg"],
+                &|e, v| mime(&e.formats, v),
+            )
+            .map(|v| json!(v)),
+            "input.language" => candidate(LANGUAGE_CANDIDATES, &|e, v| {
+                e.languages
+                    .as_ref()
+                    .is_none_or(|list| list.iter().any(|tag| language_matches(tag, v)))
+            })
+            .map(|v| json!(v)),
+            "input.voice" => candidate(&["unknown", "other-voice"], &|e, v| exact(&e.voices, v))
+                .map(|v| json!(v)),
+            "input.size" => {
+                candidate(&["huge", "other-size"], &|e, v| exact(&e.sizes, v)).map(|v| json!(v))
+            }
+            "input.resolution" => candidate(&["8k", "other-resolution"], &|e, v| {
+                exact(&e.resolutions, v)
+            })
+            .map(|v| json!(v)),
+            "input.quality" => candidate(&["unknown", "other-quality"], &|e, v| {
+                exact(&e.qualities, v)
+            })
+            .map(|v| json!(v)),
+            "input.references[0]" => {
+                candidate(&["image/jpeg", "image/png", "image/webp"], &|e, v| {
+                    e.reference_formats
+                        .as_ref()
+                        .is_some_and(|list| mime(list, v))
+                })
+                .map(|v| media(b"ref", &v))
+            }
+            "input.bias" => others
+                .iter()
+                .all(|e| e.bias_limit.is_none())
+                .then(|| json!({"terms":[]})),
+            _ => unreachable!(),
+        };
+        let Some(bad) = bad else { continue };
+        if field == "kind" {
+            req["model"] = json!("stream");
+        }
+        set_path(&mut req, field, bad);
+        probes.push((field, req));
+    }
+    Ok(probes)
 }
 
 fn transcription_engine(declared: &Describe) -> Result<&Engine, String> {
@@ -654,48 +799,7 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
         }
         "submit_refuses_outside_declared_facts" => {
             let declared = describe(s).await?;
-            for kind in ["transcribe", "synthesize", "image", "video"] {
-                if !declared
-                    .engines
-                    .iter()
-                    .any(|engine| engine.kind.as_str() == kind)
-                {
-                    refusal(
-                        s,
-                        "alice",
-                        "media.submit",
-                        request(kind, kind),
-                        "unsupported",
-                        Some("kind"),
-                    )
-                    .await?;
-                }
-            }
-            for (kind, field, bad) in [
-                ("transcribe", "kind", json!("stream_transcribe")),
-                ("transcribe", "model", json!("absent")),
-                ("transcribe", "input.audio.mime", json!("audio/unknown")),
-                ("synthesize", "input.format", json!("audio/unknown")),
-                ("transcribe", "input.language", json!("fr")),
-                ("synthesize", "input.voice", json!("unknown")),
-                ("image", "input.size", json!("huge")),
-                ("video", "input.resolution", json!("8k")),
-                ("image", "input.quality", json!("unknown")),
-                ("image", "input.references[0]", media(b"ref", "image/jpeg")),
-                ("transcribe", "input.bias", json!({"terms":[]})),
-            ] {
-                if !declared
-                    .engines
-                    .iter()
-                    .any(|engine| engine.kind.as_str() == kind)
-                {
-                    continue;
-                }
-                let mut req = request(field, kind);
-                if field == "kind" {
-                    req["model"] = json!("stream");
-                }
-                set_path(&mut req, field, bad);
+            for (field, req) in outside_fact_probes(&declared)? {
                 refusal(s, "alice", "media.submit", req, "unsupported", Some(field)).await?;
             }
             require(records(s).await?.is_empty(), "unsupported work wrote usage")?;

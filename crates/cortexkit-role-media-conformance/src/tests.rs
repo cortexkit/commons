@@ -123,6 +123,47 @@ async fn media_kit_fixed_catalog_input_limits_follow_describe() {
 }
 
 #[tokio::test]
+async fn media_kit_declared_facts_languages_follow_catalog() {
+    let subject = Fake::new(None, true, true)
+        .with_fixed_catalog(None, None)
+        .with_languages(Some(&["en", "FR"]))
+        .with_formats(&["audio/wav", "audio/unknown"]);
+    assert_eq!(
+        run_case(&subject, "submit_refuses_outside_declared_facts").await,
+        Outcome::Passed
+    );
+}
+
+#[tokio::test]
+async fn media_kit_declared_facts_languages_inapplicable() {
+    for languages in [
+        Some(&["FR", "de", "es", "ja", "zh", "cy", "ga", "mt"][..]),
+        None,
+    ] {
+        let subject = Fake::new(None, true, true)
+            .with_all_fixed_catalog()
+            .with_languages(languages);
+        let outcome = run_case(&subject, "submit_refuses_outside_declared_facts").await;
+        assert_eq!(outcome, Outcome::Passed);
+        assert_eq!(
+            subject.refused_submit_fields(),
+            [
+                "kind",
+                "model",
+                "input.audio.mime",
+                "input.format",
+                "input.voice",
+                "input.size",
+                "input.resolution",
+                "input.quality",
+                "input.references[0]",
+                "input.bias",
+            ]
+        );
+    }
+}
+
+#[tokio::test]
 async fn media_kit_fixed_catalog_undeclared_kind_field_is_checked() {
     let subject = Fake::new(Some("undeclared_kind_field"), true, true)
         .with_fixed_catalog(Some(32 * 1024 * 1024), Some(3_600_000));
