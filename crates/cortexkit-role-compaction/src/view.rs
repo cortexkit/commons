@@ -363,6 +363,12 @@ pub enum ViewRefusal, "code" {
     CutBeforeNumbers => "cut_before_numbers" {
         unknown_through: String,
     },
+    /// An edit names an entry removed by the view's own cut.
+    EditBeforeCut => "edit_before_cut" {
+        #[serde(deserialize_with = "crate::integer::required")]
+        index: u64,
+        mid: String,
+    },
     /// An inserted message's text contains a tag prefix.
     TaggedInsert => "tagged_insert" {
         id: String,

@@ -514,6 +514,13 @@ fn samples() -> Vec<(&'static str, Value)> {
             }),
         ),
         (
+            "view-edit-before-cut.json",
+            value(ViewRefusal::EditBeforeCut {
+                index: 2,
+                mid: "message-a".into(),
+            }),
+        ),
+        (
             "entries-host-parts-legacy.json",
             value(ReadPage::new(
                 host_entries
@@ -1306,6 +1313,23 @@ fn transient_read_wake_notice_is_content_free() {
     let decoded: NoticeRequest = wire::params(params).unwrap();
     assert!(decoded.entries.is_empty());
     assert!(decoded.events.is_empty());
+}
+
+#[test]
+fn edit_before_cut_refusal_round_trip() {
+    let wire: Value = serde_json::from_str(include_str!(
+        "../test-vectors/compaction-v2/view-edit-before-cut.json"
+    ))
+    .unwrap();
+    let refusal: ViewRefusal = serde_json::from_value(wire.clone()).unwrap();
+    assert!(matches!(&refusal, ViewRefusal::EditBeforeCut { index: 2, mid } if mid == "message-a"));
+    assert_eq!(serde_json::to_value(refusal).unwrap(), wire);
+    for index in [json!(-1), json!(9007199254740992_u64), Value::Null] {
+        assert!(serde_json::from_value::<ViewRefusal>(json!({
+            "code": "edit_before_cut", "index": index, "mid": "message-a"
+        }))
+        .is_err());
+    }
 }
 
 #[test]

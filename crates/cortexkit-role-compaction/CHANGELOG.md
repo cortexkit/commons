@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.7
+
+- Add the `edit_before_cut` view refusal for edits naming entries removed by
+  the view's own cut, without a capability gate.
+
 ## 0.4.6
 
 - Restrict pre-send `over_limit` rides and `context_ceiling` refusals to exact
