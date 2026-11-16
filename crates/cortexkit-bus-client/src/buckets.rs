@@ -256,8 +256,19 @@ impl BucketWatch {
                     return Ok(BucketItem::CaughtUp);
                 }
                 message = self.subscription.as_mut().expect("bound watch").next() => {
-                    let message = message.ok_or_else(|| Error::Nats("bucket watch closed".into()))?
-                        .map_err(|error| Error::Nats(error.to_string()))?;
+                    let message = match message
+                        .ok_or_else(|| Error::Nats("bucket watch closed".into()))
+                        .and_then(|message| message.map_err(|error| Error::Nats(error.to_string())))
+                    {
+                        Ok(message) => message,
+                        Err(error) => {
+                            // A connection that closed for good ends the watch;
+                            // resume on its replacement after the last revision.
+                            self.bucket.binding.recover(error).await?;
+                            self.subscription = None;
+                            continue;
+                        }
+                    };
                     let info = message.info().map_err(|error| Error::Nats(error.to_string()))?;
                     if !self.caught_up && info.pending == 0 { self.marker_pending = true; }
                     if !advance_revision(&mut self.revision, info.stream_sequence) { continue; }
@@ -303,6 +314,10 @@ where
         match result {
             Err(Error::WatchCapacity { .. }) if retry_capacity => {
                 let deadline = *deadline.get_or_insert_with(|| {
+                    #[cfg(test)]
+                    {
+                        binding.bucket_watch_capacity_warnings += 1;
+                    }
                     tracing::warn!(
                         bucket,
                         "waiting for bucket watch consumer capacity during rebind"

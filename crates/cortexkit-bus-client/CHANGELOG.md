@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.4
+
+- Fix a connection leak after a bus restart. A replaced connection used to keep
+  reconnecting for the life of the process, opening a socket and logging an
+  auth callback error every 4 seconds, because its old credential is refused
+  forever. Every connection now gives up after 20 reconnect attempts (about
+  36 seconds), which ends a replaced connection and frees its task and socket.
+- A bus restart of about 30 seconds still keeps the same connection. If a
+  connection stays down longer and ends, the client replaces it the same way as
+  a credential re-issue and notifies `connection_changes()`; event readers and
+  bucket watches rebind to the replacement.
+- Event readers and bucket watches wait for that replacement rather than
+  returning errors from the ended connection. If credential maintenance has
+  stopped, they return the error instead of waiting.
+- Each connection holds one extra subscription under its own inbox, used only
+  to notice when the connection has ended.
+
 ## 0.1.3
 
 - Add `publish_claim_check` for flow-trigger events: an empty payload with a

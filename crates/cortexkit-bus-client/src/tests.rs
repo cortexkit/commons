@@ -16,6 +16,7 @@ use crate::{
 };
 
 mod buckets_live;
+mod reconnect_live;
 
 pub(crate) struct FakeSubc {
     pub issues: AtomicUsize,

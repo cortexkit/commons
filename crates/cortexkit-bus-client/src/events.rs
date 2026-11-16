@@ -156,6 +156,8 @@ impl EventReader {
     /// Pulls one event, rebinding after credential re-issue if necessary.
     /// This never acknowledges a message. Commit before acknowledging a valid
     /// delivery; log and terminate a malformed record instead of retrying it.
+    /// If the connection closes for good, this waits for the client's
+    /// replacement connection and rebinds instead of returning an error.
     /// A closed connection-change stream reports a transport error so the caller
     /// can reconnect the client or report degraded credential maintenance.
     pub async fn next(&mut self) -> Result<EventItem> {
@@ -176,8 +178,13 @@ impl EventReader {
                         .map_err(|error| Error::Nats(error.to_string()))?;
                     batch.next().await.transpose().map_err(|error| Error::Nats(error.to_string()))
                 } => {
-                    if let Some(message) = result? {
-                        return Ok(decode(&self.names, message));
+                    match result {
+                        Ok(Some(message)) => return Ok(decode(&self.names, message)),
+                        Ok(None) => {}
+                        Err(error) => {
+                            self.binding.recover(error).await?;
+                            self.consumer = None;
+                        }
                     }
                 }
             }

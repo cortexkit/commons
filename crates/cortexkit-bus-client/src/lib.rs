@@ -125,12 +125,12 @@ impl BusClient {
         let mut revisions = manager.revisions();
         let initial = manager.credential().await;
         let names = AccountNames::derive(&initial.acct)?;
-        let connection = loop {
+        let (connection, mut ended) = loop {
             revisions.borrow_and_update();
             let credential = manager.credential().await;
             match connect_current(manager.clone(), &credential, opts.request_timeout).await {
-                Ok(connection) if !revisions.has_changed().unwrap_or(false) => break connection,
-                Ok(connection) => {
+                Ok(current) if !revisions.has_changed().unwrap_or(false) => break current,
+                Ok((connection, _)) => {
                     let _ = connection.close(Duration::from_millis(50)).await;
                 }
                 Err(_)
@@ -151,6 +151,11 @@ impl BusClient {
                     .unwrap_or_else(|| credentials::renewal_delay(credential.exp));
                 tokio::select! {
                     result = revisions.changed() => { if result.is_err() { return; } }
+                    () = connection_ended(&mut ended) => {
+                        // Replace it through the same path as a re-issue, so
+                        // event readers and bucket watches rebind to the new one.
+                        tracing::warn!("bus connection closed for good; replacing it");
+                    }
                     () = tokio::time::sleep(delay) => {
                         if let Err(error) = manager.renew().await {
                             if credentials::transient(&error) || matches!(error, Error::Transport(_)) {
@@ -178,7 +183,7 @@ impl BusClient {
                     let credential = manager.credential().await;
                     match connect_current(manager.clone(), &credential, opts.request_timeout).await
                     {
-                        Ok(replacement) => {
+                        Ok((replacement, replacement_ended)) => {
                             if revisions.has_changed().unwrap_or(false) {
                                 let _ = replacement.close(Duration::from_millis(50)).await;
                                 continue;
@@ -189,7 +194,11 @@ impl BusClient {
                                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                                 std::mem::replace(&mut *slot, replacement)
                             };
+                            ended = replacement_ended;
                             changes.send_replace(revision);
+                            // A replaced connection that is reconnecting can't
+                            // drain, and its auth callback now refuses every
+                            // attempt; MAX_RECONNECTS ends it instead.
                             let _ = old.close(Duration::from_millis(50)).await;
                             break;
                         }
@@ -331,11 +340,40 @@ impl BusClient {
     }
 }
 
+/// How many reconnect attempts async-nats makes after a connection drops before
+/// it gives up and ends the connection for good.
+///
+/// async-nats waits nothing before the first attempt, then 2 ms doubling up to
+/// a 4 s cap, so twenty attempts span about 36 s: a ck-bus restart of about
+/// 30 s rides through on the same connection. The bound matters most for a
+/// replaced connection. Its credential is no longer current, so its auth
+/// callback refuses every attempt; without a bound it would keep connecting
+/// and failing every 4 s for the life of the process.
+const MAX_RECONNECTS: usize = 20;
+
+/// A subject under the connection's own inbox that nothing ever publishes to.
+/// A hyphen never appears in async-nats's generated inbox tokens, so it
+/// cannot collide with a request inbox.
+pub(crate) const LIVENESS_SUBJECT: &str = "bus-client-liveness";
+
+/// Resolves once async-nats has ended the connection for good: after it runs
+/// out of reconnect attempts, or after a drain. The connection's handler task
+/// then exits and drops every subscription, which ends this stream. The
+/// subscription survives ordinary reconnects because async-nats resubscribes it.
+/// async-nats 0.50 emits no `Event::Closed` when it gives up reconnecting, only
+/// a `ClientError::MaxReconnects` event that can be dropped from a full queue,
+/// and `NatsConnection` keeps its event stream private; the ended subscription
+/// is the signal that can't be missed.
+async fn connection_ended(ended: &mut async_nats::Subscriber) {
+    use futures_util::StreamExt;
+    while ended.next().await.is_some() {}
+}
+
 async fn connect_current(
     manager: Arc<CredentialManager>,
     credential: &credentials::Credential,
     timeout: Duration,
-) -> Result<NatsConnection> {
+) -> Result<(NatsConnection, async_nats::Subscriber)> {
     let public = credential.credential_public.clone();
     let options = async_nats::ConnectOptions::with_auth_callback(move |nonce| {
         let manager = manager.clone();
@@ -360,12 +398,21 @@ async fn connect_current(
         }
     })
     .connection_timeout(timeout)
-    .request_timeout(Some(timeout));
+    .request_timeout(Some(timeout))
+    .max_reconnects(MAX_RECONNECTS);
     let mut config = ConnectConfig::new(&credential.credential_public)?;
     config.request_timeout = timeout;
-    NatsConnection::connect(credential.server_url.as_str(), options, config)
+    let connection = NatsConnection::connect(credential.server_url.as_str(), options, config)
         .await
-        .map_err(Error::from)
+        .map_err(Error::from)?;
+    let subject = format!("{}.{LIVENESS_SUBJECT}", connection.inbox_prefix());
+    match connection.client().subscribe(subject).await {
+        Ok(ended) => Ok((connection, ended)),
+        Err(error) => {
+            let _ = connection.close(Duration::from_millis(50)).await;
+            Err(Error::Nats(error.to_string()))
+        }
+    }
 }
 
 #[cfg(test)]

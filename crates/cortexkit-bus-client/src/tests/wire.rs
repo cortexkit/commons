@@ -191,6 +191,12 @@ impl Server {
     }
 }
 
+/// Every connection also subscribes to a liveness subject under its inbox;
+/// only the request-reply subscription shows that the new inbox is in use.
+fn is_liveness(subject: &str) -> bool {
+    subject.ends_with(&format!(".{}", crate::LIVENESS_SUBJECT))
+}
+
 #[tokio::test]
 async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
     let server = Server::start().await;
@@ -255,7 +261,7 @@ async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
     assert!(seen
         .subscriptions
         .iter()
-        .any(|subject| subject.starts_with("_INBOX.UKEY1.")));
+        .any(|subject| subject.starts_with("_INBOX.UKEY1.") && !is_liveness(subject)));
 }
 
 #[tokio::test]
@@ -448,23 +454,6 @@ async fn bucket_delete_rejects_invalid_keys_before_sending() {
 
 #[tokio::test]
 async fn bucket_rebind_capacity_wait_is_bounded_and_logs_once() {
-    struct Capture(Arc<Mutex<Vec<u8>>>);
-    impl std::io::Write for Capture {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let output = Arc::new(Mutex::new(Vec::new()));
-    let writer = output.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .without_time()
-        .with_writer(move || Capture(writer.clone()))
-        .finish();
-    let _subscriber = tracing::subscriber::set_default(subscriber);
     let server = Server::start().await;
     let (client, _) = event_client(&server).await;
     let mut binding = crate::binding::ConnectionBinding::new(&client);
@@ -491,12 +480,9 @@ async fn bucket_rebind_capacity_wait_is_bounded_and_logs_once() {
         attempts,
         [0, 1, 3, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57, 60]
     );
-    let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
-    assert_eq!(
-        logs.matches("waiting for bucket watch consumer capacity during rebind")
-            .count(),
-        1
-    );
+    // Count warning decisions without a subscriber: tracing's process-wide
+    // filtering state can be changed by tests running on other threads.
+    assert_eq!(binding.bucket_watch_capacity_warnings, 1);
 }
 
 #[tokio::test]
@@ -835,5 +821,68 @@ async fn event_reader_reissue_rebinds_pending_pull_and_redelivers_unacked_event(
     assert!(seen
         .subscriptions
         .iter()
-        .any(|subject| subject.starts_with("_INBOX.UKEY1.")));
+        .any(|subject| subject.starts_with("_INBOX.UKEY1.") && !is_liveness(subject)));
+}
+
+#[tokio::test]
+async fn ended_connection_is_replaced_and_reader_rebinds() {
+    let server = Server::start().await;
+    server
+        .observed
+        .lock()
+        .unwrap()
+        .events
+        .extend([FakeEvent::new(1), FakeEvent::new(2)]);
+    let (client, _manager) = event_client(&server).await;
+    let mut reader = client.event_reader("m_test_module").await.unwrap();
+    delivery(&mut reader).await.ack().await.unwrap();
+    let mut changes = client.connection_changes();
+    changes.borrow_and_update();
+    // Draining ends the connection for good, as running out of reconnect
+    // attempts does; the client must replace it without a credential change.
+    client
+        .connection()
+        .close(Duration::from_secs(1))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), changes.changed())
+        .await
+        .expect("the ended connection is replaced")
+        .unwrap();
+    client.connection().client().flush().await.unwrap();
+    let next = delivery(&mut reader).await;
+    assert_eq!(next.stream_sequence, 2);
+    next.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn ended_connection_with_stopped_maintenance_errors_instead_of_waiting() {
+    let server = Server::start().await;
+    server
+        .observed
+        .lock()
+        .unwrap()
+        .events
+        .extend([FakeEvent::new(1)]);
+    let (mut client, _manager) = event_client(&server).await;
+    let mut reader = client.event_reader("m_test_module").await.unwrap();
+    client.task.abort();
+    let _ = (&mut client.task).await;
+    client
+        .connection()
+        .close(Duration::from_secs(1))
+        .await
+        .unwrap();
+    // No replacement can arrive, so neither an attach nor a pull may wait.
+    let attach = tokio::time::timeout(Duration::from_secs(5), client.event_reader("m_test_module"))
+        .await
+        .expect("attach must not wait for a replacement that can't arrive");
+    assert!(
+        matches!(attach, Err(Error::Nats(_))),
+        "attach returns the failed operation's own error"
+    );
+    let next = tokio::time::timeout(Duration::from_secs(5), reader.next())
+        .await
+        .expect("a pull must not wait for a replacement that can't arrive");
+    assert!(next.is_err());
 }

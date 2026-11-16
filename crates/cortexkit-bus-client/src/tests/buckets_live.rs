@@ -37,12 +37,14 @@ fn jwt(signer: &KeyPair, subject: &str, name: &str, nats: Value) -> String {
     )
 }
 
-struct Issuer {
+pub(super) struct Issuer {
     url: String,
     account: String,
     trust: TrustChain,
     module: &'static str,
     keys: Mutex<Vec<KeyPair>>,
+    /// Keys whose nonce signing is refused as revoked, as after a ck-bus restart.
+    pub(super) revoked: Mutex<Vec<String>>,
     signing: tokio::sync::Mutex<()>,
     sign_calls: AtomicUsize,
 }
@@ -72,6 +74,14 @@ impl Issuer {
                 publish.push(format!("$KV.{bucket}.>"));
             }
         }
+        // A module may read its own EVENT durable.
+        let event = &names.streams().event;
+        let durable = AccountNames::module_consumer_name(self.module).unwrap();
+        publish.extend([
+            format!("$JS.API.CONSUMER.INFO.{event}.{durable}"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{event}.{durable}"),
+            format!("$JS.ACK.{event}.{durable}.>"),
+        ]);
         let now = trust::unix_now();
         let signer = &self.trust.signer.root(&trust::box_root_id()).pair;
         let jwt = jwt(
@@ -108,10 +118,11 @@ impl CredentialTransport for Issuer {
             }
             "ckbus.credential_renew" => Ok(self.credential(keys.last().unwrap())),
             "ckbus.nonce_sign" => {
-                let key = keys
-                    .iter()
-                    .find(|key| key.public_key() == params["credential_public"].as_str().unwrap())
-                    .unwrap();
+                let public = params["credential_public"].as_str().unwrap();
+                if self.revoked.lock().unwrap().iter().any(|key| key == public) {
+                    return Err(Error::Refused("ckbus_credential_revoked".into()));
+                }
+                let key = keys.iter().find(|key| key.public_key() == public).unwrap();
                 let nonce = STANDARD
                     .decode(params["nonce_b64"].as_str().unwrap())
                     .unwrap();
@@ -122,14 +133,14 @@ impl CredentialTransport for Issuer {
     }
 }
 
-struct Rig {
-    server: BusServer,
+pub(super) struct Rig {
+    pub(super) server: BusServer,
     account: String,
-    admin: async_nats::Client,
+    pub(super) admin: async_nats::Client,
 }
 
 impl Rig {
-    async fn start() -> Option<Self> {
+    pub(super) async fn start() -> Option<Self> {
         let Some(binary) = std::env::var_os("CK_NATS_SERVER_BIN") else {
             assert_ne!(
                 std::env::var("CK_REQUIRE_NATS_SERVER").as_deref(),
@@ -245,12 +256,23 @@ impl Rig {
         &self,
         module: &'static str,
     ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
+        self.client_via(module, &self.server.url).await
+    }
+
+    /// Connects a client whose credentials point at `url`, which may be a
+    /// proxy in front of this rig's server.
+    pub(super) async fn client_via(
+        &self,
+        module: &'static str,
+        url: &str,
+    ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
         let issuer = Arc::new(Issuer {
-            url: self.server.url.clone(),
+            url: url.into(),
             account: self.account.clone(),
             trust: self.server.trust.clone(),
             module,
             keys: Mutex::new(vec![]),
+            revoked: Mutex::new(vec![]),
             signing: tokio::sync::Mutex::new(()),
             sign_calls: AtomicUsize::new(0),
         });
@@ -349,10 +371,16 @@ async fn bucket_live_snapshot_changes_reissue_and_terminal_renewal() {
         .reissue(old.inbox_prefix().strip_prefix("_INBOX.").unwrap())
         .await
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(10), changes.changed())
-        .await
-        .unwrap()
-        .unwrap();
+    // Closing the current connection also makes the client replace it under
+    // the same key, so wait for the connection carrying the re-issued key.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while reader.connection().inbox_prefix() == old.inbox_prefix() {
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    changes.borrow_and_update();
     assert_ne!(old.inbox_prefix(), reader.connection().inbox_prefix());
     assert_eq!(
         next(&mut watch).await,

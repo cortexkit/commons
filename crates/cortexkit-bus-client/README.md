@@ -51,6 +51,15 @@ the maintenance task stopped (including on a terminal renewal refusal). Dropping
 the client stops its maintenance task. Already held snapshots should not be used
 after re-issue.
 
+A dropped connection reconnects on its own for about 36 seconds (20 attempts),
+so a bus restart of about 30 seconds keeps the same connection and emits no
+change. After that the connection ends for good and the client replaces it the
+same way as a re-issue, retrying with backoff from 250 ms to 30 seconds while the
+bus is still down. `EventReader` and `BucketWatch` wait for the replacement
+instead of returning errors from the ended connection. A replaced connection
+also stops reconnecting within that bound, so it never keeps retrying with a
+revoked key.
+
 After any unseen change is consumed, `changed()` returns `Err` when the
 maintenance task ends and drops its sender. A terminal renewal refusal also
 logs one warning containing only its refusal code, not the credential. Reconnect
