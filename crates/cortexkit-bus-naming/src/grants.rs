@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::names::AccountNames;
 use crate::token::{validate_token, NamingError, TokenKind};
-use crate::EVENT_CONSUMERS;
+use crate::{EVENT_CONSUMERS, LIVE_HINT_READERS, MODULE_BUCKETS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Principal {
@@ -1145,6 +1145,12 @@ fn validate_principal(line: usize, principal: &str) -> Result<(), GrantError> {
     ) || EVENT_CONSUMERS
         .iter()
         .any(|entry| entry.module_id == principal)
+        || MODULE_BUCKETS
+            .iter()
+            .any(|bucket| bucket.owner == principal || bucket.readers.contains(&principal))
+        || LIVE_HINT_READERS
+            .iter()
+            .any(|reader| reader.module_id == principal)
     {
         Ok(())
     } else {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Accept declared bucket owners and readers and live-hint readers as module
+  principals in permission files, while continuing to reject unknown principals.
+
 ## 0.4.0
 
 - Add optional reader-module event subjects and a shared account-scoped parser

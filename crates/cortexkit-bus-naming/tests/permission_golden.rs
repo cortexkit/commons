@@ -79,6 +79,39 @@ fn forbidden_permission_shapes_fail_the_build_validator() {
 }
 
 #[test]
+fn permission_validator_accepts_declared_module_principals_and_rejects_unknown() {
+    use cortexkit_bus_naming::{EVENT_CONSUMERS, LIVE_HINT_READERS, MODULE_BUCKETS};
+
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let bucket_only = MODULE_BUCKETS
+        .iter()
+        .flat_map(|bucket| std::iter::once(bucket.owner).chain(bucket.readers.iter().copied()))
+        .find(|module| {
+            !EVENT_CONSUMERS
+                .iter()
+                .any(|entry| entry.module_id == *module)
+        })
+        .expect("a bucket principal without an event durable is required for this regression");
+    let validate = |principal: &str| {
+        let document =
+            format!("{CHECKED_IN_GOLDEN}allow {principal} publish ck.box_goldenfixture.example\n");
+        validate_permission_file(&document, &account)
+    };
+    validate(bucket_only).expect("bucket-only principal must be accepted");
+
+    for module in MODULE_BUCKETS
+        .iter()
+        .flat_map(|bucket| std::iter::once(bucket.owner).chain(bucket.readers.iter().copied()))
+        .chain(LIVE_HINT_READERS.iter().map(|reader| reader.module_id))
+        .chain(EVENT_CONSUMERS.iter().map(|reader| reader.module_id))
+    {
+        validate(module).unwrap_or_else(|error| panic!("{module}: {error}"));
+    }
+    let error = validate("unknown-test-module").expect_err("unknown principal must be refused");
+    assert!(error.to_string().contains("unknown principal"));
+}
+
+#[test]
 fn golden_names_bound_and_refused_fixture_identities() {
     for literal in [
         "box_goldenfixture",
