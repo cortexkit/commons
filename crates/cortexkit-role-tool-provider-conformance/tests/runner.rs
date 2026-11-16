@@ -10,6 +10,18 @@ use cortexkit_role_tool_provider_conformance::{
 use fake::{Defects, FakeSubject, LateCustodyDefect, SystemTextDefect, REFUSED_LISTED_PRESET};
 
 #[tokio::test]
+async fn notice_templates_live_case_checks_declarers_and_non_declarers() {
+    for token in [None, Some("session-notices/v1")] {
+        let report = run(&FakeSubject::new(Defects {
+            session_notices_token: token,
+            ..Defects::default()
+        }))
+        .await;
+        assert_passed(&report, "catalog_notice_templates");
+    }
+}
+
+#[tokio::test]
 async fn system_text_facts_checks_reject_incorrect_providers_by_name() {
     for (defects, case) in [
         (

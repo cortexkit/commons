@@ -26,6 +26,7 @@ The role document is [`CONTRACT.md`](../../CONTRACT.md).
 | `rich-ui-stamp.json` | the optional `system_text.rich_ui` stamp (`RichUiStamp`): an unstamped system-text answer that carries no `rich_ui` member and a stamped one, both round-tripping; valid stamps (dialect of 1 to 32 printable ASCII characters, 64-lowercase-hex catalog digest, an unknown member ignored); and stamps a decoder refuses, each naming `rich_ui.dialect` or `rich_ui.catalog_digest` | the wire crate's `rich_ui_stamp` tests |
 | `catalog-capabilities.json` | accepted `params.capabilities` filters, a missing list classified as an ordinary request, and every refusal: other filter params (including model), malformed, unsorted or repeated tags, and unserved tags | the wire crate's capability-selection and refusal tests |
 | `catalog-model.json` | optional and valid ordinary-request model selectors, and malformed selectors refused naming `params.model`: missing provider, empty model, extra variant member and non-object | the wire crate's model-shape test; the runner's `catalog_model_malformed_refused` sends malformed samples to advertising providers |
+| `catalog-notice-templates.json` | opt-in preset-scoped template requests, two runner templates (including an enum slot), an empty list, and named refusals for provider bounds or unsupported requests | the wire crate and kit decode the shared vectors; the kit's `catalog_notice_templates` checks live opt-in/omission/refusal behavior and bounds, not slot rules or plan composition |
 | `model-visible-size.json` | the model-visible size measure (section 4.5) on decoded bodies: exact sizes for text, multibyte text, several parts, an excluded image part and `structuredContent`, tool-error text, unknown parts and non-string legacy bodies by their RFC 8785 length (including number formatting), and legacy string bodies; plus the size of a single text part at, one byte past and two bytes past the 65,536-byte limit, built from a repeated unit. Refusals and late-result selection aren't covered | the wire crate's `model_visible_size` tests |
 
 `SHA256SUMS` pins every file in this directory, including this README. The
@@ -40,7 +41,8 @@ the 3 MiB refusal without checking in a multi-MiB string. The result-format
 omission test also compares encoded catalog bytes and the existing
 `call-modes.json` digest pins; the older vectors remain unchanged.
 
-The conformance crate reads `call-key.json` and `schema-pin.json` from the
+The conformance crate reads `call-key.json`, `schema-pin.json` and
+`catalog-notice-templates.json` from the
 wire crate's public `vectors` module. Its dependency enables the
 `test-vectors` feature, so the published conformance package needs no vendored
 copies or repository checkout.

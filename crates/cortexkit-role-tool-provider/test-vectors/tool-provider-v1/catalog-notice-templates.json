@@ -1,0 +1,321 @@
+{
+  "_about": "Opt-in preset-scoped system-notice template catalog requests and raw JSON answers. Provider bounds are checked here; full runner template validation belongs to the composer.",
+  "requests": [
+    {
+      "name": "requested preset templates",
+      "provides": [
+        "session-notices/v1"
+      ],
+      "request": {
+        "params": {},
+        "preset": "review",
+        "notice_templates": true
+      }
+    },
+    {
+      "name": "digest-only selection",
+      "provides": [
+        "session-notices/v1"
+      ],
+      "request": {
+        "params": {},
+        "notice_templates": true,
+        "digest_only": true
+      }
+    },
+    {
+      "name": "false requests no templates",
+      "provides": [
+        "session-notices/v1"
+      ],
+      "request": {
+        "params": {},
+        "notice_templates": false
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "two runner templates",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "id": "completed",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "status",
+            "text": "Work is {state}.",
+            "slots": {
+              "state": {
+                "type": "enum",
+                "values": [
+                  "running",
+                  "complete"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "no system-text notices for this preset",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": []
+      }
+    }
+  ],
+  "refused_answers": [
+    {
+      "name": "seventeen templates",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "id": "n0",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n1",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n2",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n3",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n4",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n5",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n6",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n7",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n8",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n9",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n10",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n11",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n12",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n13",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n14",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n15",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "n16",
+            "text": "Work completed.",
+            "slots": {}
+          }
+        ]
+      },
+      "field": "notice_templates"
+    },
+    {
+      "name": "duplicate id",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "id": "same",
+            "text": "Work completed.",
+            "slots": {}
+          },
+          {
+            "id": "same",
+            "text": "Work completed.",
+            "slots": {}
+          }
+        ]
+      },
+      "field": "notice_templates[1].id"
+    },
+    {
+      "name": "oversized compact element",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "id": "large",
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "slots": {}
+          }
+        ]
+      },
+      "field": "notice_templates[0]"
+    },
+    {
+      "name": "non-object element",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          "not an object"
+        ]
+      },
+      "field": "notice_templates[0]"
+    },
+    {
+      "name": "missing id",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "text": "Done.",
+            "slots": {}
+          }
+        ]
+      },
+      "field": "notice_templates[0].id"
+    },
+    {
+      "name": "empty id",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "id": "",
+            "text": "Work completed.",
+            "slots": {}
+          }
+        ]
+      },
+      "field": "notice_templates[0].id"
+    },
+    {
+      "name": "non-string id",
+      "answer": {
+        "generation": "g1",
+        "catalog_digest": "d1",
+        "tools": [],
+        "notice_templates": [
+          {
+            "id": 7,
+            "text": "Done.",
+            "slots": {}
+          }
+        ]
+      },
+      "field": "notice_templates[0].id"
+    }
+  ],
+  "refused_requests": [
+    {
+      "name": "provider without capability",
+      "provides": [],
+      "request": {
+        "params": {},
+        "notice_templates": true
+      },
+      "error": {
+        "code": "invalid_request",
+        "message": "m",
+        "detail": {
+          "field": "notice_templates"
+        }
+      }
+    },
+    {
+      "name": "false member without capability",
+      "provides": [],
+      "request": {
+        "params": {},
+        "notice_templates": false
+      },
+      "error": {
+        "code": "invalid_request",
+        "message": "m",
+        "detail": {
+          "field": "notice_templates"
+        }
+      }
+    },
+    {
+      "name": "filter request",
+      "provides": [
+        "session-notices/v1"
+      ],
+      "request": {
+        "params": {
+          "capabilities": []
+        },
+        "notice_templates": true
+      },
+      "error": {
+        "code": "invalid_request",
+        "message": "m",
+        "detail": {
+          "field": "notice_templates"
+        }
+      }
+    }
+  ]
+}

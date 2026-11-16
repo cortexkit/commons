@@ -459,6 +459,15 @@ where
             "catalog_reply_valid" => self.catalog_reply_valid().await,
             "catalog_modes_valid" => self.catalog_modes_valid().await,
             "catalog_emits_events_boolean" => self.catalog_emits_events_boolean().await,
+            "catalog_notice_templates" => {
+                let route = self.plain_route().await?;
+                crate::notice_templates::check(
+                    &route,
+                    self.subject.catalog_arguments(),
+                    self.capabilities.contains(&Capability::SessionNotices),
+                )
+                .await
+            }
             "call_mode_matches_catalog" => self.call_mode_matches_catalog().await,
             "catalog_schema_digest_stable" => self.catalog_schema_digest_stable().await,
             "catalog_digest_only" => self.catalog_digest_only().await,

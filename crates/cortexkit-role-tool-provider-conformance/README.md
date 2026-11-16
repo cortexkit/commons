@@ -1,6 +1,9 @@
 # Tool-provider conformance
 
-Version **0.15.8** pins provider **0.15.7**. Adapters declare
+Version **0.15.10** pins provider **0.15.9**. The `catalog_notice_templates`
+case checks opt-in template lists for `session-notices/v1` providers, omission
+when unasked, and refusal by non-declarers; it checks no slot rules, plan
+composition or runner behavior. Adapters declare
 `Capability::SystemTextFacts` only when the module manifest provides the exact
 `system-text-facts/v1` token. The facts cases use the existing
 `system_text_catalog_arguments` fixture. A declarer must accept valid facts and

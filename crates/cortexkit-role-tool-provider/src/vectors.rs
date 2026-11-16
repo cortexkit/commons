@@ -33,6 +33,9 @@ pub const CATALOG_CAPABILITIES_JSON: &str =
 /// The optional model selector's valid and malformed shapes.
 pub const CATALOG_MODEL_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/catalog-model.json");
+/// Opt-in notice-template requests, answers and provider-bound refusals.
+pub const CATALOG_NOTICE_TEMPLATES_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/catalog-notice-templates.json");
 /// The `catalog-requests.json` vector cases.
 pub const CATALOG_REQUESTS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/catalog-requests.json");
@@ -113,6 +116,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("catalog-answers.json", CATALOG_ANSWERS_JSON),
     ("catalog-capabilities.json", CATALOG_CAPABILITIES_JSON),
     ("catalog-model.json", CATALOG_MODEL_JSON),
+    (
+        "catalog-notice-templates.json",
+        CATALOG_NOTICE_TEMPLATES_JSON,
+    ),
     ("catalog-requests.json", CATALOG_REQUESTS_JSON),
     ("catalog-schemas.json", CATALOG_SCHEMAS_JSON),
     ("composition-digest.json", COMPOSITION_DIGEST_JSON),

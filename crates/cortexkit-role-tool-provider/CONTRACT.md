@@ -253,9 +253,32 @@ In the runner contract's plan sender, every named sender may already use the
 `tool_result`, `steer` and `queue` delivery modes; `idle_start` adds starting
 a run. A provider without the token gets no sender.
 
+For a runner that declares the `delivery_order` describe group (runner contract
+§9.7), the composer may also request `notice_templates: true` on that provider's
+ordinary `tool.catalog` call (§3). The returned templates belong to the requested
+catalog preset. They are exactly the runner's `delivery_order::Template`
+objects, `{id, text, slots}`, with only its typed slots and no free-text slot.
+They enable `turn_system` / `turn_system_cleared` delivery; these modes accept
+only plan templates, never arbitrary system text supplied by a send.
+
+The composer validates the complete list using the runner's `delivery_order`
+rules, including placeholders, slot types and template digests. If any template
+is invalid, it copies none of that provider's templates, never a partial set.
+It copies a valid list into that provider's plan sender entry,
+`senders[<module>].templates`, only when the runner declares `delivery_order`
+and the daemon-stamped principal of the provider's route is its reserved id,
+`reserved:<module id>`. The daemon grants that principal only to a module that
+proved its launch nonce (the daemon's public `subconscious/docs/principal.md`
+describes principals). For any other principal, including `direct`, the composer
+copies none. The sender keeps its non-system modes when templates are omitted.
+Template text reaches the model at system authority, which is why the composer
+must check the route's daemon-stamped principal rather than trust a provider id
+in catalog data.
+
 **Readers first:** consumers accept the token before providers declare it.
 The provider conformance kit checks the declared token's `role.describe`
-shape only. Notice behavior and plan composition are runner and composer
+shape and catalog template opt-in, omission, refusal and provider bounds only.
+Slot rules, notice behavior and plan composition are runner and composer
 responsibilities, not behaviors checked by this provider kit.
 
 ## 3. `tool.catalog`
@@ -271,7 +294,7 @@ responsibilities, not behaviors checked by this provider kit.
   `program: source:rich-ui/1`; the declarations do not authorize scanning until
   the runner's frozen plan opts the provider into output references.
 
-- Request: `{params, preset?, composition?, system_text?, facts?, digest_only?}`
+- Request: `{params, preset?, composition?, system_text?, notice_templates?, facts?, digest_only?}`
   (`CatalogRequest`).
   - `params` is the plan item's params, and every key in it is per-provider:
     a provider accepts only the keys it documents, and refuses any other key
@@ -355,6 +378,15 @@ responsibilities, not behaviors checked by this provider kit.
       `system_text_preset_required` with `detail: {provider}` naming the
       provider module id, writing nothing and forwarding nothing. This
       refusal is terminal and never timed.
+  - `notice_templates: true` asks for the requested catalog preset's
+    system-notice templates. `false` and absence mean the same: no templates
+    are requested. A consumer sends the member only to a provider declaring
+    `session-notices/v1` (§2.2), and only on ordinary requests, never with
+    `params.capabilities`. A provider without that capability refuses the
+    member as `invalid_request {field: "notice_templates"}`, even when false
+    (`catalog::check_notice_templates_request`). Like `system_text`, the
+    member may accompany `digest_only: true`: it selects content covered by
+    the digest, not extra members in the digest-only answer.
 ### Plan-carried system-text facts
 
 - A provider declares `system-text-facts/v1` (`SYSTEM_TEXT_FACTS_V1`) in its
@@ -392,7 +424,7 @@ responsibilities, not behaviors checked by this provider kit.
   to send facts.
 
 - Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
-  tools: [...], system_text?, capabilities?, user_commands?, presets?}`.
+  tools: [...], system_text?, notice_templates?, capabilities?, user_commands?, presets?}`.
   `user_commands` is §4.2; `presets` is §4.3.
   - `generation` is an opaque string that changes whenever the full advertised
     definitions change, independent of a capability filter.
@@ -403,7 +435,10 @@ responsibilities, not behaviors checked by this provider kit.
     fetch. When the request asks for `system_text`, that item is part of the
     answer's content, so `catalog_digest` covers it too: a change to the text
     alone changes `catalog_digest`, and a `digest_only` fetch with the same
-    `system_text` request detects it.
+    `system_text` request detects it. Likewise, when the request asks for
+    `notice_templates`, the templates are part of the covered content: a
+    change to them alone changes `catalog_digest`, and a `digest_only`
+    request with the same `notice_templates: true` detects it.
   - `composition_digest` is SHA-256 over the RFC 8785 (JCS) canonical JSON
     of the request's `composition` object exactly as sent, written as 64
     lowercase hex characters (`composition_digest`). Nothing is stripped
@@ -471,6 +506,31 @@ responsibilities, not behaviors checked by this provider kit.
       group, which copies the stamp onto the replies of each run that froze
       the answer.
     - Pinned by `test-vectors/tool-provider-v1/rich-ui-stamp.json`.
+  - A full answer to `notice_templates: true` includes `notice_templates`, an
+    array of the requested preset's system-notice templates, like the tools
+    in that answer. All other answers omit the member. An empty array means
+    the provider sends no
+    system-text notices for that preset. Readers that never ask never see
+    new answer bytes, so this opt-in member needs no readers-first census
+    of existing catalog readers.
+    - Each element is exactly the runner contract §9.7
+      `delivery_order::Template`, `{id, text, slots}`, with the runner's typed
+      slots: `slots` maps names to `Slot` values with a `type` discriminator,
+      `integer {min, max}`, `percentage`, `part_tag` or `enum {values}`. None
+      takes free text. The provider crate carries elements as raw JSON
+      (`serde_json::Value`) and does not depend on the runner crate.
+    - The provider decoder enforces only these bounds: at most 16 templates
+      (`notice_templates`); each element is a JSON object
+      (`notice_templates[i]`); each `id` is a non-empty string unique within
+      the list (`notice_templates[i].id`); each element's compact JSON is at
+      most 4096 bytes (`notice_templates[i]`). A violating answer is refused
+      naming the indicated field. A present member must be an array, not null.
+    - Full template validation, including placeholders, slot types and digest,
+      is the composer's job under the runner's `delivery_order` rules. An
+      invalid template means the composer copies none of that provider's
+      templates (§2.2), not a partial set.
+    - Acceptance and refusal forms are pinned by
+      `test-vectors/tool-provider-v1/catalog-notice-templates.json`.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
@@ -1490,6 +1550,7 @@ CI against its real module over a real route; never against a double.
 | Case | Requires |
 |---|---|
 | `session_notices_describe` | exact `session-notices/v1` in live `role.describe.capabilities`; otherwise N/A |
+| `catalog_notice_templates` | —; declarers answer the flag with a present bounded list, unasked answers omit it, and non-declarers refuse it naming `notice_templates`; no slot, composition or runner behavior checks |
 | `role_describe_shape`, `role_describe_cacheable` | — |
 | `catalog_schemas_flat`, `catalog_schemas_portable`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
 | `catalog_capability_filter_matches_describe`, `catalog_filter_preserves_plan_item`, `catalog_filter_model_refused` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |

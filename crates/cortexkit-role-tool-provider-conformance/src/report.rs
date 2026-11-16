@@ -106,6 +106,11 @@ pub const CASES: &[CaseSpec] = &[
         checks: "every catalog tool that carries emits_events declares a JSON boolean, not null or another type; the promise a false makes cannot be checked from outside the provider",
     },
     CaseSpec {
+        name: "catalog_notice_templates",
+        requires: &[],
+        checks: "a session-notices/v1 provider accepts notice_templates: true with a present list within provider bounds, an unasked answer omits it, and a non-declarer refuses the flag as invalid_request naming notice_templates; no slot validation, plan composition or runner behavior is checked",
+    },
+    CaseSpec {
         name: "call_mode_matches_catalog",
         requires: &[CallModes],
         checks: "the restricted probe is refused on a route with a known bind mode its catalog entry does not list, and served on a route with a listed mode",

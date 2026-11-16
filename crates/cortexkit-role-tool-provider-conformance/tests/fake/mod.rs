@@ -554,6 +554,15 @@ impl Module {
         }
         let mut request: CatalogRequest = serde_json::from_value(arguments.clone())
             .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
+        let provides = self
+            .defects
+            .session_notices_token
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        cortexkit_role_tool_provider_conformance::wire::catalog::check_notice_templates_request(
+            &request, &provides,
+        )?;
         let filter_request = request.params.contains_key("capabilities");
         if filter_request && self.defects.accept_filter_model {
             request.params.remove("model");
@@ -663,6 +672,9 @@ impl Module {
                 Some(preset) => preset,
             };
             answer["system_text"] = self.system_text(preset);
+        }
+        if request.notice_templates == Some(true) {
+            answer["notice_templates"] = json!([]);
         }
         let mut digestable = answer.clone();
         digestable.as_object_mut().unwrap().remove("catalog_digest");

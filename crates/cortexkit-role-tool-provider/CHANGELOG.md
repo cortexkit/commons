@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.9
+
+- Add opt-in `tool.catalog.notice_templates` for providers declaring
+  `session-notices/v1`. Full answers expose the requested preset's templates
+  only when asked, and the catalog digest covers them, including digest-only
+  checks. Existing requests and unasked answers keep their bytes.
+- Carry runner template objects as raw JSON without a runner dependency.
+  Decode at most 16 objects with unique non-empty string ids, each at most
+  4096 compact JSON bytes; pin requests, answers and named refusals in shared
+  wire vectors.
+- Require composers to validate the entire template set and copy none on any
+  invalid template. Copy templates only for a runner declaring `delivery_order`
+  and a provider route with its daemon-stamped reserved principal, proven by
+  its launch nonce: template text reaches the model at system authority.
+- Add the `catalog_notice_templates` conformance case for opt-in answers,
+  provider bounds and unsupported-member refusals, not runner behavior.
+
 ## 0.15.8
 
 - Accept subc-protocol 0.37.

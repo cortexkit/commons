@@ -204,6 +204,10 @@ pub struct CatalogRequest {
     /// The provider's system-prompt item, when the plan has one for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_text: Option<SystemTextItem>,
+    /// Ask for this preset's system-notice templates. Send only to a provider
+    /// declaring [`crate::SESSION_NOTICES_V1`]; false and absence are equivalent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice_templates: Option<bool>,
     /// Plan-carried rendering facts, beside (not inside) `system_text` to keep
     /// the original item type source-compatible. Send only to a provider whose
     /// manifest declares [`crate::SYSTEM_TEXT_FACTS_V1`].
@@ -243,6 +247,12 @@ impl CatalogRequest {
     /// Fetch the provider's system-prompt item alongside the catalog.
     pub fn with_system_text(mut self, system_text: SystemTextItem) -> Self {
         self.system_text = Some(system_text);
+        self
+    }
+
+    /// Fetch this preset's system-notice templates alongside the catalog.
+    pub fn with_notice_templates(mut self, notice_templates: bool) -> Self {
+        self.notice_templates = Some(notice_templates);
         self
     }
 
@@ -327,6 +337,14 @@ pub struct CatalogAnswer {
     /// The system-prompt item's answer, when the request named one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_text: Option<SystemTextAnswer>,
+    /// This preset's runner `delivery_order::Template` objects, only when asked
+    /// for. Decoding checks provider bounds, not the runner's template rules.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "decode_notice_templates"
+    )]
+    pub notice_templates: Option<Vec<Value>>,
     /// Session-level capabilities, keyed by name ([`session_capabilities`]),
     /// each declared with the value `true`.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
@@ -376,6 +394,13 @@ impl CatalogAnswer {
         self
     }
 
+    /// Include the requested preset's system-notice templates; an empty list
+    /// means the provider sends no system-text notices for that preset.
+    pub fn with_notice_templates(mut self, notice_templates: Vec<Value>) -> Self {
+        self.notice_templates = Some(notice_templates);
+        self
+    }
+
     /// Set the session-level capability declarations.
     pub fn with_capabilities(mut self, capabilities: Map<String, Value>) -> Self {
         self.capabilities = capabilities;
@@ -404,6 +429,80 @@ impl CatalogAnswer {
     pub fn lists_preset(&self, preset: &str) -> bool {
         self.presets.iter().any(|listed| listed == preset)
     }
+}
+
+/// The most system-notice templates one catalog answer may carry.
+pub const MAX_NOTICE_TEMPLATES: usize = 16;
+
+/// The largest compact JSON encoding of one system-notice template, in bytes.
+pub const MAX_NOTICE_TEMPLATE_BYTES: usize = 4096;
+
+/// Check the request member against the provider's manifest capabilities.
+/// Even `false` must not be sent to a provider that does not declare support.
+pub fn check_notice_templates_request(
+    request: &CatalogRequest,
+    provides: &[String],
+) -> Result<(), ErrorBody> {
+    if request.notice_templates.is_none() {
+        return Ok(());
+    }
+    if !provides
+        .iter()
+        .any(|token| token == crate::SESSION_NOTICES_V1)
+    {
+        return Err(errors::invalid_request(
+            "notice_templates",
+            "notice_templates requires session-notices/v1",
+        ));
+    }
+    if request.params.contains_key("capabilities") {
+        return Err(errors::invalid_request(
+            "notice_templates",
+            "notice_templates is only allowed on ordinary catalog requests",
+        ));
+    }
+    Ok(())
+}
+
+fn decode_notice_templates<'de, D: Deserializer<'de>>(
+    decoder: D,
+) -> Result<Option<Vec<Value>>, D::Error> {
+    use serde::de::Error;
+
+    let templates = Vec::<Value>::deserialize(decoder)
+        .map_err(|error| D::Error::custom(format!("notice_templates: {error}")))?;
+    if templates.len() > MAX_NOTICE_TEMPLATES {
+        return Err(D::Error::custom("notice_templates: at most 16 templates"));
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for (index, template) in templates.iter().enumerate() {
+        if !template.is_object() {
+            return Err(D::Error::custom(format!(
+                "notice_templates[{index}]: template must be an object"
+            )));
+        }
+        let id = template
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                D::Error::custom(format!(
+                    "notice_templates[{index}].id: expected a non-empty string"
+                ))
+            })?;
+        if !ids.insert(id) {
+            return Err(D::Error::custom(format!(
+                "notice_templates[{index}].id: duplicate id"
+            )));
+        }
+        let bytes = serde_json::to_vec(template).map_err(D::Error::custom)?;
+        if bytes.len() > MAX_NOTICE_TEMPLATE_BYTES {
+            return Err(D::Error::custom(format!(
+                "notice_templates[{index}]: compact JSON exceeds 4096 bytes"
+            )));
+        }
+    }
+    Ok(Some(templates))
 }
 
 /// The most presets one catalog answer may list.

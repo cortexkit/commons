@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.10
+
+- Pin the provider contract to `=0.15.9` and decode its shared notice-template
+  request, answer and refusal vectors, including deliberately faulty providers.
+- Add `catalog_notice_templates`: providers declaring `session-notices/v1`
+  now need to accept `notice_templates: true` and answer with a present list
+  within the provider bounds (an empty list is valid). Unasked answers omit
+  the member; non-declarers refuse it as `invalid_request` naming
+  `notice_templates`. This checks neither slots nor plan composition nor
+  runner delivery behavior.
+
 ## 0.15.9
 
 - Accept subc-protocol 0.37.
