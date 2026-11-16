@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.2
+
+- Add `m_occipital` with `event.thalamus-harness.send_state.v1.occipital`,
+  `event.broca.send_state.v1.occipital`, `event.cerebellum.tool_display.v1`,
+  `event.aft.display_record_ready.v1`, and `event.fusiform.catalog_changed.v1`.
+- Extend the existing `m_broca` compaction reader with
+  `event.aft.late_result_ready.v1.broca`,
+  `event.cerebellum.late_result_ready.v1.broca`,
+  `event.prefrontal-core.late_result_ready.v1.broca`,
+  `event.basal.late_result_ready.v1.broca`, `event.fusiform.catalog_changed.v1`,
+  and `event.cingulate.card_settled.v1.broca`, preserving its cursor.
+- Extend `m_thalamus-harness_late_results` with
+  `event.prefrontal-core.late_result_ready.v1.thalamus-harness`.
+- Add `m_magic-context_runs` with `event.thalamus-harness.turn_ended.v1` and
+  `event.broca.run.ended.v1`, separate from the existing compaction cursor.
+- Extend `m_colliculus_events` with `event.broca.run.ended.v1`; its existing
+  `event.magic-context.memory_changed.v1` filter is retained unchanged.
+- Extend `m_aft_sendstate` with `event.broca.send_state.v1.aft`, retaining
+  `event.thalamus-harness.send_state.v1`, and add the separate `m_aft_cards`
+  durable for `event.cingulate.card_settled.v1.aft`.
+- Extend `m_plexus` with `event.cingulate.card_settled.v1.plexus` and
+  `m_prefrontal-core` with `event.cingulate.card_settled.v1.prefrontal-core`.
+  Basal needs no table row: `m_basal` already filters `event.>`, including
+  `event.cingulate.card_settled.v1.basal`. Keep `prefrontal-routing` unchanged.
+- Add the separate `m_astrocyte_attribution` durable with
+  `event.prefrontal-core.attribution_fact.v1`,
+  `event.magic-context.attribution_fact.v1`,
+  `event.entorhinal.placement_fact.v1`, and `event.basal.attribution_fact.v1`;
+  existing Astrocyte cursors are unchanged.
+- Declare owner-written `aft.views` and `cerebellum.views` buckets with reader
+  `occipital`, 256 KiB values, history 1, no TTL, and 32 MiB each (128 schema
+  pins, allowing multiple tools and schema revisions within a bounded budget).
+  Keys are schema pins' lowercase hex digests without `sha256:`; values are
+  exactly what `tool.views` serves for each pin.
+- Clarify that `LiveHintReader` and `LIVE_HINT_READERS` name live subjects using
+  relative `event.{module}.{name}.v{N}` spelling and grant subscribe only on
+  `ck.{acct}.live.{module}.{name}.v{N}`, with no durable or stream read.
+
 ## 0.4.1
 
 - Accept declared bucket owners and readers and live-hint readers as module

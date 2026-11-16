@@ -62,6 +62,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.cerebellum.late_result_ready.v1.prefrontal-core",
             "event.fusiform.catalog_changed.v1",
             "event.basal.flow_owner_notice.v1",
+            "event.cingulate.card_settled.v1.prefrontal-core",
         ],
     },
     EventConsumer {
@@ -102,6 +103,14 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         ],
     },
     EventConsumer {
+        module_id: "magic-context",
+        durable: "m_magic-context_runs",
+        filter_subjects: &[
+            "event.thalamus-harness.turn_ended.v1",
+            "event.broca.run.ended.v1",
+        ],
+    },
+    EventConsumer {
         module_id: "thalamus-harness",
         durable: "m_thalamus-harness",
         filter_subjects: &["event.magic-context.compaction.>"],
@@ -114,7 +123,26 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "broca",
         durable: "m_broca",
-        filter_subjects: &["event.magic-context.compaction.>"],
+        filter_subjects: &[
+            "event.magic-context.compaction.>",
+            "event.aft.late_result_ready.v1.broca",
+            "event.cerebellum.late_result_ready.v1.broca",
+            "event.prefrontal-core.late_result_ready.v1.broca",
+            "event.basal.late_result_ready.v1.broca",
+            "event.fusiform.catalog_changed.v1",
+            "event.cingulate.card_settled.v1.broca",
+        ],
+    },
+    EventConsumer {
+        module_id: "occipital",
+        durable: "m_occipital",
+        filter_subjects: &[
+            "event.thalamus-harness.send_state.v1.occipital",
+            "event.broca.send_state.v1.occipital",
+            "event.cerebellum.tool_display.v1",
+            "event.aft.display_record_ready.v1",
+            "event.fusiform.catalog_changed.v1",
+        ],
     },
     // Intended for the browser and computer-use module's cursor badge, which
     // it clears when a runner's turn ends; turn starts let it ignore a late end
@@ -136,6 +164,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.aft.late_result_ready.v1.thalamus-harness",
             "event.cerebellum.late_result_ready.v1.thalamus-harness",
             "event.basal.late_result_ready.v1.thalamus-harness",
+            "event.prefrontal-core.late_result_ready.v1.thalamus-harness",
         ],
     },
     EventConsumer {
@@ -154,14 +183,35 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &["event.fusiform.catalog_changed.v1"],
     },
     EventConsumer {
+        module_id: "astrocyte",
+        durable: "m_astrocyte_attribution",
+        filter_subjects: &[
+            "event.prefrontal-core.attribution_fact.v1",
+            "event.magic-context.attribution_fact.v1",
+            "event.entorhinal.placement_fact.v1",
+            "event.basal.attribution_fact.v1",
+        ],
+    },
+    EventConsumer {
         module_id: "aft",
         durable: "m_aft_sendstate",
-        filter_subjects: &["event.thalamus-harness.send_state.v1"],
+        filter_subjects: &[
+            "event.thalamus-harness.send_state.v1",
+            "event.broca.send_state.v1.aft",
+        ],
+    },
+    EventConsumer {
+        module_id: "aft",
+        durable: "m_aft_cards",
+        filter_subjects: &["event.cingulate.card_settled.v1.aft"],
     },
     EventConsumer {
         module_id: "plexus",
         durable: "m_plexus",
-        filter_subjects: &["event.prefrontal-core.agent_changed.v1"],
+        filter_subjects: &[
+            "event.prefrontal-core.agent_changed.v1",
+            "event.cingulate.card_settled.v1.plexus",
+        ],
     },
     EventConsumer {
         module_id: "wernicke",
@@ -176,13 +226,16 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.prefrontal-core.board_changed.v1",
             "event.magic-context.memory_changed.v1",
             "event.thalamus-harness.turn_ended.v1",
+            "event.broca.run.ended.v1",
         ],
     },
 ];
 
-/// A module allowed to subscribe to exact live hints without gaining an EVENT
-/// durable, EVENT-stream reads, or consumer create/info permissions. Subjects
-/// use relative `event.{module}.{name}.v{version}` spelling to identify the hint.
+/// A module allowed to subscribe to exact live hints. Each row names live
+/// subjects using the relative spelling `event.{module}.{name}.v{N}` and grants
+/// subscribe on `ck.{acct}.live.{module}.{name}.v{N}` only. It grants no durable,
+/// no stream read, and no consumer create/info permissions; the `event.` spelling
+/// does not make the row an EVENT reader.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LiveHintReader {
@@ -200,8 +253,10 @@ impl LiveHintReader {
 }
 
 /// Who may observe another module's hints is a security decision reviewed in
-/// code. Runtime configuration cannot extend this closed table. Entries grant
-/// live-hint subscribe permission only, independently of event durables.
+/// code. Runtime configuration cannot extend this closed table. Each row names
+/// live subjects spelled relative as `event.{module}.{name}.v{N}` and grants
+/// subscribe on `ck.{acct}.live.{module}.{name}.v{N}` only: no durable and no
+/// stream read. These are live hints, not EVENT reader rows.
 pub const LIVE_HINT_READERS: &[LiveHintReader] = &[
     LiveHintReader::new(
         "prefrontal-routing",
@@ -779,6 +834,7 @@ mod tests {
                 "ck.box_readers.event.cerebellum.late_result_ready.v1.prefrontal-core",
                 "ck.box_readers.event.fusiform.catalog_changed.v1",
                 "ck.box_readers.event.basal.flow_owner_notice.v1",
+                "ck.box_readers.event.cingulate.card_settled.v1.prefrontal-core",
             ]
         );
     }

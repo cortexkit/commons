@@ -98,6 +98,7 @@ fn permission_validator_accepts_declared_module_principals_and_rejects_unknown()
         validate_permission_file(&document, &account)
     };
     validate(bucket_only).expect("bucket-only principal must be accepted");
+    validate("occipital").expect("the views reader and event consumer must be accepted");
 
     for module in MODULE_BUCKETS
         .iter()
@@ -143,6 +144,20 @@ fn subject_matches(pattern: &str, subject: &str) -> bool {
         }
     }
     pattern.len() == subject.len()
+}
+
+#[test]
+fn basal_broad_filter_includes_its_card_settled_event_without_a_table_row() {
+    use cortexkit_bus_naming::{flow_engine_consumer_spec, EVENT_CONSUMERS};
+    let account = AccountNames::derive("box_readers").unwrap();
+    let basal = flow_engine_consumer_spec(&account, "basal").unwrap();
+    assert_eq!(basal.consumer.durable, "m_basal");
+    assert_eq!(basal.consumer.filter_subjects, ["ck.box_readers.event.>"]);
+    assert!(subject_matches(
+        &basal.consumer.filter_subjects[0],
+        "ck.box_readers.event.cingulate.card_settled.v1.basal"
+    ));
+    assert!(!EVENT_CONSUMERS.iter().any(|row| row.module_id == "basal"));
 }
 
 fn allowed(
@@ -720,6 +735,9 @@ fn event_consumer_grant_is_participant_plus_three_permissions_per_owned_durable(
         "striatum",
         "thalamus-harness",
         "thalamus",
+        "broca",
+        "magic-context",
+        "occipital",
         "cerebellum",
         "aft",
         "plexus",

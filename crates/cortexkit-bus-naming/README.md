@@ -55,3 +55,11 @@ changes (32 MiB), and 16,384 session-liveness keys (16 MiB). All have history 1;
 only status expires, after 10 seconds. The bus service must provision the
 buckets and derive writer/read permissions from these declarations; this crate
 does not provision them or add KV grants by itself.
+
+`aft.views` and `cerebellum.views` are owner-written and readable by `occipital`.
+Each key is the schema pin's lowercase hex digest without its `sha256:` prefix;
+the value is exactly what `tool.views` serves for that pin. Each bucket has a
+256 KiB value cap, history 1, no TTL, and a 32 MiB total byte cap. This budgets
+128 maximum-sized schema pins per owner, allowing multiple tools and schema
+revisions without unbounded storage. The byte cap is a budget, not a key-count
+limit.

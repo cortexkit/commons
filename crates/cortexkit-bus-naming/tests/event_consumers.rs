@@ -44,6 +44,7 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.cerebellum.late_result_ready.v1.prefrontal-core"),
                 format!("ck.{account}.event.fusiform.catalog_changed.v1"),
                 format!("ck.{account}.event.basal.flow_owner_notice.v1"),
+                format!("ck.{account}.event.cingulate.card_settled.v1.prefrontal-core"),
             ]
         );
         let astrocyte = specs
@@ -79,7 +80,7 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.broca.compaction.>"),
             ]
         );
-        for durable in ["m_thalamus-harness", "m_thalamus", "m_broca"] {
+        for durable in ["m_thalamus-harness", "m_thalamus"] {
             let reader = specs
                 .iter()
                 .find(|spec| spec.consumer.durable == durable)
@@ -186,10 +187,14 @@ fn live_hint_subscriptions_preserve_event_only_readers_and_validate_modules() {
     assert_eq!(
         live_hint_subscriptions(&account, "astrocyte").unwrap(),
         [
+            "ck.box_hints.live.basal.attribution_fact.v1",
             "ck.box_hints.live.broca.step.finished.v1",
             "ck.box_hints.live.colliculus.usage_recorded.v1",
+            "ck.box_hints.live.entorhinal.placement_fact.v1",
             "ck.box_hints.live.fusiform.catalog_changed.v1",
             "ck.box_hints.live.insula.>",
+            "ck.box_hints.live.magic-context.attribution_fact.v1",
+            "ck.box_hints.live.prefrontal-core.attribution_fact.v1",
             "ck.box_hints.live.thalamus-harness.payer_row.v1",
             "ck.box_hints.live.thalamus-harness.step.finished.v1",
             "ck.box_hints.live.thalamus.step.finished.v1",
@@ -267,6 +272,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
                 "event.aft.late_result_ready.v1.thalamus-harness",
                 "event.cerebellum.late_result_ready.v1.thalamus-harness",
                 "event.basal.late_result_ready.v1.thalamus-harness",
+                "event.prefrontal-core.late_result_ready.v1.thalamus-harness",
             ],
         ),
         (
@@ -285,14 +291,35 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
             &["event.fusiform.catalog_changed.v1"],
         ),
         (
+            "astrocyte",
+            "m_astrocyte_attribution",
+            &[
+                "event.prefrontal-core.attribution_fact.v1",
+                "event.magic-context.attribution_fact.v1",
+                "event.entorhinal.placement_fact.v1",
+                "event.basal.attribution_fact.v1",
+            ],
+        ),
+        (
             "aft",
             "m_aft_sendstate",
-            &["event.thalamus-harness.send_state.v1"],
+            &[
+                "event.thalamus-harness.send_state.v1",
+                "event.broca.send_state.v1.aft",
+            ],
+        ),
+        (
+            "aft",
+            "m_aft_cards",
+            &["event.cingulate.card_settled.v1.aft"],
         ),
         (
             "plexus",
             "m_plexus",
-            &["event.prefrontal-core.agent_changed.v1"],
+            &[
+                "event.prefrontal-core.agent_changed.v1",
+                "event.cingulate.card_settled.v1.plexus",
+            ],
         ),
         (
             "wernicke",
@@ -307,12 +334,45 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
                 "event.prefrontal-core.board_changed.v1",
                 "event.magic-context.memory_changed.v1",
                 "event.thalamus-harness.turn_ended.v1",
+                "event.broca.run.ended.v1",
+            ],
+        ),
+        (
+            "occipital",
+            "m_occipital",
+            &[
+                "event.thalamus-harness.send_state.v1.occipital",
+                "event.broca.send_state.v1.occipital",
+                "event.cerebellum.tool_display.v1",
+                "event.aft.display_record_ready.v1",
+                "event.fusiform.catalog_changed.v1",
+            ],
+        ),
+        (
+            "broca",
+            "m_broca",
+            &[
+                "event.magic-context.compaction.>",
+                "event.aft.late_result_ready.v1.broca",
+                "event.cerebellum.late_result_ready.v1.broca",
+                "event.prefrontal-core.late_result_ready.v1.broca",
+                "event.basal.late_result_ready.v1.broca",
+                "event.fusiform.catalog_changed.v1",
+                "event.cingulate.card_settled.v1.broca",
+            ],
+        ),
+        (
+            "magic-context",
+            "m_magic-context_runs",
+            &[
+                "event.thalamus-harness.turn_ended.v1",
+                "event.broca.run.ended.v1",
             ],
         ),
     ];
     let names = AccountNames::derive("box_readers").unwrap();
     let specs = event_consumer_specs(&names).unwrap();
-    assert_eq!(EVENT_CONSUMERS.len(), 17);
+    assert_eq!(EVENT_CONSUMERS.len(), 21);
     for (module, durable, filters) in expected {
         let row = EVENT_CONSUMERS
             .iter()

@@ -86,6 +86,16 @@ fn declared_module_buckets_pin_readers_value_caps_and_retention() {
             None,
             16_777_216,
         ),
+        ModuleBucket::new("aft", "views", &["occipital"], 262_144, 1, None, 33_554_432),
+        ModuleBucket::new(
+            "cerebellum",
+            "views",
+            &["occipital"],
+            262_144,
+            1,
+            None,
+            33_554_432,
+        ),
     ];
     assert_eq!(MODULE_BUCKETS, expected);
     for account in ["box_kv", "box_second"] {
