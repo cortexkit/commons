@@ -452,7 +452,10 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-naming"
-version = "0.4.4"
+version = "0.4.5"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "cortexkit-bus-nats"

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5
+
+- Add hub-only federation names, strict canonical box ids, stream and bucket
+  descriptors, and the ordered leaf-user grant, with a checksummed JSON fixture
+  for implementations in other languages. Existing local stream rows are unchanged.
+- Allow the system user to read leaf connection state for relay-bridge fallback
+  when direct connections fail, and for reconnecting after credential renewal.
+
 ## 0.4.4
 
 - Raise the `astrocyte.multiplier` bucket's value limit from 8 KiB to 64 KiB

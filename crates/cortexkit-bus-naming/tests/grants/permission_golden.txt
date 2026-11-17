@@ -191,6 +191,7 @@ allow system publish $SYS.REQ.ACCOUNT.*.CLAIMS.LOOKUP
 allow system publish $SYS.REQ.CLAIMS.LIST
 allow system publish $SYS.REQ.CLAIMS.UPDATE
 allow system publish $SYS.REQ.SERVER.*.KICK
+allow system publish $SYS.REQ.SERVER.*.LEAFZ
 allow system subscribe $SYS.ACCOUNT.*.CONNECT
 allow system subscribe $SYS.ACCOUNT.*.DISCONNECT
 allow system subscribe _INBOX.cksys.>

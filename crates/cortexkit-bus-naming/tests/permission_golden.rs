@@ -693,6 +693,38 @@ fn system_user_can_look_up_account_claims_and_read_only_its_own_replies() {
 }
 
 #[test]
+fn system_user_can_read_leaf_connections_but_not_subscribe_to_requests() {
+    use cortexkit_bus_naming::{system_permissions, Operation};
+    let entries = system_permissions("cksys").unwrap();
+    for server in ["server_a", "server_b"] {
+        let subject = format!("$SYS.REQ.SERVER.{server}.LEAFZ");
+        assert!(allowed(
+            &entries,
+            Principal::System,
+            Operation::Publish,
+            &subject
+        ));
+        assert!(!allowed(
+            &entries,
+            Principal::System,
+            Operation::Subscribe,
+            &subject
+        ));
+    }
+    for subject in [
+        "$SYS.REQ.SERVER.server_a.VARZ",
+        "$SYS.REQ.SERVER.server_a.CONNZ",
+    ] {
+        assert!(!allowed(
+            &entries,
+            Principal::System,
+            Operation::Publish,
+            subject
+        ));
+    }
+}
+
+#[test]
 fn non_table_modules_keep_the_exact_participant_grant() {
     use cortexkit_bus_naming::{participant_permissions, Operation};
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();

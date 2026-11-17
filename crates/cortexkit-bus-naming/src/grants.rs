@@ -497,6 +497,7 @@ pub fn system_permissions(credential_public: &str) -> Result<Vec<AllowEntry>, Gr
         "$SYS.REQ.CLAIMS.LIST",
         "$SYS.REQ.ACCOUNT.*.CLAIMS.LOOKUP",
         "$SYS.REQ.SERVER.*.KICK",
+        "$SYS.REQ.SERVER.*.LEAFZ",
     ] {
         add(
             &mut entries,

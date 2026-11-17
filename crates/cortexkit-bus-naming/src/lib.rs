@@ -1,6 +1,7 @@
 //! Canonical names, topology limits, and allow-only grants for the NATS plane.
 
 mod event_consumers;
+pub mod federation;
 mod grants;
 mod limits;
 mod module_buckets;

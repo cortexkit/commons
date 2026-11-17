@@ -1,9 +1,12 @@
 [package]
 name = "cortexkit-bus-naming"
-version = "0.4.4"
+version = "0.4.5"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Subject, stream, bucket, consumer and grant naming rules for the CortexKit message plane"
+
+[dev-dependencies]
+serde_json = "1"
 

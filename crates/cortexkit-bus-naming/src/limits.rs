@@ -35,6 +35,10 @@ pub enum StreamKind {
     Inbox,
     CoreWork,
     DeliveryDead,
+    HubInbox,
+    HubIdlog,
+    KvResidence,
+    ObjCuts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
