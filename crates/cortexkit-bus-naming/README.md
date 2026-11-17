@@ -27,11 +27,22 @@ permissions by rewriting only `EVENT_CONSUMERS` filters.
 Bootstrap should leave removed, now-unlisted durables alone. `thalamus-pi` no
 longer appears in either reader table or the generated permission fixture.
 
-In 0.4, EVENT readers may own several durables. Each name is `m_{module}` or
+EVENT readers may own several durables. Each name is `m_{module}` or
 `m_{module}_{suffix}`, with suffix `[a-z0-9_]+`. Grants include all of a module's
 declared durables, and no other module's. Bootstrap must use each row's explicit
-name, not synthesize one name per module. The existing `m_prefrontal-core` and
-`m_striatum` gain filters in place; mutable filter updates preserve their cursors.
+name, not synthesize one name per module. Mutable filter updates preserve each
+durable's cursor.
+
+Version 0.5 renames the `prefrontal-core` module's bus identity to `prefrontal`:
+its EVENT durable and delivery durables are `m_prefrontal`, reader-qualified
+filters end in `.v1.prefrontal`, and its bucket is `prefrontal.session-liveness`.
+A reader using 0.5 must be deployed together with the module rename. Use 0.4.8
+for readers-first deployment: it adds other modules' `event.prefrontal.*` filters
+beside `event.prefrontal-core.*` and subscribes to both publishers' corresponding
+ephemeral notifications under `ck.{account}.live.*`, without changing delivery
+ownership. Both publisher spellings remain readable in 0.5. Bootstrap must not
+create the renamed EVENT durable before the rename, since it would accumulate
+a separate backlog; INBOX and CORE_WORK cannot host both delivery readers.
 
 `AccountNames::event_subject_with_reader` appends the intended reader module
 after the version. `AccountNames::parse_event_subject` parses both forms for

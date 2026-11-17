@@ -28,7 +28,7 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
         }
         let reader = specs
             .iter()
-            .find(|spec| spec.consumer.durable == "m_prefrontal-core")
+            .find(|spec| spec.consumer.durable == "m_prefrontal")
             .unwrap();
         assert_eq!(
             reader.consumer.filter_subjects,
@@ -39,12 +39,12 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.basal.flow_instance_ended.v1"),
                 format!("ck.{account}.event.basal.flow_instance_expired.v1"),
                 format!("ck.{account}.event.basal.flow_instance_rescheduled.v1"),
-                format!("ck.{account}.event.aft.late_result_ready.v1.prefrontal-core"),
-                format!("ck.{account}.event.basal.late_result_ready.v1.prefrontal-core"),
-                format!("ck.{account}.event.cerebellum.late_result_ready.v1.prefrontal-core"),
+                format!("ck.{account}.event.aft.late_result_ready.v1.prefrontal"),
+                format!("ck.{account}.event.basal.late_result_ready.v1.prefrontal"),
+                format!("ck.{account}.event.cerebellum.late_result_ready.v1.prefrontal"),
                 format!("ck.{account}.event.fusiform.catalog_changed.v1"),
                 format!("ck.{account}.event.basal.flow_owner_notice.v1"),
-                format!("ck.{account}.event.cingulate.card_settled.v1.prefrontal-core"),
+                format!("ck.{account}.event.cingulate.card_settled.v1.prefrontal"),
             ]
         );
         let astrocyte = specs

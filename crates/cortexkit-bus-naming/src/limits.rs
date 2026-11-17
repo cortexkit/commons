@@ -378,7 +378,7 @@ pub fn validate_consumer(
             .durable
             .strip_prefix("c_")
             .is_some_and(|id| crate::validate_token(crate::TokenKind::AgentId, id).is_ok()),
-        StreamKind::Inbox | StreamKind::CoreWork => consumer.durable == "m_prefrontal-core",
+        StreamKind::Inbox | StreamKind::CoreWork => consumer.durable == "m_prefrontal",
         _ => true,
     };
     if !valid_owner {

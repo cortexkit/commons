@@ -290,7 +290,7 @@ fn event_subject_parser_round_trips_both_reader_forms() {
             assert_eq!(parsed.event, event);
             assert_eq!(parsed.version, version);
             assert_eq!(parsed.reader, None);
-            for reader in ["prefrontal-core", "thalamus-harness", "v2"] {
+            for reader in ["prefrontal", "thalamus-harness", "v2"] {
                 let subject = names
                     .event_subject_with_reader("aft", event, version, reader)
                     .unwrap();
@@ -366,8 +366,8 @@ fn the_event_stream_is_the_sixth_stream_and_holds_module_durables() {
 
     assert_eq!(names.event_binding(), "ck.box_events.event.>");
     assert_eq!(
-        names.event_publish_grant("prefrontal-core").unwrap(),
-        "ck.box_events.event.prefrontal-core.>"
+        names.event_publish_grant("prefrontal").unwrap(),
+        "ck.box_events.event.prefrontal.>"
     );
     assert_eq!(
         AccountNames::module_consumer_name("basal").unwrap(),
@@ -429,12 +429,12 @@ fn root_credential_ids_follow_the_ceremony_grammar() {
 fn census_key_is_the_module_id_and_refuses_anything_but_one_token() {
     let names = AccountNames::derive("box_census").unwrap();
     assert_eq!(
-        AccountNames::census_key("prefrontal-core").unwrap(),
-        "prefrontal-core"
+        AccountNames::census_key("prefrontal").unwrap(),
+        "prefrontal"
     );
     assert_eq!(
-        names.census_subject("prefrontal-core").unwrap(),
-        "$KV.CK_BOX_CENSUS_CENSUS.prefrontal-core"
+        names.census_subject("prefrontal").unwrap(),
+        "$KV.CK_BOX_CENSUS_CENSUS.prefrontal"
     );
     for bad in ["", "a.b", "*", ">", "Prefrontal", "mod ule", "-lead"] {
         let error = AccountNames::census_key(bad).expect_err("census key must refuse a non-token");
@@ -445,7 +445,7 @@ fn census_key_is_the_module_id_and_refuses_anything_but_one_token() {
     }
     validate_tenancy_name(
         &names,
-        &names.census_subject("prefrontal-core").unwrap(),
+        &names.census_subject("prefrontal").unwrap(),
         NamingRule::Exempt(NamingExemption::KeyValuePrefix),
     )
     .unwrap();

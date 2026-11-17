@@ -116,8 +116,15 @@ fn delivery_bootstrap_readers_are_disjoint_and_subset_checked() {
             .contains(&spec.consumer.stream.as_str()));
         validate_consumer(&spec.consumer, &streams).unwrap();
         if index < 2 {
-            assert_eq!(spec.consumer.durable, "m_prefrontal-core");
+            assert_eq!(spec.consumer.durable, "m_prefrontal");
             assert_eq!(spec.max_ack_pending, 1);
+            let mut legacy = spec.consumer.clone();
+            legacy.durable = "m_prefrontal-core".into();
+            assert!(matches!(
+                validate_consumer(&legacy, &streams),
+                Err(LimitError::InvalidDurableOwner { durable, .. })
+                    if durable == "m_prefrontal-core"
+            ));
         } else {
             assert_eq!(spec.consumer.durable, "c_ckbus_dead");
         }
@@ -166,8 +173,7 @@ fn delivery_bootstrap_readers_are_disjoint_and_subset_checked() {
 #[test]
 fn delivery_grants_admit_only_core_and_diagnostics() {
     let names = AccountNames::derive("box_local").unwrap();
-    let authority =
-        delivery_authority_permissions(&names, "UCORE", "prefrontal-core", &[]).unwrap();
+    let authority = delivery_authority_permissions(&names, "UCORE", "prefrontal", &[]).unwrap();
     let participant = participant_permissions(&names, "UOTHER", "other", &[]).unwrap();
     let flow = flow_engine_permissions(&names, "UFLOW", "basal").unwrap();
     let bus = bus_permissions(&names, "UBUS").unwrap();
@@ -186,9 +192,9 @@ fn delivery_grants_admit_only_core_and_diagnostics() {
     }
     for stream in [&names.streams().inbox, &names.streams().core_work] {
         for subject in [
-            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
-            format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal-core"),
-            format!("$JS.ACK.{stream}.m_prefrontal-core.>"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal"),
+            format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal"),
+            format!("$JS.ACK.{stream}.m_prefrontal.>"),
         ] {
             assert!(authority.iter().any(|entry| entry.subject == subject));
             for excluded in [&participant, &flow] {

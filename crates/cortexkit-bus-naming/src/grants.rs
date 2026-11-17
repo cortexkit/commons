@@ -95,7 +95,7 @@ pub const PINNED_GOLDEN_FIXTURE: GoldenFixture = GoldenFixture {
     system_credential: "cksys",
     flow_engine_module: "basal",
     foreign_module: "other",
-    delivery_authority_module: "prefrontal-core",
+    delivery_authority_module: "prefrontal",
 };
 
 /// The session token in the golden's refused peer and effect subjects.
@@ -204,9 +204,9 @@ impl From<NamingError> for GrantError {
 ///
 /// Credentials are account-scoped and name no agents: a participant may pull,
 /// inspect and acknowledge any agent's durable on the agent streams, and which
-/// durable it actually reads is decided by prefrontal-core, which owns agent
-/// residence. It holds no workload publish at all: hosts and modules consume
-/// wakes, peer deliveries and effect intents but never produce them.
+/// durable it actually reads is decided by prefrontal, which decides where
+/// each agent runs. Participants hold no workload-publish permission: hosts and
+/// modules consume wakes, peer deliveries and effect intents but never produce them.
 ///
 /// It may publish its own module events, on `ck.{acct}.event.{module_id}.>`
 /// and on no other module's event subjects.
@@ -229,16 +229,16 @@ pub fn participant_permissions(
     Ok(entries.into_iter().collect())
 }
 
-/// The grant for the delivery authority, prefrontal-core alone.
+/// The grant for the delivery authority, prefrontal alone.
 ///
 /// Everything a participant holds, plus publish on each agent stream's own
-/// binding: prefrontal-core is the only producer of wakes, peer deliveries and
+/// binding: prefrontal is the only producer of wakes, peer deliveries and
 /// effect intents, so it publishes every agent's wake fires and peer deliveries.
 /// Keeping workload publish here, and out of every
 /// host credential and out of ck-bus's own, means the module that decides a
 /// delivery is the only one that can make one.
 ///
-/// Rooms follow the same shape. prefrontal-core is the only producer and the
+/// Rooms follow the same shape. prefrontal is the only producer and the
 /// only consumer of room posts (hosts never consume rooms), so it publishes on
 /// the ROOM binding `ck.{acct}.room.*.post` rather than per bound room, which
 /// would re-mint its credential on every room create. It reads every room
@@ -880,7 +880,7 @@ pub fn generate_permission_golden(
                 reason,
             });
         }
-        if reader.module_id == "prefrontal-core" {
+        if reader.module_id == "prefrontal" {
             refused.insert(RefusedEntry {
                 principal,
                 operation: Operation::Subscribe,
@@ -984,9 +984,9 @@ pub fn generate_permission_golden(
         }
         for stream in [&account.streams().inbox, &account.streams().core_work] {
             for subject in [
-                format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
-                format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal-core"),
-                format!("$JS.ACK.{stream}.m_prefrontal-core.>"),
+                format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal"),
+                format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal"),
+                format!("$JS.ACK.{stream}.m_prefrontal.>"),
             ] {
                 refused.insert(RefusedEntry {
                     principal,

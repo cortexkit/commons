@@ -50,7 +50,7 @@ pub const MODULE_BUCKETS: &[ModuleBucket] = &[
     ModuleBucket::new(
         "aft",
         "status",
-        &["prefrontal-core"],
+        &["prefrontal"],
         2_048,
         1,
         Some(10),
@@ -77,14 +77,14 @@ pub const MODULE_BUCKETS: &[ModuleBucket] = &[
     ModuleBucket::new(
         "entorhinal",
         "changes",
-        &["prefrontal-core", "plexus", "magic-context"],
+        &["prefrontal", "plexus", "magic-context"],
         512,
         1,
         None,
         512 * 65_536,
     ),
     ModuleBucket::new(
-        "prefrontal-core",
+        "prefrontal",
         "session-liveness",
         &["entorhinal"],
         1_024,

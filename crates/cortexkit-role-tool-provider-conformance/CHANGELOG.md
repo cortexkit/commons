@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.12
+
+- Follows tool-provider 0.15.11, which accepts cortexkit-bus-naming 0.5; no new
+  checks.
+
 ## 0.15.11
 
 - Follows tool-provider 0.15.10; no new checks.

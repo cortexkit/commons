@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.11
+
+- Accepts cortexkit-bus-naming 0.5.
+
 ## 0.15.10
 
 - Pin the `late_result_ready.v1` bus hint for durably settled held results:

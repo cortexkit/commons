@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- Accepts cortexkit-bus-naming 0.5.
+
 ## 0.1.4
 
 - Fix a connection leak after a bus restart. A replaced connection used to keep

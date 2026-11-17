@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+- **Breaking:** rename the module's bus names from `prefrontal-core` to
+  `prefrontal`: its EVENT reader and reader-qualified filters, delivery authority,
+  INBOX / CORE_WORK / ROOM durables, and session-liveness bucket. Its reads of
+  other modules' buckets also use the new identity. Limits and other bucket
+  readers are unchanged.
+- A reader using this release must be deployed together with the module rename.
+  Do not adopt it early: the new EVENT durable would collect a separate backlog,
+  and INBOX / CORE_WORK cannot admit both delivery readers. Use 0.4.8 for
+  readers-first deployment; other modules retain both publisher subject spellings
+  in 0.5.0 until a later cleanup release.
+
 ## 0.4.8
 
 - Other modules' EVENT filters and derived live-hint subscriptions now accept

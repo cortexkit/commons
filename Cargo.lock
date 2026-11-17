@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-client"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-inmemory"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "cortexkit-bus-naming",
@@ -452,14 +452,14 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-naming"
-version = "0.4.8"
+version = "0.5.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "cortexkit-bus-nats"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.15.10"
+version = "0.15.11"
 dependencies = [
  "cortexkit-bus-naming",
  "cortexkit-role-tool-display",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.11"
+version = "0.15.12"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",

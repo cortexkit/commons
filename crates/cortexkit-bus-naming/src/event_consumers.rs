@@ -48,8 +48,8 @@ impl EventConsumer {
 /// code. Runtime configuration must not extend this closed table or its filters.
 pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
-        module_id: "prefrontal-core",
-        durable: "m_prefrontal-core",
+        module_id: "prefrontal",
+        durable: "m_prefrontal",
         filter_subjects: &[
             "event.broca.>",
             "event.basal.flow_instance_created.v1",
@@ -57,12 +57,12 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.basal.flow_instance_ended.v1",
             "event.basal.flow_instance_expired.v1",
             "event.basal.flow_instance_rescheduled.v1",
-            "event.aft.late_result_ready.v1.prefrontal-core",
-            "event.basal.late_result_ready.v1.prefrontal-core",
-            "event.cerebellum.late_result_ready.v1.prefrontal-core",
+            "event.aft.late_result_ready.v1.prefrontal",
+            "event.basal.late_result_ready.v1.prefrontal",
+            "event.cerebellum.late_result_ready.v1.prefrontal",
             "event.fusiform.catalog_changed.v1",
             "event.basal.flow_owner_notice.v1",
-            "event.cingulate.card_settled.v1.prefrontal-core",
+            "event.cingulate.card_settled.v1.prefrontal",
         ],
     },
     EventConsumer {
@@ -423,13 +423,13 @@ pub fn delivery_consumer_specs(
     let specs = [
         (
             names.inbox.clone(),
-            "m_prefrontal-core",
+            "m_prefrontal",
             account.inbox_bindings(),
             1,
         ),
         (
             names.core_work.clone(),
-            "m_prefrontal-core",
+            "m_prefrontal",
             account.core_work_bindings(),
             1,
         ),
@@ -701,7 +701,7 @@ mod tests {
             validate_table(&[
                 entry,
                 EventConsumer {
-                    durable: "m_prefrontal-core_other",
+                    durable: "m_prefrontal_other",
                     ..entry
                 }
             ]),
@@ -720,7 +720,7 @@ mod tests {
                     ..entry
                 }
             ]),
-            Err(EventConsumerError::DuplicateDurable("m_prefrontal-core"))
+            Err(EventConsumerError::DuplicateDurable("m_prefrontal"))
         );
     }
 
@@ -732,12 +732,12 @@ mod tests {
         };
         assert_eq!(
             validate_table(&[entry]),
-            Err(EventConsumerError::DurableMismatch("prefrontal-core"))
+            Err(EventConsumerError::DurableMismatch("prefrontal"))
         );
         for durable in [
-            "m_prefrontal-core_",
-            "m_prefrontal-core_Bad",
-            "m_prefrontal-core_bad-name",
+            "m_prefrontal_",
+            "m_prefrontal_Bad",
+            "m_prefrontal_bad-name",
             "m_astrocyte_media_usage",
         ] {
             assert!(validate_table(&[EventConsumer {
@@ -815,13 +815,13 @@ mod tests {
     }
 
     #[test]
-    fn prefrontal_core_filter_keeps_lifecycle_and_adds_delivery_events() {
+    fn prefrontal_filter_keeps_lifecycle_and_delivery_events() {
         let names = AccountNames::derive("box_readers").unwrap();
         let reader = event_consumer_specs(&names)
             .unwrap()
             .into_iter()
-            .find(|spec| spec.consumer.durable == "m_prefrontal-core")
-            .expect("prefrontal-core reader is in the reviewed table");
+            .find(|spec| spec.consumer.durable == "m_prefrontal")
+            .expect("prefrontal reader is in the reviewed table");
 
         assert_eq!(
             reader.consumer.filter_subjects,
@@ -832,12 +832,12 @@ mod tests {
                 "ck.box_readers.event.basal.flow_instance_ended.v1",
                 "ck.box_readers.event.basal.flow_instance_expired.v1",
                 "ck.box_readers.event.basal.flow_instance_rescheduled.v1",
-                "ck.box_readers.event.aft.late_result_ready.v1.prefrontal-core",
-                "ck.box_readers.event.basal.late_result_ready.v1.prefrontal-core",
-                "ck.box_readers.event.cerebellum.late_result_ready.v1.prefrontal-core",
+                "ck.box_readers.event.aft.late_result_ready.v1.prefrontal",
+                "ck.box_readers.event.basal.late_result_ready.v1.prefrontal",
+                "ck.box_readers.event.cerebellum.late_result_ready.v1.prefrontal",
                 "ck.box_readers.event.fusiform.catalog_changed.v1",
                 "ck.box_readers.event.basal.flow_owner_notice.v1",
-                "ck.box_readers.event.cingulate.card_settled.v1.prefrontal-core",
+                "ck.box_readers.event.cingulate.card_settled.v1.prefrontal",
             ]
         );
     }

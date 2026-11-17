@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Accepts cortexkit-bus-naming 0.5.
+
 ## 0.4.0
 
 - Adopt bus-naming 0.4 for reader-token event subjects and declared module KV

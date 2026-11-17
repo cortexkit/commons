@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- Accepts cortexkit-bus-naming 0.5.
+
 ## 0.5.1
 
 - A subscribe no longer fails on another operation's permission violation on

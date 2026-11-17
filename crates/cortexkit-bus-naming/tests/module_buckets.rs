@@ -9,9 +9,9 @@ fn module_bucket_names_normalize_only_the_derived_name() {
     for (owner, name, expected) in [
         ("aft", "status", "CK_BOX_KV_AFT_STATUS"),
         (
-            "prefrontal-core",
+            "prefrontal",
             "session-liveness",
-            "CK_BOX_KV_PREFRONTAL_CORE_SESSION_LIVENESS",
+            "CK_BOX_KV_PREFRONTAL_SESSION_LIVENESS",
         ),
         ("astrocyte", "read.marks", "CK_BOX_KV_ASTROCYTE_READ_MARKS"),
     ] {
@@ -44,7 +44,7 @@ fn declared_module_buckets_pin_readers_value_caps_and_retention() {
         ModuleBucket::new(
             "aft",
             "status",
-            &["prefrontal-core"],
+            &["prefrontal"],
             2_048,
             1,
             Some(10),
@@ -71,14 +71,14 @@ fn declared_module_buckets_pin_readers_value_caps_and_retention() {
         ModuleBucket::new(
             "entorhinal",
             "changes",
-            &["prefrontal-core", "plexus", "magic-context"],
+            &["prefrontal", "plexus", "magic-context"],
             512,
             1,
             None,
             33_554_432,
         ),
         ModuleBucket::new(
-            "prefrontal-core",
+            "prefrontal",
             "session-liveness",
             &["entorhinal"],
             1_024,

@@ -10,6 +10,7 @@ use async_nats::ConnectOptions;
 use bytes::Bytes;
 use cortexkit_bus_naming::{
     delivery_authority_permissions, participant_permissions, AccountNames, AllowEntry, Operation,
+    PINNED_GOLDEN_FIXTURE,
 };
 use cortexkit_bus_trait::{
     terminally_dispose, terminally_dispose_cursor, BusError, ClaimOutcome, ContentDigest,
@@ -24,6 +25,7 @@ use crate::{CloseOutcome, ConnectConfig, NatsConnection};
 
 const ADMIN_PUBLIC: &str = "UADMIN";
 const PARTICIPANT_PUBLIC: &str = "UPARTICIPANT";
+const DELIVERY_AUTHORITY_MODULE: &str = PINNED_GOLDEN_FIXTURE.delivery_authority_module;
 
 /// Writes a server configuration file from the port and the store directory.
 type RenderConfig<'a> = dyn Fn(u16, &TempDir) -> String + 'a;
@@ -1159,8 +1161,8 @@ async fn connect_user(url: &str, user: &str, credential_public: &str) -> NatsCon
     .expect("connect fixture user")
 }
 
-/// prefrontal-core, holding the delivery-authority grant, publishes a room
-/// post and reads it through its ROOM durable `m_prefrontal-core`; the server
+/// prefrontal, holding the delivery-authority grant, publishes a room
+/// post and reads it through its ROOM durable `m_prefrontal`; the server
 /// refuses that durable to another module's participant grant and refuses
 /// another module's ROOM durable to the delivery authority. Each refusal is
 /// asserted on the server's permission error naming the subject, which a
@@ -1168,8 +1170,10 @@ async fn connect_user(url: &str, user: &str, credential_public: &str) -> NatsCon
 #[tokio::test]
 async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
     let account = AccountNames::derive("box_live").expect("account");
-    let authority = delivery_authority_permissions(&account, "UCORE", "prefrontal-core", &[])
-        .expect("delivery-authority grant");
+    let durable = AccountNames::module_consumer_name(DELIVERY_AUTHORITY_MODULE).unwrap();
+    let authority =
+        delivery_authority_permissions(&account, "UCORE", DELIVERY_AUTHORITY_MODULE, &[])
+            .expect("delivery-authority grant");
     let other_module =
         participant_permissions(&account, "UOTHER", "other", &[]).expect("participant grant");
     let render = |port: u16, directory: &TempDir| {
@@ -1184,7 +1188,7 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
     };
 
     // Provision as ck-bus does: the ROOM stream bound on the ROOM binding,
-    // prefrontal-core's durable filtered on it, and a second module durable
+    // prefrontal's durable filtered on it, and a second module durable
     // so the delivery authority has a real foreign target to be refused.
     let room = account.streams().room.clone();
     let admin = connect_admin(&server.url).await;
@@ -1198,7 +1202,7 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
         })
         .await
         .expect("create ROOM stream");
-    for module in ["prefrontal-core", "other"] {
+    for module in [DELIVERY_AUTHORITY_MODULE, "other"] {
         stream
             .create_consumer(pull::Config {
                 durable_name: Some(AccountNames::module_consumer_name(module).expect("name")),
@@ -1222,7 +1226,7 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
         .duplicate());
     let mut cursor = core
         .stream(room.clone())
-        .consumer(DurableOwner::Module("prefrontal-core"))
+        .consumer(DurableOwner::Module(DELIVERY_AUTHORITY_MODULE))
         .await
         .expect("the delivery authority binds its ROOM durable");
     let delivery = next_delivery(&mut cursor).await;
@@ -1240,23 +1244,20 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
     };
 
     // Another module, holding a participant grant, can neither bind nor pull
-    // prefrontal-core's ROOM durable.
+    // prefrontal's ROOM durable.
     let other = connect_user(&server.url, "other", "UOTHER").await;
     let error = other
         .stream(room.clone())
-        .consumer(DurableOwner::Module("prefrontal-core"))
+        .consumer(DurableOwner::Module(DELIVERY_AUTHORITY_MODULE))
         .await
         .err()
-        .expect("another module must not bind m_prefrontal-core");
-    refused(
-        error,
-        &format!("$JS.API.CONSUMER.INFO.{room}.m_prefrontal-core"),
-    );
-    let core_pull = format!("$JS.API.CONSUMER.MSG.NEXT.{room}.m_prefrontal-core");
+        .expect("another module must not bind the delivery authority's durable");
+    refused(error, &format!("$JS.API.CONSUMER.INFO.{room}.{durable}"));
+    let core_pull = format!("$JS.API.CONSUMER.MSG.NEXT.{room}.{durable}");
     let error = other
         .request(&core_pull, pull.clone())
         .await
-        .expect_err("another module must not pull m_prefrontal-core");
+        .expect_err("another module must not pull the delivery authority's durable");
     refused(error, &core_pull);
 
     // The delivery authority cannot pull another module's ROOM durable.
@@ -1440,7 +1441,7 @@ async fn reliable_delivery_work_queue_cursor_acks_delayed_naks_terms_and_counts(
         assert!(!receipt.duplicate());
     }
     let mut cursor = stream
-        .consumer(DurableOwner::Module("prefrontal-core"))
+        .consumer(DurableOwner::Module(DELIVERY_AUTHORITY_MODULE))
         .await
         .unwrap();
     let first = next_delivery(&mut cursor).await;
@@ -1476,7 +1477,10 @@ async fn reliable_delivery_work_queue_cursor_acks_delayed_naks_terms_and_counts(
     );
     let info = admin
         .jetstream()
-        .get_consumer_from_stream::<pull::Config, _, _>("m_prefrontal-core", "CK_BOX_INBOX")
+        .get_consumer_from_stream::<pull::Config, _, _>(
+            AccountNames::module_consumer_name(DELIVERY_AUTHORITY_MODULE).unwrap(),
+            "CK_BOX_INBOX",
+        )
         .await
         .unwrap();
     assert_eq!(info.cached_info().config.max_deliver, -1);
@@ -1531,7 +1535,7 @@ async fn reliable_delivery_repeated_disposal_crashes_never_strand_a_command() {
     let mut work_invocations = 0;
     for expected in 1..=6 {
         let mut cursor = inbox
-            .consumer(DurableOwner::Module("prefrontal-core"))
+            .consumer(DurableOwner::Module(DELIVERY_AUTHORITY_MODULE))
             .await
             .unwrap();
         let delivery = next_delivery(&mut cursor).await;
@@ -1561,7 +1565,7 @@ async fn reliable_delivery_repeated_disposal_crashes_never_strand_a_command() {
         drop(crashing);
     }
     let mut cursor = inbox
-        .consumer(DurableOwner::Module("prefrontal-core"))
+        .consumer(DurableOwner::Module(DELIVERY_AUTHORITY_MODULE))
         .await
         .unwrap();
     let delivery = next_delivery(&mut cursor).await;
@@ -1610,7 +1614,7 @@ async fn reliable_delivery_routes_effect_and_inbox_dead_letters_separately() {
         (
             "CK_BOX_INBOX",
             "ck.box.inbox.head.target.ready",
-            DurableOwner::Module("prefrontal-core"),
+            DurableOwner::Module(DELIVERY_AUTHORITY_MODULE),
             DeliveryFamily::Inbox,
             "CK_BOX_DELIVERY_DEAD",
             "ck.box.delivery.dead",

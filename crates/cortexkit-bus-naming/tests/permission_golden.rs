@@ -123,7 +123,7 @@ fn golden_names_bound_and_refused_fixture_identities() {
         "room_gold_unbound",
         "basal",
         "other",
-        "prefrontal-core",
+        "prefrontal",
     ] {
         assert!(CHECKED_IN_GOLDEN.contains(literal), "missing {literal}");
     }
@@ -421,7 +421,7 @@ fn assert_no_allow_overlaps(
     }
 }
 
-/// The ROOM module durable `m_prefrontal-core` is the delivery authority's
+/// The ROOM module durable `m_prefrontal` is the delivery authority's
 /// alone, and only that one durable: no participant reads it, the delivery
 /// authority reads no other ROOM consumer and creates or deletes none, and the
 /// flow engine does not touch ROOM. As with the flow engine, a golden diff
@@ -447,7 +447,7 @@ fn only_the_delivery_authority_reads_the_room_durable_and_only_its_own() {
     for (principal, expected) in [
         (
             Principal::Participant,
-            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal"),
         ),
         (
             Principal::DeliveryAuthority,
@@ -463,15 +463,15 @@ fn only_the_delivery_authority_reads_the_room_durable_and_only_its_own() {
         ),
         (
             Principal::DeliveryAuthority,
-            format!("$JS.API.CONSUMER.CREATE.{stream}.m_prefrontal-core.{binding}"),
+            format!("$JS.API.CONSUMER.CREATE.{stream}.m_prefrontal.{binding}"),
         ),
         (
             Principal::DeliveryAuthority,
-            format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_prefrontal-core"),
+            format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_prefrontal"),
         ),
         (
             Principal::DeliveryAuthority,
-            format!("$JS.API.CONSUMER.DELETE.{stream}.m_prefrontal-core"),
+            format!("$JS.API.CONSUMER.DELETE.{stream}.m_prefrontal"),
         ),
         (
             Principal::DeliveryAuthority,
@@ -479,7 +479,7 @@ fn only_the_delivery_authority_reads_the_room_durable_and_only_its_own() {
         ),
         (
             Principal::FlowEngine,
-            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal"),
         ),
         (
             Principal::FlowEngine,
@@ -505,9 +505,9 @@ fn only_the_delivery_authority_reads_the_room_durable_and_only_its_own() {
     // the ROOM binding, so the refusals above are not passing over a grant that
     // was never made.
     for subject in [
-        format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
-        format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal-core"),
-        format!("$JS.ACK.{stream}.m_prefrontal-core.1.2.3.4.5"),
+        format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal"),
+        format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal"),
+        format!("$JS.ACK.{stream}.m_prefrontal.1.2.3.4.5"),
         format!("$JS.API.STREAM.INFO.{stream}"),
         account
             .room_post(PINNED_GOLDEN_FIXTURE.unbound_room)
@@ -761,7 +761,7 @@ fn event_consumer_grant_is_participant_plus_three_permissions_per_owned_durable(
     use std::collections::BTreeSet;
     let account = AccountNames::derive("box_readers").unwrap();
     for module_id in [
-        "prefrontal-core",
+        "prefrontal",
         "astrocyte",
         "striatum",
         "thalamus-harness",
@@ -834,11 +834,11 @@ fn assert_event_reader_refused(subjects: &[String]) {
     for (principal, allows) in [
         (
             Principal::Participant,
-            participant_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap(),
+            participant_permissions(&account, "UPFC", "prefrontal", &[]).unwrap(),
         ),
         (
             Principal::DeliveryAuthority,
-            delivery_authority_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap(),
+            delivery_authority_permissions(&account, "UPFC", "prefrontal", &[]).unwrap(),
         ),
         (
             Principal::Participant,
@@ -861,8 +861,8 @@ fn event_consumer_cannot_create_consumers() {
     assert_event_reader_refused(&[
         format!("$JS.API.CONSUMER.CREATE.{stream}"),
         format!("$JS.API.CONSUMER.CREATE.{stream}.ephemeral"),
-        format!("$JS.API.CONSUMER.CREATE.{stream}.m_prefrontal-core.ck.box_readers.event.broca.>"),
-        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_prefrontal-core"),
+        format!("$JS.API.CONSUMER.CREATE.{stream}.m_prefrontal.ck.box_readers.event.broca.>"),
+        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.m_prefrontal"),
     ]);
 }
 
@@ -880,7 +880,7 @@ fn event_consumer_cannot_pull_basal() {
 fn event_consumer_cannot_delete_purge_or_directly_read_events() {
     let stream = "CK_BOX_READERS_EVENT";
     assert_event_reader_refused(&[
-        format!("$JS.API.CONSUMER.DELETE.{stream}.m_prefrontal-core"),
+        format!("$JS.API.CONSUMER.DELETE.{stream}.m_prefrontal"),
         format!("$JS.API.CONSUMER.DELETE.{stream}.m_astrocyte"),
         format!("$JS.API.STREAM.PURGE.{stream}"),
         format!("$JS.API.STREAM.DELETE.{stream}"),
@@ -907,9 +907,9 @@ fn astrocyte_reads_only_its_own_event_durable_and_publishes_only_its_own_events(
         );
     }
     for subject in [
-        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_prefrontal-core",
-        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_prefrontal-core",
-        "$JS.ACK.CK_BOX_READERS_EVENT.m_prefrontal-core.1.2.3.4.5",
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_prefrontal",
+        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_prefrontal",
+        "$JS.ACK.CK_BOX_READERS_EVENT.m_prefrontal.1.2.3.4.5",
         "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_basal",
         "ck.box_readers.event.insula.quota_sampled.v1",
     ] {
@@ -941,12 +941,12 @@ fn event_consumer_reads_but_cannot_publish_broca_events() {
         "ck.box_readers.event.broca.run.progress.v1".to_owned(),
     ]);
     let account = AccountNames::derive("box_readers").unwrap();
-    let allows = participant_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap();
+    let allows = participant_permissions(&account, "UPFC", "prefrontal", &[]).unwrap();
     for subject in [
-        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_prefrontal-core",
-        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_prefrontal-core",
-        "$JS.ACK.CK_BOX_READERS_EVENT.m_prefrontal-core.1.2.3.4.5",
-        "ck.box_readers.event.prefrontal-core.run.started.v1",
+        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_prefrontal",
+        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_prefrontal",
+        "$JS.ACK.CK_BOX_READERS_EVENT.m_prefrontal.1.2.3.4.5",
+        "ck.box_readers.event.prefrontal.run.started.v1",
     ] {
         assert!(
             allowed(&allows, Principal::Participant, Operation::Publish, subject),
@@ -981,11 +981,11 @@ fn rescheduled_flows_are_read_through_core_durable_not_direct_subscriptions() {
     let reader = event_consumer_specs(&account)
         .unwrap()
         .into_iter()
-        .find(|spec| spec.consumer.durable == "m_prefrontal-core")
+        .find(|spec| spec.consumer.durable == "m_prefrontal")
         .unwrap();
     assert!(reader.consumer.filter_subjects.contains(&subject));
 
-    let core = participant_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap();
+    let core = participant_permissions(&account, "UPFC", "prefrontal", &[]).unwrap();
     assert!(!allowed(
         &core,
         Principal::Participant,
