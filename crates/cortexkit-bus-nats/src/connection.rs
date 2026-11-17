@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use cortexkit_bus_trait::{
     AsyncPermissionViolation, BusError, BusResult, PermissionViolationSource,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::error::{
     map_connect_error, map_operation_error, permission_violation,
@@ -54,10 +54,23 @@ pub enum CloseOutcome {
     Pending,
 }
 
+/// The current state of the underlying NATS connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NatsConnectionState {
+    /// The client is connected to a NATS server.
+    Connected,
+    /// The client is disconnected and may reconnect automatically.
+    Disconnected,
+    /// The connection has ended and will not reconnect.
+    Closed,
+}
+
 #[derive(Clone)]
 pub struct NatsConnection {
     client: Client,
     events: broadcast::Sender<Event>,
+    connection_state: watch::Sender<NatsConnectionState>,
     request_timeout: Duration,
     inbox_prefix: String,
 }
@@ -81,9 +94,24 @@ impl NatsConnection {
         let inbox_prefix = config.inbox_prefix();
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let event_sender = events.clone();
+        let (connection_state, _) = watch::channel(NatsConnectionState::Connected);
+        let state_sender = connection_state.clone();
         let options = options.event_callback(move |event| {
             let event_sender = event_sender.clone();
+            let state_sender = state_sender.clone();
             async move {
+                match &event {
+                    Event::Connected => {
+                        state_sender.send_replace(NatsConnectionState::Connected);
+                    }
+                    Event::Disconnected => {
+                        state_sender.send_replace(NatsConnectionState::Disconnected);
+                    }
+                    Event::Closed => {
+                        state_sender.send_replace(NatsConnectionState::Closed);
+                    }
+                    _ => {}
+                }
                 let _ = event_sender.send(event);
             }
         });
@@ -96,6 +124,7 @@ impl NatsConnection {
         Ok(Self {
             client,
             events,
+            connection_state,
             request_timeout: config.request_timeout,
             inbox_prefix,
         })
@@ -107,6 +136,21 @@ impl NatsConnection {
 
     pub fn inbox_prefix(&self) -> &str {
         &self.inbox_prefix
+    }
+
+    /// Watches the latest state of the underlying NATS connection without polling.
+    ///
+    /// [`NatsConnectionState::Connected`] means the client is connected to a
+    /// server and is the initial state after connecting. A lost connection sets
+    /// [`NatsConnectionState::Disconnected`], followed by `Connected` when
+    /// async-nats reconnects on its own. [`NatsConnectionState::Closed`] means
+    /// the connection has ended; it is final and will not reconnect.
+    ///
+    /// Slow readers retain the latest state, but may skip intermediate states.
+    /// Await [`watch::Receiver::changed`] to observe updates, including while
+    /// another operation is waiting for messages.
+    pub fn connection_state(&self) -> watch::Receiver<NatsConnectionState> {
+        self.connection_state.subscribe()
     }
 
     pub fn permission_violations(&self) -> NatsPermissionViolations {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- Expose a connection-state watch for connection loss, automatic reconnection
+  and final closure without polling the client.
+
 ## 0.5.2
 
 - Accepts cortexkit-bus-naming 0.5.

@@ -21,7 +21,7 @@ use tempfile::TempDir;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, Instant};
 
-use crate::{CloseOutcome, ConnectConfig, NatsConnection};
+use crate::{CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionState};
 
 const ADMIN_PUBLIC: &str = "UADMIN";
 const PARTICIPANT_PUBLIC: &str = "UPARTICIPANT";
@@ -1267,6 +1267,77 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
         .await
         .expect_err("the delivery authority must not pull m_other");
     refused(error, &foreign_pull);
+}
+
+#[tokio::test]
+async fn connection_state_watches_disconnect_and_reconnect() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let url = server.url.clone();
+    let port = url
+        .rsplit(':')
+        .next()
+        .and_then(|port| port.parse::<u16>().ok())
+        .expect("server port");
+    let connection = connect(&url, "USTATE").await;
+    let mut states = connection.connection_state();
+    assert_eq!(*states.borrow(), NatsConnectionState::Connected);
+
+    drop(server);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| *state == NatsConnectionState::Disconnected),
+    )
+    .await
+    .expect("watch reports Disconnected without polling the client")
+    .expect("state watch remains open");
+
+    let restarted = TestServer::start_on(None, Some(port))
+        .await
+        .expect("restart available server");
+    assert_eq!(restarted.url, url, "restart uses the same port");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| *state == NatsConnectionState::Connected),
+    )
+    .await
+    .expect("watch reports Connected after automatic reconnect")
+    .expect("state watch remains open");
+    assert_eq!(
+        *connection.clone().connection_state().borrow(),
+        NatsConnectionState::Connected
+    );
+}
+
+#[tokio::test]
+async fn connection_state_watches_closed_and_retains_latest_state() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let connection = connect(&server.url, "USTATECLOSED").await;
+    let mut states = connection.connection_state();
+    assert_eq!(*states.borrow(), NatsConnectionState::Connected);
+
+    assert_eq!(
+        connection
+            .close(Duration::from_secs(5))
+            .await
+            .expect("close"),
+        CloseOutcome::Closed
+    );
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| *state == NatsConnectionState::Closed),
+    )
+    .await
+    .expect("watch reports Closed after draining")
+    .expect("state watch remains open");
+    assert_eq!(
+        *connection.connection_state().borrow(),
+        NatsConnectionState::Closed,
+        "a late receiver retains the final state"
+    );
 }
 
 /// Closing an idle connection returns `Closed`, ends its empty subscription,
