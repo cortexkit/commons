@@ -3,7 +3,7 @@
 Stability: **alpha**. The role owner's decisions are recorded under
 "Open questions". This document is the role definition; the
 Rust types in this crate are its wire shapes, this crate's
-`test-vectors/llm-runner-v1/` holds its vectors (they ship in its package, and
+`test-vectors/` holds its vectors (they ship in its package, and
 the `test-vectors` feature exposes them as the public `vectors` module, with
 a `SHA256SUMS` pinning every file), and a separate `-conformance` crate
 holds its suite (§15). Paths to vector files below are relative to this
@@ -5468,6 +5468,47 @@ re-send their bodies.
 - [pinned] Vectors: `send-status.json` (requests, refused requests,
   replies, and the `unknown_send` refusal) and `send-status-describe.json`
   in `test-vectors/llm-runner-v1/`.
+
+### 9.8.1 Send-state notices
+
+A send-state notice wakes the module that made a keyed `session.send` when
+what `session.send_status` would answer for that send has changed. It is a
+hint, not an authoritative status reply.
+
+- [pinned] A runner publishes a notice for every keyed send (one carrying
+  `send_id`) whose sender is a reserved principal: a module the daemon
+  launched, `reserved:<module id>`. Person, app and unkeyed sends get none,
+  and neither do seeded runs (import or fork). The runner does not check
+  whether a reader exists.
+- [pinned] The subject is
+  `event.<runner module id>.send_state.v1.<sender module id>`. The account
+  prefix belongs to the bus.
+- [pinned] A notice is published whenever what `session.send_status` would
+  answer changes: its state **or its receipt**, for example when a delivery
+  lands. Two consecutive notices may therefore carry the same `state`.
+  A retraction also gets a notice with `state: "retracted"`. Delivery is
+  at least once, from a durable outbox written only after the change's record
+  is durable.
+- [pinned] The raw payload is inline JSON, never a claim check. It is the
+  notice serialized as RFC 8785 (JCS), with sorted keys and no extra whitespace:
+  `{"send_id":…,"seq":…,"session_ref":…,"state":…,"v":1}`. The serialized
+  body must be at most 512 bytes; a larger notice is refused, never cut.
+  `v` is the integer `1`. Publishers use one of `pending`, `active`, `paused`,
+  `finished`, `superseded`, `expired`, `retracted`, or `not_delivered` for
+  `state`. Readers treat `state` as an open string, ignore unknown members,
+  and re-read `session.send_status` through the runner that owns the send.
+- [pinned] `seq` is an integer no larger than 2^53 − 1, so every JSON reader
+  decodes it exactly. It strictly increases across notices for the same
+  `session_ref`. It is not dense and is not comparable across
+  sessions. One runner uses the session log position of the record that
+  changed the send.
+- [pinned] `Nats-Msg-Id` is `<session_ref>:<send_id>:<seq>`, so a republish
+  is dropped as a duplicate. The other headers are `kind: send_state`,
+  `session_ref`, `send_id`, and `seq` (decimal).
+- [pinned] `retracted` exists only in notices. `session.send_status` answers
+  a retracted send with its refusal.
+- [pinned] `send_state::SendStateNotice` and `test-vectors/send-state-v1/`
+  pin the notice body and message-id shape.
 
 ### 9.9 `turn_directives`: trailing wake tags
 

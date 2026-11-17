@@ -1,0 +1,11 @@
+{
+  "body": "{\"send_id\":\"sender-a-notice-1\",\"seq\":44,\"session_ref\":\"78854827f6b9ee06bcfec3c818e40ae1\",\"state\":\"active\",\"v\":1}",
+  "headers": {
+    "kind": "send_state",
+    "send_id": "sender-a-notice-1",
+    "seq": "44",
+    "session_ref": "78854827f6b9ee06bcfec3c818e40ae1"
+  },
+  "nats_msg_id": "78854827f6b9ee06bcfec3c818e40ae1:sender-a-notice-1:44",
+  "subject": "ck.box_test.event.runner-a.send_state.v1.sender-a"
+}

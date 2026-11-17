@@ -1,11 +1,59 @@
 //! The `llm-runner/v1` test vectors, compiled in.
 //!
-//! The files live in this crate's `test-vectors/llm-runner-v1/` and ship in
+//! The files live in this crate's `test-vectors/` and ship in
 //! its package. With the `test-vectors` feature this module is public, so a
 //! runner or consumer that depends on this crate by version checks exactly
 //! the bytes this crate's own tests check, without a checkout of this
 //! repository. [`SHA256SUMS`] pins every file's bytes; [`README`] describes
 //! each file's cases and the tests that read them.
+
+/// Exact send-state notice bodies, subjects, headers and message ids.
+pub mod send_state {
+    pub const DIR: &str = "send-state-v1";
+
+    /// Every sample and its README, in checksum-manifest order.
+    pub const FILES: &[(&str, &str)] = &[
+        (
+            "01-sender-a-pending.json",
+            include_str!("../test-vectors/send-state-v1/01-sender-a-pending.json"),
+        ),
+        (
+            "02-sender-a-active.json",
+            include_str!("../test-vectors/send-state-v1/02-sender-a-active.json"),
+        ),
+        (
+            "03-sender-a-superseded.json",
+            include_str!("../test-vectors/send-state-v1/03-sender-a-superseded.json"),
+        ),
+        (
+            "04-sender-a-expired.json",
+            include_str!("../test-vectors/send-state-v1/04-sender-a-expired.json"),
+        ),
+        (
+            "05-sender-b-pending.json",
+            include_str!("../test-vectors/send-state-v1/05-sender-b-pending.json"),
+        ),
+        (
+            "06-sender-b-active.json",
+            include_str!("../test-vectors/send-state-v1/06-sender-b-active.json"),
+        ),
+        (
+            "07-sender-b-paused.json",
+            include_str!("../test-vectors/send-state-v1/07-sender-b-paused.json"),
+        ),
+        (
+            "08-sender-b-finished.json",
+            include_str!("../test-vectors/send-state-v1/08-sender-b-finished.json"),
+        ),
+        (
+            "README.md",
+            include_str!("../test-vectors/send-state-v1/README.md"),
+        ),
+    ];
+
+    /// SHA-256 pins for every member of [`FILES`].
+    pub const SHA256SUMS: &str = include_str!("../test-vectors/send-state-v1/SHA256SUMS");
+}
 
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "llm-runner-v1";

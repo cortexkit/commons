@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.73
+
+- Pin the runner contract to `=0.8.60` for send-state notices. This release
+  adds no checks.
+
 ## 0.17.72
 
 - Fix the identical-marks retry check (`message_marks_retry_changed`,

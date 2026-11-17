@@ -58,6 +58,7 @@ pub mod rides;
 pub mod run;
 pub mod scope_admission;
 pub mod send;
+pub mod send_state;
 pub mod send_status;
 pub mod sender_succession;
 pub mod serializer_profile;
@@ -85,6 +86,8 @@ pub mod wire;
 pub use run::{
     COMPACTION_WAIT_REPORT_AFTER_MS, RUN_REASON_COMPACTION_WAIT, RUN_REASON_CONTEXT_CEILING_WAIT,
 };
+
+pub use send_state::{send_state_msg_id, SendStateNotice, SEND_STATE_EVENT, SEND_STATE_VERSION};
 
 #[allow(deprecated)]
 pub use session_ref::{session_ref, session_ref_v1, SessionIdentity};

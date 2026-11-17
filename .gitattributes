@@ -14,3 +14,6 @@
 
 # Late-result-ready payloads and their checksum-pinned companions are exact bytes.
 crates/cortexkit-role-tool-provider/test-vectors/late-result-ready-v1/** -text
+
+# Send-state notices and their checksum-pinned companions are exact bytes.
+crates/cortexkit-role-llm-runner/test-vectors/send-state-v1/** -text

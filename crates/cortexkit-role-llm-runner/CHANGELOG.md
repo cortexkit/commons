@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.60
+
+- Pin the `send_state.v1` bus wake-up for reserved senders of keyed sends,
+  including receipt-only changes, retractions, durable publication, headers
+  and the at-most-512-byte inline JCS body. Readers re-read `session.send_status`.
+- Add `SendStateNotice`, event/version constants, validation and the stable
+  message-id helper. Ship eight identifier-neutralized outbox samples and
+  exact serializer/checksum tests. No runtime behaviour changes.
+
 ## 0.8.59
 
 - Add opt-in `fork_effort` and closed `low`/`medium`/`high` effort hints on

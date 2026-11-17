@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-llm-runner"
-version = "0.8.59"
+version = "0.8.60"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,7 +18,7 @@ description = "Wire contract of the CortexKit llm-runner/v1 role: role.describe,
 publish = true
 
 [features]
-# Compiles the vectors in this crate's `test-vectors/llm-runner-v1/` into the
+# Compiles the vectors in this crate's `test-vectors/` into the
 # crate as the public `vectors` module.
 test-vectors = []
 
@@ -52,4 +52,8 @@ required-features = ["test-vectors"]
 
 [[test]]
 name = "restart_survival"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "send_state"
 required-features = ["test-vectors"]
