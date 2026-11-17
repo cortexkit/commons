@@ -164,11 +164,6 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     },
     EventConsumer {
         module_id: "astrocyte",
-        durable: "m_astrocyte_payer",
-        filter_subjects: &["event.thalamus-harness.payer_row.v1"],
-    },
-    EventConsumer {
-        module_id: "astrocyte",
         durable: "m_astrocyte_media_usage",
         filter_subjects: &["event.colliculus.usage_recorded.v1"],
     },
@@ -191,7 +186,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         module_id: "aft",
         durable: "m_aft_sendstate",
         filter_subjects: &[
-            "event.thalamus-harness.send_state.v1",
+            "event.thalamus-harness.send_state.v1.aft",
             "event.broca.send_state.v1.aft",
         ],
     },
@@ -734,7 +729,7 @@ mod tests {
             "m_prefrontal-core_",
             "m_prefrontal-core_Bad",
             "m_prefrontal-core_bad-name",
-            "m_astrocyte_payer",
+            "m_astrocyte_media_usage",
         ] {
             assert!(validate_table(&[EventConsumer {
                 durable,

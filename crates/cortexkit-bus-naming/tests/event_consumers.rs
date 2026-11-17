@@ -170,7 +170,6 @@ fn live_hint_subscriptions_preserve_event_only_readers_and_validate_modules() {
             "ck.box_hints.live.insula.>",
             "ck.box_hints.live.magic-context.attribution_fact.v1",
             "ck.box_hints.live.prefrontal-core.attribution_fact.v1",
-            "ck.box_hints.live.thalamus-harness.payer_row.v1",
             "ck.box_hints.live.thalamus-harness.step.finished.v1",
             "ck.box_hints.live.thalamus.step.finished.v1",
         ]
@@ -208,6 +207,13 @@ fn retired_runner_is_absent_from_reader_tables_and_permission_golden() {
         assert!(reader.subjects.iter().all(|s| !s.contains(RETIRED)));
     }
     assert!(!include_str!("grants/permission_golden.txt").contains(RETIRED));
+}
+
+#[test]
+fn retired_payer_reader_is_absent() {
+    assert!(EVENT_CONSUMERS
+        .iter()
+        .all(|reader| reader.durable != "m_astrocyte_payer"));
 }
 
 #[test]
@@ -252,11 +258,6 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
         ),
         (
             "astrocyte",
-            "m_astrocyte_payer",
-            &["event.thalamus-harness.payer_row.v1"],
-        ),
-        (
-            "astrocyte",
             "m_astrocyte_media_usage",
             &["event.colliculus.usage_recorded.v1"],
         ),
@@ -279,7 +280,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
             "aft",
             "m_aft_sendstate",
             &[
-                "event.thalamus-harness.send_state.v1",
+                "event.thalamus-harness.send_state.v1.aft",
                 "event.broca.send_state.v1.aft",
             ],
         ),
@@ -347,7 +348,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
     ];
     let names = AccountNames::derive("box_readers").unwrap();
     let specs = event_consumer_specs(&names).unwrap();
-    assert_eq!(EVENT_CONSUMERS.len(), 20);
+    assert_eq!(EVENT_CONSUMERS.len(), 19);
     for (module, durable, filters) in expected {
         let row = EVENT_CONSUMERS
             .iter()

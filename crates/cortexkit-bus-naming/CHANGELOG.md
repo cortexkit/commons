@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.7
+
+- The `aft` reader's filter for the second runner's send-state notices now
+  names its reader token (`...send_state.v1.aft`), like every other
+  send-state row; the bare subject it named never matched a per-reader notice.
+- Remove a reader row whose publisher was retired.
+
 ## 0.4.6
 
 - HUB_IDLOG discards new messages when its storage is full: an append is refused
