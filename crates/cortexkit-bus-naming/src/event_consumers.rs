@@ -84,6 +84,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.thalamus-harness.route_fact.v1",
             "event.colliculus.route_fact.v1",
             "event.prefrontal-core.route_fact.v1",
+            "event.prefrontal.route_fact.v1",
             "event.plexus.route_fact.v1",
             "event.fusiform.catalog_changed.v1",
         ],
@@ -123,6 +124,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.aft.late_result_ready.v1.broca",
             "event.cerebellum.late_result_ready.v1.broca",
             "event.prefrontal-core.late_result_ready.v1.broca",
+            "event.prefrontal.late_result_ready.v1.broca",
             "event.basal.late_result_ready.v1.broca",
             "event.fusiform.catalog_changed.v1",
             "event.cingulate.card_settled.v1.broca",
@@ -160,6 +162,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.cerebellum.late_result_ready.v1.thalamus-harness",
             "event.basal.late_result_ready.v1.thalamus-harness",
             "event.prefrontal-core.late_result_ready.v1.thalamus-harness",
+            "event.prefrontal.late_result_ready.v1.thalamus-harness",
         ],
     },
     EventConsumer {
@@ -177,6 +180,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_astrocyte_attribution",
         filter_subjects: &[
             "event.prefrontal-core.attribution_fact.v1",
+            "event.prefrontal.attribution_fact.v1",
             "event.magic-context.attribution_fact.v1",
             "event.entorhinal.placement_fact.v1",
             "event.basal.attribution_fact.v1",
@@ -200,13 +204,17 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_plexus",
         filter_subjects: &[
             "event.prefrontal-core.agent_changed.v1",
+            "event.prefrontal.agent_changed.v1",
             "event.cingulate.card_settled.v1.plexus",
         ],
     },
     EventConsumer {
         module_id: "wernicke",
         durable: "m_wernicke_agents",
-        filter_subjects: &["event.prefrontal-core.agent_changed.v1"],
+        filter_subjects: &[
+            "event.prefrontal-core.agent_changed.v1",
+            "event.prefrontal.agent_changed.v1",
+        ],
     },
     EventConsumer {
         module_id: "colliculus",
@@ -214,6 +222,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &[
             "event.fusiform.catalog_changed.v1",
             "event.prefrontal-core.board_changed.v1",
+            "event.prefrontal.board_changed.v1",
             "event.magic-context.memory_changed.v1",
             "event.thalamus-harness.turn_ended.v1",
             "event.broca.run.ended.v1",

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.8
+
+- Other modules' EVENT filters and derived live-hint subscriptions now accept
+  both `prefrontal-core` and `prefrontal` publisher subjects, so they keep
+  receiving across the module's rename. Nothing prefrontal-core itself owns
+  changes yet: its own EVENT reader and the reader suffixes addressed to it,
+  its INBOX / CORE_WORK / ROOM delivery durables, its role as the only module
+  that publishes agent wakes, and its session-liveness KV bucket. Those move
+  in 0.5.0.
+
 ## 0.4.7
 
 - The `aft` reader's filter for the second runner's send-state notices now

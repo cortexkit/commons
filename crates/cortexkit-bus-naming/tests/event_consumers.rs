@@ -108,7 +108,7 @@ fn routing_live_hint_subscriptions_include_insula_and_exact_step_hints() {
     ] {
         assert!(subscriptions.iter().any(|actual| actual == subject));
     }
-    assert_eq!(subscriptions.len(), 9);
+    assert_eq!(subscriptions.len(), 10);
     let routing = LIVE_HINT_READERS
         .iter()
         .find(|reader| reader.module_id == "striatum")
@@ -138,6 +138,7 @@ fn striatum_preserves_insula_and_live_hints_while_adding_route_facts_and_catalog
             "event.thalamus-harness.route_fact.v1",
             "event.colliculus.route_fact.v1",
             "event.prefrontal-core.route_fact.v1",
+            "event.prefrontal.route_fact.v1",
             "event.plexus.route_fact.v1",
             "event.fusiform.catalog_changed.v1",
         ]
@@ -156,6 +157,49 @@ fn striatum_preserves_insula_and_live_hints_while_adding_route_facts_and_catalog
 }
 
 #[test]
+fn other_modules_read_both_prefrontal_publishers_in_event_and_live_subjects() {
+    use cortexkit_bus_naming::live_hint_subscriptions;
+
+    let account = AccountNames::derive("box_rename").unwrap();
+    let specs = event_consumer_specs(&account).unwrap();
+    for (module, durable, suffix) in [
+        ("striatum", "m_striatum", "route_fact.v1"),
+        ("broca", "m_broca", "late_result_ready.v1.broca"),
+        (
+            "thalamus-harness",
+            "m_thalamus-harness_late_results",
+            "late_result_ready.v1.thalamus-harness",
+        ),
+        (
+            "astrocyte",
+            "m_astrocyte_attribution",
+            "attribution_fact.v1",
+        ),
+        ("plexus", "m_plexus", "agent_changed.v1"),
+        ("wernicke", "m_wernicke_agents", "agent_changed.v1"),
+        ("colliculus", "m_colliculus_events", "board_changed.v1"),
+    ] {
+        let spec = specs
+            .iter()
+            .find(|spec| spec.consumer.durable == durable)
+            .unwrap();
+        let live = live_hint_subscriptions(&account, module).unwrap();
+        for publisher in ["prefrontal-core", "prefrontal"] {
+            assert!(
+                spec.consumer
+                    .filter_subjects
+                    .contains(&format!("ck.box_rename.event.{publisher}.{suffix}")),
+                "{durable} must read {publisher}.{suffix}"
+            );
+            assert!(
+                live.contains(&format!("ck.box_rename.live.{publisher}.{suffix}")),
+                "{module} must observe live hints from {publisher}.{suffix}"
+            );
+        }
+    }
+}
+
+#[test]
 fn live_hint_subscriptions_preserve_event_only_readers_and_validate_modules() {
     use cortexkit_bus_naming::{live_hint_subscriptions, TokenKind};
     let account = AccountNames::derive("box_hints").unwrap();
@@ -170,6 +214,7 @@ fn live_hint_subscriptions_preserve_event_only_readers_and_validate_modules() {
             "ck.box_hints.live.insula.>",
             "ck.box_hints.live.magic-context.attribution_fact.v1",
             "ck.box_hints.live.prefrontal-core.attribution_fact.v1",
+            "ck.box_hints.live.prefrontal.attribution_fact.v1",
             "ck.box_hints.live.thalamus-harness.step.finished.v1",
             "ck.box_hints.live.thalamus.step.finished.v1",
         ]
@@ -254,6 +299,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
                 "event.cerebellum.late_result_ready.v1.thalamus-harness",
                 "event.basal.late_result_ready.v1.thalamus-harness",
                 "event.prefrontal-core.late_result_ready.v1.thalamus-harness",
+                "event.prefrontal.late_result_ready.v1.thalamus-harness",
             ],
         ),
         (
@@ -271,6 +317,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
             "m_astrocyte_attribution",
             &[
                 "event.prefrontal-core.attribution_fact.v1",
+                "event.prefrontal.attribution_fact.v1",
                 "event.magic-context.attribution_fact.v1",
                 "event.entorhinal.placement_fact.v1",
                 "event.basal.attribution_fact.v1",
@@ -294,13 +341,17 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
             "m_plexus",
             &[
                 "event.prefrontal-core.agent_changed.v1",
+                "event.prefrontal.agent_changed.v1",
                 "event.cingulate.card_settled.v1.plexus",
             ],
         ),
         (
             "wernicke",
             "m_wernicke_agents",
-            &["event.prefrontal-core.agent_changed.v1"],
+            &[
+                "event.prefrontal-core.agent_changed.v1",
+                "event.prefrontal.agent_changed.v1",
+            ],
         ),
         (
             "colliculus",
@@ -308,6 +359,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
             &[
                 "event.fusiform.catalog_changed.v1",
                 "event.prefrontal-core.board_changed.v1",
+                "event.prefrontal.board_changed.v1",
                 "event.magic-context.memory_changed.v1",
                 "event.thalamus-harness.turn_ended.v1",
                 "event.broca.run.ended.v1",
@@ -332,6 +384,7 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
                 "event.aft.late_result_ready.v1.broca",
                 "event.cerebellum.late_result_ready.v1.broca",
                 "event.prefrontal-core.late_result_ready.v1.broca",
+                "event.prefrontal.late_result_ready.v1.broca",
                 "event.basal.late_result_ready.v1.broca",
                 "event.fusiform.catalog_changed.v1",
                 "event.cingulate.card_settled.v1.broca",
