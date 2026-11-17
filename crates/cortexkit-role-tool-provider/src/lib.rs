@@ -23,6 +23,7 @@ pub mod call_yield;
 pub mod catalog;
 pub mod describe;
 pub mod errors;
+pub mod late_result_ready;
 pub mod late_results;
 pub mod points;
 pub mod reply_custody;
@@ -37,6 +38,11 @@ pub mod user_command;
 pub mod vectors;
 pub mod views;
 pub mod withdraw;
+
+pub use late_result_ready::{
+    late_result_ready_msg_id, late_result_ready_reader, LateResultReady, LATE_RESULT_READY_EVENT,
+    LATE_RESULT_READY_VERSION,
+};
 
 /// The daemon's bind-mode vocabulary and the manifest capability promising
 /// that a provider reads it on every bind.

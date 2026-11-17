@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.10
+
+- Pin the `late_result_ready.v1` bus hint for durably settled held results:
+  reader-qualified subjects, inline two-member JSON, stable `Nats-Msg-Id`,
+  retry/restart deduplication and acknowledgement-aware replay. Readers still
+  fetch and acknowledge results through `late_results`, including at startup.
+- Add `LateResultReady`, event/version constants, payload validation and helpers
+  for reserved custodian readers and message ids. Readers accept open outcomes
+  and ignore unknown payload members; producers keep the exact compact shape.
+- Ship byte-exact success, error-code and unknown-outcome vectors with checksums.
+  No provider runtime behavior changes.
+
 ## 0.15.9
 
 - Add opt-in `tool.catalog.notice_templates` for providers declaring

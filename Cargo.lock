@@ -943,8 +943,9 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.15.9"
+version = "0.15.10"
 dependencies = [
+ "cortexkit-bus-naming",
  "cortexkit-role-tool-display",
  "jsonschema",
  "serde",
@@ -956,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.10"
+version = "0.15.11"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",

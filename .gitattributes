@@ -11,3 +11,6 @@
 # keeps the comparison exact: a generator that started emitting CRLF would
 # still fail.
 * text=auto eol=lf
+
+# Late-result-ready payloads and their checksum-pinned companions are exact bytes.
+crates/cortexkit-role-tool-provider/test-vectors/late-result-ready-v1/** -text

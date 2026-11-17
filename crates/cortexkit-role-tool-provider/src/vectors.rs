@@ -4,6 +4,58 @@
 //! and ship in its package. Consumers can enable this feature to test against
 //! the same bytes as the wire crate and conformance suite.
 
+/// Exact bus notice subjects, message ids and compact payloads for held results.
+pub mod late_result_ready {
+    pub const DIR: &str = "late-result-ready-v1";
+
+    /// Every fixture and its README, in checksum-manifest order.
+    pub const FILES: &[(&str, &str)] = &[
+        (
+            "README.md",
+            include_str!("../test-vectors/late-result-ready-v1/README.md"),
+        ),
+        (
+            "ok/subject.txt",
+            include_str!("../test-vectors/late-result-ready-v1/ok/subject.txt"),
+        ),
+        (
+            "ok/nats-msg-id.txt",
+            include_str!("../test-vectors/late-result-ready-v1/ok/nats-msg-id.txt"),
+        ),
+        (
+            "ok/payload.json",
+            include_str!("../test-vectors/late-result-ready-v1/ok/payload.json"),
+        ),
+        (
+            "error/subject.txt",
+            include_str!("../test-vectors/late-result-ready-v1/error/subject.txt"),
+        ),
+        (
+            "error/nats-msg-id.txt",
+            include_str!("../test-vectors/late-result-ready-v1/error/nats-msg-id.txt"),
+        ),
+        (
+            "error/payload.json",
+            include_str!("../test-vectors/late-result-ready-v1/error/payload.json"),
+        ),
+        (
+            "unknown/subject.txt",
+            include_str!("../test-vectors/late-result-ready-v1/unknown/subject.txt"),
+        ),
+        (
+            "unknown/nats-msg-id.txt",
+            include_str!("../test-vectors/late-result-ready-v1/unknown/nats-msg-id.txt"),
+        ),
+        (
+            "unknown/payload.json",
+            include_str!("../test-vectors/late-result-ready-v1/unknown/payload.json"),
+        ),
+    ];
+
+    /// SHA-256 pins for every member of [`FILES`].
+    pub const SHA256SUMS: &str = include_str!("../test-vectors/late-result-ready-v1/SHA256SUMS");
+}
+
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "tool-provider-v1";
 

@@ -1473,6 +1473,43 @@ update, is the call's answer, correlated by `(carrier, call_key)`.
   until acked. At most 1,000 unacked results per session and 1,000 expired
   entries per scope owner are kept, oldest dropped first.
 
+### Late-result-ready wake-up notice
+
+After durably recording a settled held result (`held-reply/v1`, §4.1), the
+provider publishes a `late_result_ready.v1` bus notice:
+
+- **Subject:** `event.<provider module id>.late_result_ready.v1.<reader>`.
+  `<reader>` is the held entry's custodian with its `reserved:` prefix removed.
+  An entry whose custodian is not a valid `reserved:<module id>` gets no notice.
+- **Payload:** the raw message payload is inline compact JSON, never a claim
+  check (no empty body plus digest):
+  `{"call_key":"<the held call's call_key>","outcome":"<outcome>"}`.
+  Producers emit exactly these two members in this order. `call_key` keeps
+  the existing bounds in §4. `outcome` is `ok`, or the settled error code (the
+  protocol error `code` or the tool's `errorCode`), or `unknown`. Readers treat
+  `outcome` as an open string and ignore unknown members.
+- **Hint only:** the notice carries no result body. The reader fetches the
+  result, and acks it, through `late_results`. A reader must still reconcile
+  through `late_results` when it starts, because a notice can be missed.
+- **`Nats-Msg-Id`:** `<event_id>:<reader>`, where `event_id` is the provider's
+  stable id for that settlement (for example its call-ledger event id).
+  Republishing the same settlement reuses the id, so the stream's duplicate
+  window drops repeats.
+- **When:** once per settled held result, after the settlement is durably
+  recorded. A failed publish may be retried. After a restart a provider may
+  republish, with the same msg ids, entries the reader hasn't acked yet (`seq`
+  above its `through_seq`). It must never announce an entry the reader already
+  acked. Readers tolerate duplicates, and a notice whose entry they already
+  consumed.
+
+`LATE_RESULT_READY_EVENT` and `LATE_RESULT_READY_VERSION` name the event and
+version. `LateResultReady` carries the two payload members; `validate()` checks
+the existing `call_key` bounds and a non-empty outcome. The
+`late_result_ready_reader` helper derives the reader from a custodian principal,
+and `late_result_ready_msg_id` builds the message id from `(event_id, reader)`.
+`test-vectors/late-result-ready-v1/` pins subjects, message ids and exact payload
+bytes for success, an error code and an unknown outcome.
+
 ### 7.1. Opt-in reply custody
 
 `reply_custody` adds no delivery path: it builds entirely on `late_results`.

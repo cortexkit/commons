@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.11
+
+- Follows tool-provider 0.15.10; no new checks.
+
 ## 0.15.10
 
 - Pin the provider contract to `=0.15.9` and decode its shared notice-template
