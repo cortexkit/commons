@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6
+
+- HUB_IDLOG discards new messages when its storage is full: an append is refused
+  and no stored entry is ever dropped, because a reader that falls behind reads
+  from the first entry. Clarify the federation fixture README.
+
 ## 0.4.5
 
 - Add hub-only federation names, strict canonical box ids, stream and bucket

@@ -90,7 +90,7 @@
       "allow_direct": true,
       "allow_rollup_hdrs": false,
       "deny_delete": false,
-      "discard": "old",
+      "discard": "new",
       "duplicate_window_seconds": null,
       "kind": "hub_idlog",
       "max_age_seconds": 0,

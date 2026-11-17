@@ -150,11 +150,15 @@ pub fn hub_inbox_stream(box_id: &BoxId) -> HubStreamSpec {
 
 pub fn hub_idlog_stream() -> HubStreamSpec {
     // A reader may resume from sequence 1, so neither age nor size may evict the log.
-    let mut spec = HubStreamSpec::new(StreamSpec::new(
+    // Discard new: when the account's storage quota is full, refuse the append and
+    // keep every stored entry, rather than dropping the oldest one.
+    let mut stream = StreamSpec::new(
         StreamKind::HubIdlog,
         HUB_IDLOG_STREAM.to_owned(),
         vec![IDLOG_SUBJECT.to_owned()],
-    ));
+    );
+    stream.discard = DiscardPolicy::New;
+    let mut spec = HubStreamSpec::new(stream);
     spec.allow_direct = true;
     spec
 }

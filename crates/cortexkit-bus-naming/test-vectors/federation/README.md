@@ -2,8 +2,11 @@
 
 `hub.json` pins the names, leaf-user allow lists, and hub stream descriptors for
 the sample box `0123456789abcdef0123456789abcdef`. Both self-hosted and hosted
-issuers use the same grant. Residence replication is shown separately for each
-hub kind. The example module name only demonstrates the deliver-prefix shape.
+issuers use the same grant. The residence key-value bucket (agent residence
+records) is stored with one replica on a self-hosted hub and three on a hosted
+hub, so the fixture lists its descriptor once for each hub kind. The example
+module name only shows how a module's deliver prefix is formed
+(`ckdel.<box id>.<module>`); it names no real module.
 These hub streams must not be provisioned on a machine's local server.
 
 The JSON is UTF-8, pretty-printed with two spaces, sorted object keys, and one
