@@ -77,6 +77,7 @@ pub mod problem_names {
     pub const MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS: &str = "media_only_send_without_attachments";
     pub const MEDIA_REFS_WITHOUT_ATTACHMENTS: &str = "media_refs_without_attachments";
     pub const MEDIA_REFS_WITHOUT_TRANSCRIPT_READS: &str = "media_refs_without_transcript_reads";
+    pub const TOOL_MEDIA_REFS_WITHOUT_MEDIA_REFS: &str = "tool_media_refs_without_media_refs";
     pub const PLAN_NOTES_WITHOUT_SESSION_CHANGE: &str = "plan_notes_without_session_change";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL: &str =
         "run_cancel_by_interrupt_without_run_cancel";
@@ -916,6 +917,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::MEDIA_REFS_WITHOUT_TRANSCRIPT_READS,
         ),
         (
+            capabilities::TOOL_MEDIA_REFS,
+            capabilities::MEDIA_REFS,
+            problem_names::TOOL_MEDIA_REFS_WITHOUT_MEDIA_REFS,
+        ),
+        (
             capabilities::PLAN_NOTES,
             capabilities::SESSION_CHANGE,
             problem_names::PLAN_NOTES_WITHOUT_SESSION_CHANGE,
@@ -1425,6 +1431,36 @@ mod opt_in_dependency_tests {
                 ));
             }
         }
+    }
+
+    #[test]
+    fn tool_media_refs_requires_media_refs() {
+        let mut ops = crate::REQUIRED_OPS.to_vec();
+        let groups = [
+            capabilities::TOOL_MEDIA_REFS,
+            capabilities::MEDIA_REFS,
+            capabilities::ATTACHMENTS,
+            capabilities::TRANSCRIPT_READS,
+        ];
+        for group in groups {
+            ops.extend_from_slice(capabilities::group_ops(group).unwrap());
+        }
+        let mut raw = serde_json::json!({
+            "majors":[{"version":crate::PROVIDES,"ops":ops,"stability":"stable"}],
+            "implementation_version":"test", "capabilities":groups,
+            "session_capabilities_from":"baseline",
+            "max_bytes":{"default":1024,"maximum":4096}
+        });
+        assert!(check_describe(&raw).is_ok(), "{:?}", check_describe(&raw));
+        raw["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|g| g != capabilities::MEDIA_REFS);
+        assert!(check_describe(&raw)
+            .unwrap_err()
+            .contains(&DescribeProblem::Undecodable(
+                problem_names::TOOL_MEDIA_REFS_WITHOUT_MEDIA_REFS.into()
+            )));
     }
 }
 

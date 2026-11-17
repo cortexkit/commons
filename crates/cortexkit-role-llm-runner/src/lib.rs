@@ -248,6 +248,9 @@ pub mod capabilities {
     /// Inline reads with references for media only. Requires attachments and
     /// transcript reads; large non-media payloads remain inline.
     pub const MEDIA_REFS: &str = "media_refs";
+    /// Opt-in structured tool-output media references on media-refs reads.
+    /// Requires [`MEDIA_REFS`].
+    pub const TOOL_MEDIA_REFS: &str = "tool_media_refs";
     /// Head metadata marks a growing initial intake of host history. No group dependencies.
     pub const HISTORY_INTAKE: &str = "history_intake";
 
@@ -525,6 +528,7 @@ pub mod capabilities {
         ),
         (MEDIA_ONLY_SEND, &[ops::SESSION_SEND]),
         (MEDIA_REFS, &[ops::SESSION_READ]),
+        (TOOL_MEDIA_REFS, &[ops::SESSION_READ]),
         (HISTORY_INTAKE, &[ops::SESSION_HEAD]),
         (
             USER_COMMANDS,

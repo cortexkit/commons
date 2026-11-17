@@ -328,6 +328,16 @@ fn flatten_tool_output(message: &mut Value, defects: &Defects, referenced: bool)
                 | "refs_output_changed"
                 | "refs_flattened_envelope"
                 | "refs_envelope_digest"
+                | "tool_flattened"
+                | "tool_still_flattened"
+                | "tool_leaks_default"
+                | "tool_bad_digest"
+                | "tool_bytes_with_metadata"
+                | "tool_changes_payload"
+                | "tool_changes_text"
+                | "tool_keeps_marker"
+                | "tool_invalid_accepted"
+                | "tool_non_declaring"
         )
     ) && message["role"] == "tool"
         && message["content"]["type"] == "tool_result"
@@ -337,7 +347,14 @@ fn flatten_tool_output(message: &mut Value, defects: &Defects, referenced: bool)
         {
             "different text without media references"
         } else {
-            "[image/png; media omitted]"
+            if defects
+                .media
+                .is_some_and(|defect| defect.starts_with("tool_"))
+            {
+                "before-media\n[media not shown: kind=image mime=image/png reason=not_requested]\nafter-media"
+            } else {
+                "[image/png; media omitted]"
+            }
         });
     }
 }
@@ -400,7 +417,14 @@ fn drop_pairing(value: &mut Value) {
     }
 }
 
-pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &Defects) -> Reply {
+pub fn page_with_tool_media(
+    page: ReadPage,
+    mode: Option<MediaMode>,
+    tool_media: bool,
+    budget: usize,
+    defects: &Defects,
+) -> Reply {
+    let originals = page.messages.clone();
     let mut page = page;
     if matches!(mode, Some(MediaMode::Descriptors | MediaMode::MediaRefs)) {
         let messages = page
@@ -428,6 +452,39 @@ pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &De
     if matches!(mode, None | Some(MediaMode::Inline)) {
         for message in &mut page.messages {
             flatten_tool_output(&mut message.message, defects, false);
+        }
+    }
+    if mode == Some(MediaMode::MediaRefs)
+        && (tool_media || defects.media == Some("tool_leaks_default"))
+        && defects.media != Some("tool_still_flattened")
+    {
+        for (message, original) in page.messages.iter_mut().zip(&originals) {
+            if message.message["role"] == "tool" {
+                let payloads = descriptor_payloads(&original.message, defects);
+                message.message = descriptors::media_refs(&original.message, &payloads).unwrap();
+                if defects.media == Some("tool_bad_digest") {
+                    message.message["content"]["content"][1]["sha256"] = json!("f".repeat(64));
+                }
+                if defects.media == Some("tool_bytes_with_metadata") {
+                    let reference = message.message["content"]["content"][1]
+                        .as_object_mut()
+                        .unwrap();
+                    reference.remove("type");
+                    reference.insert("data".into(), json!("AAAA"));
+                }
+                if defects.media == Some("tool_changes_payload") {
+                    message.message["content"]["tool_use_id"] = json!("different-call");
+                }
+                if defects.media == Some("tool_changes_text") {
+                    message.message["content"]["content"][0]["text"] = json!("different text");
+                }
+                if defects.media == Some("tool_keeps_marker") {
+                    message.message["content"]["content"] = json!([
+                        message.message["content"]["content"].clone(),
+                        "[media not shown: kind=image reason=not_requested]"
+                    ]);
+                }
+            }
         }
     }
     let value = serde_json::to_value(page).unwrap();

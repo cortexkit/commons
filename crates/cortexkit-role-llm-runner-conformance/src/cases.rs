@@ -193,6 +193,7 @@ where
             "media_only_send" => crate::attachments::media_only_send(self).await,
             name if name.starts_with("attachments_") => crate::attachments::run(self, name).await,
             name if name.starts_with("media_") => crate::media::run(self, name).await,
+            name if name.starts_with("tool_media_refs_") => crate::media::run(self, name).await,
             "user_commands_cutoff_after_forward" | "user_commands_cutoff_before_forward" => {
                 crate::user_commands::cutoff(self, name.ends_with("after_forward")).await
             }

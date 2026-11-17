@@ -16,6 +16,8 @@ use cortexkit_role_llm_runner::{
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod tool_media;
+
 type Check = Result<(), String>;
 
 /// Decoded size of the frame-budget case's image. Its base64 form
@@ -188,10 +190,29 @@ async fn pages<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
+    pages_with_tool_media(case, route, media, provider_profile, false).await
+}
+
+async fn pages_with_tool_media<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    route: &S::Route,
+    media: MediaMode,
+    provider_profile: Option<&str>,
+    tool_media: bool,
+) -> Result<Vec<ReadMessage>, String>
+where
+    S::Route: RunnerRoute,
+{
+    if tool_media && !case.declared.contains(&Capability::ToolMediaRefs) {
+        return Err("tool_media must never be sent without tool_media_refs".into());
+    }
     let mut all = Vec::new();
     let mut from = 0;
     for _ in 0..16 {
-        let request = ReadRequest::range(from).with_media(media);
+        let mut request = ReadRequest::range(from).with_media(media);
+        if tool_media {
+            request = request.with_tool_media(cortexkit_role_llm_runner::read::ToolMedia::Refs);
+        }
         let page: ReadPage = decode(
             "media read",
             expect_ok(
@@ -292,6 +313,9 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    if name == "tool_media_refs_invalid_params" {
+        return tool_media::invalid_params(case).await;
+    }
     let head = name == "media_descriptors_utf8_head";
     let marker = case.mint.next("descriptor");
     let fixture = fixture(name);
@@ -379,6 +403,11 @@ where
         profile.as_deref(),
     )
     .await?;
+    if name == "tool_media_refs_requested" {
+        let owned_broca = case.subject.serializer_profile(&session.name).as_deref()
+            == Some(cortexkit_role_llm_runner::serializer_profile::OWNED_BROCA);
+        return tool_media::check(case, &session.route, &described, owned_broca).await;
+    }
     let mut found = Vec::new();
     for message in &described {
         refs(&message.message, &mut found);

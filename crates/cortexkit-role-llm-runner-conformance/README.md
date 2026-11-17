@@ -58,6 +58,17 @@ reference must match descriptors' SHA-256, byte size and kind. Outside the
 identified outputs, comparisons are unchanged. The default `None` identifies
 no exception and retains strict comparison everywhere.
 
+The optional `tool_media_refs` group opts in only on `session.read` requests
+with `media: "media_refs", tool_media: "refs"`. Its cases are inapplicable
+without the declaration and never send the member to a non-declaring runner.
+Declaring adapters supply the same output-pointer hook for blocks, ordinary
+media-refs and opted-in reads; `owned-broca` output paths are recognized
+directly. The kit compares owned-broca output exactly with blocks. Other
+schemas must serve references matching descriptors. Missing references or
+remaining omission markers for nameable media fail the opted-in check, and
+the rest of each message must remain unchanged. Reads without the member
+keep their previous payloads, including after an opted-in read.
+
 Version **0.17.28** pins runner **0.8.24**. Mid-step `"live"` attaches
 (including absent or null `from`) replay the current step's real durable
 controls in cursor order before the display snapshot. This is required of

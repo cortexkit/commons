@@ -468,6 +468,7 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
     if !missing.is_empty() {
         if spec.name == "media_only_send"
             || spec.name.starts_with("media_refs_")
+            || spec.name.starts_with("tool_media_refs_")
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")
             || spec.name.starts_with("cleared_ride_")

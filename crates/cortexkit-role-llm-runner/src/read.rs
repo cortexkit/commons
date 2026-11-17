@@ -30,11 +30,66 @@ use serde_json::{Map, Value};
 pub mod descriptors;
 pub use descriptors::MediaMode;
 
+#[cfg(test)]
+mod tool_media_refs_tests {
+    use super::*;
+    use crate::capabilities::{MEDIA_REFS, TOOL_MEDIA_REFS};
+    use serde_json::json;
+
+    #[test]
+    fn tool_media_refs_request_gate_and_wire() {
+        let old = ReadRequest::range(1).with_media(MediaMode::MediaRefs);
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"media":"media_refs","from_ordinal":1}"#
+        );
+        let request = old.with_tool_media(ToolMedia::Refs);
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            wire,
+            json!({"from_ordinal":1,"media":"media_refs","tool_media":"refs"})
+        );
+        assert_eq!(
+            serde_json::from_value::<ReadRequest>(wire).unwrap(),
+            request
+        );
+        assert_eq!(request.check_media(&[MEDIA_REFS, TOOL_MEDIA_REFS]), Ok(()));
+        assert_eq!(request.check_media(&[MEDIA_REFS]), Err("tool_media"));
+        for mode in [
+            None,
+            Some(MediaMode::Inline),
+            Some(MediaMode::Blocks),
+            Some(MediaMode::Descriptors),
+        ] {
+            let mut request = request.clone();
+            request.media = mode;
+            assert_eq!(
+                request.check_media(&[MEDIA_REFS, TOOL_MEDIA_REFS]),
+                Err("tool_media")
+            );
+        }
+        for bad in [
+            json!(null),
+            json!(false),
+            json!(3),
+            json!("blocks"),
+            json!({}),
+        ] {
+            let error = serde_json::from_value::<ReadRequest>(
+                json!({"media":"media_refs","tool_media":bad}),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("tool_media"), "{error}");
+        }
+    }
+}
+
 /// The `field` an `invalid_params` refusal names when a read combines
 /// fields that exclude each other, or names `after_mid` without
 /// `history_version`.
 pub mod fields {
     pub const MEDIA: &str = "media";
+    pub const TOOL_MEDIA: &str = "tool_media";
     /// `session.history`'s opaque page cursor.
     pub const CURSOR: &str = "cursor";
     /// `session.history`'s forward start, inclusive.
@@ -68,6 +123,22 @@ where
     crate::strict::optional(deserializer, fields::VIEW, "\"raw\"")
 }
 
+/// Tool-output media representation on an opted-in media-refs read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ToolMedia {
+    /// Preserve structured output with media references, never media bytes.
+    Refs,
+}
+
+fn deserialize_tool_media<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ToolMedia>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(value) if value == "refs" => Ok(Some(ToolMedia::Refs)),
+        _ => Err(serde::de::Error::custom("tool_media must be \"refs\"")),
+    }
+}
+
 /// The `session.read` request.
 ///
 /// Strict on unknown fields: absence is meaningful here (no cursor means
@@ -98,6 +169,14 @@ pub struct ReadRequest {
         deserialize_with = "descriptors::deserialize_media"
     )]
     pub media: Option<MediaMode>,
+    /// Preserve tool-output media references. Valid only with `media_refs`
+    /// and sent only to a runner declaring `tool_media_refs`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_tool_media"
+    )]
+    pub tool_media: Option<ToolMedia>,
     /// Read forward from this ordinal. Excludes `after_mid`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_ordinal: Option<u64>,
@@ -154,6 +233,11 @@ impl ReadRequest {
         self.media = Some(media);
         self
     }
+
+    pub fn with_tool_media(mut self, tool_media: ToolMedia) -> Self {
+        self.tool_media = Some(tool_media);
+        self
+    }
     /// The newest page.
     pub fn tail() -> Self {
         Self::default()
@@ -200,6 +284,14 @@ impl ReadRequest {
 
     /// Check opt-in media modes against the runner's declared groups.
     pub fn check_media<S: AsRef<str>>(&self, groups: &[S]) -> Result<(), &'static str> {
+        if self.tool_media.is_some()
+            && (self.media != Some(MediaMode::MediaRefs)
+                || !groups
+                    .iter()
+                    .any(|group| group.as_ref() == crate::capabilities::TOOL_MEDIA_REFS))
+        {
+            return Err(fields::TOOL_MEDIA);
+        }
         self.media.unwrap_or_default().check_declared(groups)
     }
 

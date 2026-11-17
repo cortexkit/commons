@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.74
+
+- Pin the runner contract to `=0.8.61` for shared tool output views and
+  readers-first tool media references.
+- Check structured tool media only on opted-in reads, omission of the member
+  for non-declaring runners, and `invalid_params` naming `tool_media` when
+  used without `media_refs`. Exercise named faulty implementations for the
+  new checks.
+
 ## 0.17.73
 
 - Pin the runner contract to `=0.8.60` for send-state notices. This release

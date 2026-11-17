@@ -14,6 +14,7 @@ use serde_json::Value;
 
 pub mod error_output;
 mod opencode_v1;
+pub mod owned_broca;
 pub use opencode_v1::{opencode1_session_projection, OpenCode1OrdinalEntry};
 pub(crate) mod opencode_v2;
 pub use opencode_v2::{

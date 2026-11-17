@@ -351,6 +351,7 @@ alias until the next breaking release.
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
 | `media_only_send` | `session.send` with media content and no prompt text; requires `attachments` | §9, §9.12 |
 | `media_refs` | `session.read` and raw `session.history` where served, with `media: "media_refs"`; requires `attachments` and `transcript_reads` | §4.2, §9.12 |
+| `tool_media_refs` | `session.read` with `tool_media: "refs"` and `media: "media_refs"`; requires `media_refs` | §4.1, §4.2 |
 | `history_intake` | `session.head`; no group dependencies | §4.3 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
@@ -403,6 +404,7 @@ alias until the next breaking release.
   The `media_refs` group explicitly requires `transcript_reads` as well as
   `attachments`. `check_describe` refuses missing dependencies by name:
   `media_refs_without_attachments`, `media_refs_without_transcript_reads`,
+  `tool_media_refs_without_media_refs`,
   and `plan_notes_without_session_change` for `plan_notes`.
 - [pinned] A runner declares `system_text_default` only when it accepts a
   plan whose `system_text` item has no preset and forwards that item unchanged
@@ -551,7 +553,7 @@ Read admission follows §9.19 when the plan carries `readers`; without that
 member it keeps that runner's current read admission.
 
 `{from_ordinal?, after_mid?, history_version?, lineage_id?, limit?, max_bytes?,
-include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`ReadRequest`).
+include_originals?, view?, media?, tool_media?, include_rich_ui?, include_display_facts?}` (`ReadRequest`).
 
 - [pinned] **Tail.** No cursor means the newest page of the active path.
 - [pinned] **Range.** `from_ordinal` reads forward from that ordinal. 0 and 1
@@ -600,6 +602,13 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   payload bytes, whole-message paging and `reply_too_large` behavior; §9.12
   defines the text rendering of media on an `attachments` runner.
   Descriptors are offered on raw transcript reads.
+- [pinned] `tool_media: "refs"` opts in to structured tool-output media
+  references (§4.2). It is valid only with `media: "media_refs"`; a caller
+  sends it only to a runner declaring `tool_media_refs`. Unknown values,
+  `null`, use with another or absent media mode, or an undeclared member
+  are refused `invalid_params {field: "tool_media"}` before read work
+  (`ReadRequest::check_media`). Absent the member, served bytes are unchanged.
+  Readers accept the structured form before callers send the opt-in.
 - [pinned] The request is strict: an unknown field is refused
   `invalid_params` naming it, because a missing cursor changes the question
   (a misspelled `from_ordinal` would otherwise get the newest page).
@@ -819,8 +828,15 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   Media inside a tool result's output is replaced by `media_ref` in place only
   where the inline read carries the media payload there. Where the inline read
   flattens that output to text, the `media_refs` read serves the same text.
-  This release defines no member for carrying media references beside flattened
-  text; adding one is deferred to a future release.
+  With `tool_media: "refs"` on `session.read`, a runner declaring
+  `tool_media_refs` instead preserves the structured stored output when it
+  contains media: `owned-broca` serves `kind: "parts"`, with each media part's
+  `media` equal to the reference `media: "blocks"` serves (`sha256`, `mime`,
+  `kind`, `byte_size`, optional `width` and `height`), never media bytes.
+  Other runners substitute a reference for the marker wherever they can name
+  the media's SHA-256; otherwise the marker stays. Every other payload is
+  unchanged. Without this member the existing flattened text, including
+  `[media not shown: … reason=not_requested]` markers, stays unchanged.
 - [pinned] In descriptors mode every byte-backed image, file, PDF or audio
   payload becomes `{type: "media_ref", part?, kind, mime, byte_size, sha256,
   width?, height?}`. Size and SHA-256 are over decoded bytes, never base64.
@@ -1264,6 +1280,21 @@ that a model meant as content; it does not tell decoration from content.
   the runner first read it (read stability, §4.2). `display::opencode_aisdk` is its decoder (§4.7).
 - [pinned] **`owned-broca`.** An entry's body has a `content` array of parts.
   Descriptors replace payloads inside a part, never the whole array.
+- [pinned] **`owned-broca` tool output views**
+  (`serializer_profile::owned_broca::tool_output(output, is_error)`). The
+  inputs are a stored output envelope and its sibling tool-result error flag,
+  not the tool-result wrapper or an embedded flag. `ToolOutputView` contains
+  `text`, ordered `media` references (the same fields as `blocks`, no bytes)
+  and `is_error`. `text` outputs keep their text; `json` outputs use compact
+  JSON text; `denied` renders `denied: <reason>`; `error` uses
+  `error_output::render`. For `parts`, only text parts join with `\n`, in
+  order, and media parts enter `media` without a text omission marker.
+  The stored error flag is preserved; `denied` and `error` imply true.
+  Malformed envelopes return `Violation`, never a panic. The conversion
+  adds no notices, part labels or view rewrites. Family transport wrapping,
+  including Gemini's `functionResponse`, stays outside it. The ten cases in
+  `test-vectors/owned-broca-tool-output/` pin recorded serve-path inputs and
+  text-only family conversions with public example identifiers.
 - [pinned] **`owned-broca` error outputs** (`serializer_profile::error_output`).
   A tool result's error output is `{"kind": "error", "message": ...}`.
   After `message` it may carry five optional members, encoded in this

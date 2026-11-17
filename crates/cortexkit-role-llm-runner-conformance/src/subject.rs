@@ -98,6 +98,8 @@ pub enum Capability {
     PlanNotes,
     /// Inline reads that reference media without describing large text.
     MediaRefs,
+    /// Structured tool media references only on explicitly opted-in reads.
+    ToolMediaRefs,
     /// Initial host-history intake state on the head; optional seeded-intake hooks.
     HistoryIntake,
     /// Whole-session retention with limits from `role.describe.retention`.
@@ -250,6 +252,7 @@ impl Capability {
         Self::SessionChange,
         Self::PlanNotes,
         Self::MediaRefs,
+        Self::ToolMediaRefs,
         Self::HistoryIntake,
         Self::Retention,
         Self::SessionRetention,
@@ -338,6 +341,7 @@ impl Capability {
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::PlanNotes => groups::PLAN_NOTES,
             Self::MediaRefs => groups::MEDIA_REFS,
+            Self::ToolMediaRefs => groups::TOOL_MEDIA_REFS,
             Self::HistoryIntake => groups::HISTORY_INTAKE,
             Self::Retention => groups::RETENTION,
             Self::SessionRetention => groups::SESSION_RETENTION,
@@ -2002,11 +2006,14 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Exact JSON pointer, relative to `message`, of the output inside the
     /// tool-result part named by `part_key` from [`Self::read_parts`]. Return it
-    /// consistently for inline, descriptors and media-refs reads. Only values
+    /// consistently for inline, blocks, descriptors and media-refs reads,
+    /// including `tool_media: "refs"`. Only values
     /// beneath that pointer may omit media refs when unchanged from inline;
     /// the part's envelope and all other values keep the strict comparison.
     /// Flattening adapters must supply this hook. `None` keeps the existing
     /// strict comparison everywhere; never identify a non-tool output here.
+    /// Declaring `tool_media_refs` removes the unchanged-inline exception on
+    /// opted-in reads: nameable tool media must then be served as references.
     fn media_refs_tool_output_pointer(&self, _message: &Value, _part_key: &str) -> Option<String> {
         None
     }

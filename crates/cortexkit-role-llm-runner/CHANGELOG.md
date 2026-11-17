@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.61
+
+- Add `serializer_profile::owned_broca::tool_output(output, is_error)` and
+  `ToolOutputView` for stored tool output text, ordered media references and
+  error status. Pin the conversion with ten identifier-neutralized recordings.
+- Add optional `tool_media_refs` (requires `media_refs`) and the readers-first
+  `session.read` member `tool_media: "refs"`, valid only with
+  `media: "media_refs"`. Opted-in reads preserve structured tool media
+  references without bytes. Absent the member, served payloads are unchanged.
+
 ## 0.8.60
 
 - Pin the `send_state.v1` bus wake-up for reserved senders of keyed sends,

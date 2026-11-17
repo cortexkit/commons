@@ -1,0 +1,80 @@
+[
+  {
+    "id": "case-01",
+    "output": { "kind": "text", "text": "line one\nline two" },
+    "is_error": false,
+    "expected": { "text": "line one\nline two", "media": [], "is_error": false }
+  },
+  {
+    "id": "case-02",
+    "output": { "kind": "text", "text": "No such file: notes.md" },
+    "is_error": true,
+    "expected": { "text": "No such file: notes.md", "media": [], "is_error": true }
+  },
+  {
+    "id": "case-03",
+    "output": { "kind": "text", "text": "" },
+    "is_error": false,
+    "expected": { "text": "", "media": [], "is_error": false }
+  },
+  {
+    "id": "case-04",
+    "output": { "kind": "denied", "reason": "the person declined" },
+    "is_error": true,
+    "expected": { "text": "denied: the person declined", "media": [], "is_error": true }
+  },
+  {
+    "id": "case-05",
+    "output": { "kind": "json", "value": { "count": 2, "files": ["a.rs", "b.rs"] } },
+    "is_error": false,
+    "expected": { "text": "{\"count\":2,\"files\":[\"a.rs\",\"b.rs\"]}", "media": [], "is_error": false }
+  },
+  {
+    "id": "case-06",
+    "output": { "kind": "error", "message": "exit status 1" },
+    "is_error": true,
+    "expected": { "text": "exit status 1", "media": [], "is_error": true }
+  },
+  {
+    "id": "case-07",
+    "output": { "kind": "parts", "parts": [{ "kind": "text", "text": "first part" }, { "kind": "text", "text": "second part" }] },
+    "is_error": false,
+    "expected": { "text": "first part\nsecond part", "media": [], "is_error": false }
+  },
+  {
+    "id": "case-08",
+    "output": { "kind": "error", "message": "the tool's module is unavailable", "module": "sample-tool", "code": "target_unavailable", "detail": "module restarting", "nothing_sent": true, "retry": "safe" },
+    "is_error": true,
+    "expected": { "text": "the tool's module is unavailable\nmodule: sample-tool\ncode: target_unavailable\ndetail: module restarting\nnothing was sent\nretry: safe", "media": [], "is_error": true }
+  },
+  {
+    "id": "case-09",
+    "output": {
+      "kind": "parts",
+      "parts": [
+        { "kind": "text", "text": "the screen" },
+        { "kind": "media", "media": { "sha256": "2bb3f6f7eb60006453f46d1a1f6fb72cb30be54fbe604d29a31a8a41cc0a5fe7", "mime": "image/png", "kind": "image", "byte_size": 4749, "width": 640, "height": 160 } },
+        { "kind": "text", "text": "after the image" }
+      ]
+    },
+    "is_error": false,
+    "expected": {
+      "text": "the screen\nafter the image",
+      "media": [{ "sha256": "2bb3f6f7eb60006453f46d1a1f6fb72cb30be54fbe604d29a31a8a41cc0a5fe7", "mime": "image/png", "kind": "image", "byte_size": 4749, "width": 640, "height": 160 }],
+      "is_error": false
+    }
+  },
+  {
+    "id": "case-10",
+    "output": {
+      "kind": "parts",
+      "parts": [{ "kind": "media", "media": { "sha256": "2bb3f6f7eb60006453f46d1a1f6fb72cb30be54fbe604d29a31a8a41cc0a5fe7", "mime": "image/png", "kind": "image", "byte_size": 4749, "width": 640, "height": 160 } }]
+    },
+    "is_error": false,
+    "expected": {
+      "text": "",
+      "media": [{ "sha256": "2bb3f6f7eb60006453f46d1a1f6fb72cb30be54fbe604d29a31a8a41cc0a5fe7", "mime": "image/png", "kind": "image", "byte_size": 4749, "width": 640, "height": 160 }],
+      "is_error": false
+    }
+  }
+]

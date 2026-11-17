@@ -172,6 +172,7 @@ const READ_FIELDS: &[&str] = &[
     "include_display_facts",
     "include_rich_ui",
     "media",
+    "tool_media",
     "from_ordinal",
     "after_mid",
     "history_version",
@@ -4875,11 +4876,17 @@ impl Module {
     }
 
     fn read(&self, session: &str, params: &Value) -> Reply {
+        assert!(
+            self.world.defects.media != Some("tool_non_declaring")
+                || params.get("tool_media").is_none(),
+            "a non-declaring runner must never be asked for tool_media"
+        );
         if let Some(field) = unknown_field(params, READ_FIELDS) {
             return invalid(&field);
         }
         let mut request: ReadRequest = match serde_json::from_value(params.clone()) {
             Ok(request) => request,
+            Err(e) if e.to_string().contains("tool_media") => return invalid("tool_media"),
             Err(e) if e.to_string().contains("media") => return invalid("media"),
             Err(_) => return invalid("view"),
         };
@@ -4898,7 +4905,11 @@ impl Module {
         if let Err(field) = request.check_rich_ui(&self.world.groups) {
             return invalid(field);
         }
-        if let Err(field) = request.check_media(&self.world.groups) {
+        let mut checked_media = request.clone();
+        if self.world.defects.media == Some("tool_invalid_accepted") {
+            checked_media.tool_media = None;
+        }
+        if let Err(field) = checked_media.check_media(&self.world.groups) {
             return invalid(field);
         }
         let sessions = self.sessions.lock().unwrap();
@@ -5140,7 +5151,13 @@ impl Module {
         if end < all.len() {
             page = page.with_next_from_ordinal(all[end].ordinal);
         }
-        let mut reply = media::page(page, request.media, cap, &self.world.defects);
+        let mut reply = media::page_with_tool_media(
+            page,
+            request.media,
+            request.tool_media.is_some(),
+            cap,
+            &self.world.defects,
+        );
         if let Reply::Response(body) = &mut reply {
             if self.world.defects.notices == Some("missing_call_key") {
                 for message in body["messages"].as_array_mut().unwrap() {
@@ -7487,6 +7504,15 @@ impl LlmRunnerSubject for FakeSubject {
             {
                 json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,
                 "content":[image.clone()],"metadata_media":image})
+            } else if nested
+                && self
+                    .defects
+                    .media
+                    .is_some_and(|defect| defect.starts_with("tool_"))
+            {
+                json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,"content":[
+                    {"type":"text","text":"before-media"}, image, {"type":"text","text":"after-media"}
+                ]})
             } else if nested {
                 json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,"content":[image]})
             } else {

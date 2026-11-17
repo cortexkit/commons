@@ -1373,6 +1373,79 @@ async fn media_refs_tool_output_hook_keeps_envelope_references_strict() {
     println!("FAIL {name}: {reason}");
 }
 
+fn tool_media_refs_subject(defect: &'static str) -> FakeSubject {
+    let mut subject = media_reference_subject(Some(defect));
+    subject.capabilities.insert(Capability::ToolMediaRefs);
+    subject.media_refs_output_hook = true;
+    subject
+}
+
+#[tokio::test]
+async fn tool_media_refs_requested_and_faulty_runners() {
+    let name = "tool_media_refs_requested";
+    let report = run(&tool_media_refs_subject("tool_flattened")).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    for (defect, reason) in [
+        ("tool_still_flattened", "kept a marker"),
+        ("tool_leaks_default", "leaked into a read without"),
+        ("tool_bad_digest", "references differ"),
+        ("tool_bytes_with_metadata", "media bytes are forbidden"),
+        ("tool_changes_payload", "outside tool output"),
+        (
+            "tool_changes_text",
+            "non-media structure differs from descriptors",
+        ),
+        ("tool_keeps_marker", "kept a marker"),
+    ] {
+        let report = run(&tool_media_refs_subject(defect)).await;
+        let actual = failed(&report, name);
+        assert!(actual.contains(reason), "{defect}: {actual}");
+        println!("FAIL {name} ({defect}): {actual}");
+    }
+}
+
+#[tokio::test]
+async fn tool_media_refs_invalid_params_and_faulty_runner() {
+    let name = "tool_media_refs_invalid_params";
+    let report = run(&tool_media_refs_subject("tool_flattened")).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    let reason = failed(
+        &run(&tool_media_refs_subject("tool_invalid_accepted")).await,
+        name,
+    );
+    assert!(reason.contains("invalid tool_media"), "{reason}");
+    println!("FAIL {name}: {reason}");
+}
+
+#[tokio::test]
+async fn tool_media_refs_non_declaring_runner_is_never_asked() {
+    let mut subject = tool_media_refs_subject("tool_non_declaring");
+    subject.capabilities.remove(&Capability::ToolMediaRefs);
+    let report = run(&subject).await;
+    for name in [
+        "tool_media_refs_requested",
+        "tool_media_refs_invalid_params",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+            if reason.contains("tool_media_refs")),
+            "{}",
+            report.render()
+        );
+    }
+    assert_passed(&report, "media_refs_media_are_refs");
+}
+
 fn assert_passed(report: &SuiteReport, case: &str) {
     if case.starts_with("host_start_")
         && matches!(report.outcome(case), Some(CaseOutcome::SkippedWithReason { reason, .. })
@@ -1405,7 +1478,9 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
-    if (case.starts_with("plan_notes_") || case.starts_with("media_refs_"))
+    if (case.starts_with("plan_notes_")
+        || case.starts_with("media_refs_")
+        || case.starts_with("tool_media_refs_"))
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
     {
         return;
@@ -1713,6 +1788,7 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         || case.starts_with("history_intake_")
         || case.starts_with("plan_notes_")
         || case.starts_with("media_refs_")
+        || case.starts_with("tool_media_refs_")
         || case.starts_with("adopt_open_")
         || case.starts_with("live_ids_")
         || case.starts_with("message_senders_")
@@ -1797,6 +1873,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::HistoryIntake,
     Capability::PlanNotes,
     Capability::MediaRefs,
+    Capability::ToolMediaRefs,
     Capability::MessageMarks,
     Capability::Plans,
     Capability::SessionRetention,
@@ -2354,6 +2431,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             || spec.name.starts_with("plan_view_")
             || spec.name.starts_with("keep_warm_")
             || spec.name.starts_with("media_refs_")
+            || spec.name.starts_with("tool_media_refs_")
             || spec.name.starts_with("plan_notes_")
             || spec.name.starts_with("adopt_open_")
             || spec.name.starts_with("sender_attribution_")
