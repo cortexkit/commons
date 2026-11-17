@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- `publish_event` sends a non-empty body with its SHA-256 as `Ck-Content-Digest`,
+  the same header claim checks carry. A reader can check the bytes it
+  received, and a publisher whose event format requires the body, the message
+  id and the digest together can use this helper. An empty body is still sent
+  without a digest, because an empty payload with a digest is the claim-check
+  shape.
+
 ## 0.1.5
 
 - Accepts cortexkit-bus-naming 0.5.

@@ -17,6 +17,10 @@ use bytes::Bytes;
 use cortexkit_bus_naming::{validate_token, AccountNames, TokenKind};
 use cortexkit_bus_nats::{ConnectConfig, NatsConnection};
 use cortexkit_bus_trait::{ContentDigest, Headers, PublishReceipt, Stream};
+
+/// The header carrying a body's SHA-256, spelled as the NATS codec writes it
+/// for claim checks.
+const CONTENT_DIGEST_HEADER: &str = "Ck-Content-Digest";
 use subc_client_rs::SubcConsumer;
 use tokio::sync::watch;
 
@@ -264,6 +268,9 @@ impl BusClient {
     /// Event bodies carry ids, counters and enums, not large content. Bodies
     /// larger than 4 KiB are refused; retrieve large content through its owner's
     /// own call instead.
+    /// A non-empty body is sent with its SHA-256 as `Ck-Content-Digest`, so a
+    /// reader can check the bytes it received. An empty body is sent without one,
+    /// because an empty payload with a digest is the claim-check shape.
     /// Inline bodies reach every reader whose durable matches the subject, with
     /// no per-reader visibility check; reserve them for pointers and facts every
     /// declared reader may see. Flow triggers must use [`Self::publish_claim_check`],
@@ -286,6 +293,12 @@ impl BusClient {
         let subject = self.event_subject(event, version, qualifier)?;
         let mut headers = async_nats::HeaderMap::new();
         headers.insert(async_nats::header::NATS_MESSAGE_ID, msg_id);
+        if !body.is_empty() {
+            headers.insert(
+                CONTENT_DIGEST_HEADER,
+                ContentDigest::of_bytes(&body).to_string().as_str(),
+            );
+        }
         let ack = async_nats::jetstream::new(self.connection().client())
             .publish_with_headers(subject, headers, body)
             .await

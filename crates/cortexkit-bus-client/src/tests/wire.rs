@@ -250,6 +250,11 @@ async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
     );
     let event = String::from_utf8(seen.publishes[0].1.clone()).unwrap();
     assert!(event.contains("Nats-Msg-Id: fact-42\r\n"));
+    let digest = cortexkit_bus_trait::ContentDigest::of_bytes(b"event-body");
+    assert!(
+        event.contains(&format!("Ck-Content-Digest: {digest}\r\n")),
+        "an inline body carries its own SHA-256: {event}"
+    );
     assert!(event.ends_with("\r\n\r\nevent-body"));
     assert_eq!(
         seen.publishes[1],
@@ -608,10 +613,13 @@ async fn publish_event_body_limit_is_4096_bytes() {
         .unwrap_err();
     assert!(matches!(error, Error::EventBodyTooLarge { size: 4097 }));
     client.connection().client().flush().await.unwrap();
-    assert_eq!(
-        server.observed.lock().unwrap().publishes.len(),
-        2,
-        "oversize body never reaches NATS"
+    let seen = server.observed.lock().unwrap();
+    assert_eq!(seen.publishes.len(), 2, "oversize body never reaches NATS");
+    let empty = String::from_utf8(seen.publishes[1].1.clone()).unwrap();
+    assert!(empty.contains("Nats-Msg-Id: empty\r\n"));
+    assert!(
+        !empty.contains("Ck-Content-Digest"),
+        "an empty inline body must not take the claim-check shape: {empty}"
     );
 }
 
