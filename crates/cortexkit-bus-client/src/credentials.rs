@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use cortexkit_bus_naming::federation::{module_deliver_prefix, BoxId};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::{watch, Mutex, RwLock};
@@ -83,7 +84,13 @@ impl Credential {
         let credential: Self =
             serde_json::from_value(value).map_err(|_| Error::Reply("missing credential fields"))?;
         let config = cortexkit_bus_nats::ConnectConfig::new(&credential.credential_public)?;
-        if config.inbox_prefix() != credential.inbox_prefix {
+        let deliver_prefix = credential
+            .inbox_prefix
+            .rsplit_once('.')
+            .and_then(|(_, module)| module_deliver_prefix(&box_id(&credential.acct)?, module).ok());
+        if config.inbox_prefix() != credential.inbox_prefix
+            && deliver_prefix.as_deref() != Some(credential.inbox_prefix.as_str())
+        {
             return Err(Error::Reply(
                 "credential inbox prefix does not match its key",
             ));
@@ -184,7 +191,7 @@ impl CredentialManager {
                 .map_err(|_| Error::Reply("invalid base64 nonce signature")),
             Err(error) if needs_reissue(&error) => {
                 self.reissue(public).await?;
-                // This connection still has the old inbox. Only a replacement
+                // This connection still uses the old credential. Only a replacement
                 // connection may authenticate with the newly issued key.
                 Err(Error::Reply("connection credential was replaced"))
             }
@@ -214,11 +221,18 @@ impl CredentialManager {
                     jwt: String,
                     exp: u64,
                     credential_public: String,
+                    inbox_prefix: Option<String>,
                 }
                 let renewal: Renewal = serde_json::from_value(value)
                     .map_err(|_| Error::Reply("missing renewal fields"))?;
                 if renewal.credential_public != observed.credential_public {
                     return Err(Error::Reply("renewal changed the credential key"));
+                }
+                if renewal
+                    .inbox_prefix
+                    .is_some_and(|prefix| prefix != observed.inbox_prefix)
+                {
+                    return Err(Error::Reply("renewal changed the inbox prefix"));
                 }
                 let mut current = self.current.write().await;
                 current.jwt = renewal.jwt;
@@ -232,6 +246,10 @@ impl CredentialManager {
             Err(error) => Err(error),
         }
     }
+}
+
+pub(crate) fn box_id(acct: &str) -> Option<BoxId> {
+    BoxId::parse(acct.strip_prefix("box_")?).ok()
 }
 
 fn needs_reissue(error: &Error) -> bool {
@@ -253,4 +271,137 @@ pub(crate) fn renewal_delay(exp: u64) -> Duration {
     // a stable, small jitter.
     let jitter = u64::from(std::process::id() % 7);
     Duration::from_secs(exp.saturating_sub(300 + jitter)).saturating_sub(now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOX: &str = "0123456789abcdef0123456789abcdef";
+    const DELIVER: &str = "ckdel.0123456789abcdef0123456789abcdef.example-module_2";
+
+    fn reply(prefix: &str, acct: &str) -> Value {
+        json!({"jwt":"jwt", "exp":1234, "credential_public":"UKEY0",
+            "acct":acct, "server_url":"nats://127.0.0.1:4222", "inbox_prefix":prefix})
+    }
+
+    #[test]
+    fn inbox_prefix_accepts_credential_and_box_module_forms() {
+        for prefix in ["_INBOX.UKEY0", DELIVER] {
+            let credential = Credential::parse(reply(prefix, &format!("box_{BOX}"))).unwrap();
+            assert_eq!(credential.inbox_prefix, prefix);
+            assert_eq!(box_id(&credential.acct).unwrap().as_str(), BOX);
+        }
+        for acct in ["box_test", "another_account"] {
+            let credential = Credential::parse(reply("_INBOX.UKEY0", acct)).unwrap();
+            assert_eq!(box_id(&credential.acct), None);
+        }
+    }
+
+    #[test]
+    fn inbox_prefix_refuses_unrelated_or_malformed_deliver_subjects() {
+        for prefix in [
+            "_INBOX.UKEY1",
+            "ckdel.fedcba9876543210fedcba9876543210.example-module_2",
+            "ckdel.0123456789abcdef0123456789abcdef.*",
+            "ckdel.0123456789abcdef0123456789abcdef.>",
+            "ckdel.0123456789abcdef0123456789abcdef.example.module",
+            "ckdel.0123456789abcdef0123456789abcdef.",
+            "ckdel.0123456789abcdef0123456789abcdef",
+            "ckdel.0123456789abcdef0123456789abcdef.Example",
+            "ckdel.0123456789abcdef0123456789abcdef.module name",
+        ] {
+            assert!(
+                matches!(
+                    Credential::parse(reply(prefix, &format!("box_{BOX}"))),
+                    Err(Error::Reply(
+                        "credential inbox prefix does not match its key"
+                    ))
+                ),
+                "{prefix}"
+            );
+        }
+        for acct in [
+            "box_test",
+            "another_account",
+            "box_0123456789ABCDEF0123456789ABCDEF",
+        ] {
+            assert!(
+                matches!(
+                    Credential::parse(reply(DELIVER, acct)),
+                    Err(Error::Reply(
+                        "credential inbox prefix does not match its key"
+                    ))
+                ),
+                "{acct}"
+            );
+        }
+    }
+
+    struct PrefixTransport {
+        initial: &'static str,
+        renewed: Option<&'static str>,
+    }
+
+    #[async_trait]
+    impl CredentialTransport for PrefixTransport {
+        async fn call(&self, method: &str, _: Value) -> Result<Value> {
+            match method {
+                "ckbus.credential" => Ok(reply(self.initial, &format!("box_{BOX}"))),
+                "ckbus.credential_renew" => {
+                    let mut value =
+                        json!({"jwt":"renewed", "exp":5678, "credential_public":"UKEY0"});
+                    if let Some(prefix) = self.renewed {
+                        value["inbox_prefix"] = prefix.into();
+                    }
+                    Ok(value)
+                }
+                _ => panic!("unexpected method {method}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn inbox_prefix_renewal_accepts_omitted_or_unchanged_prefix() {
+        for initial in ["_INBOX.UKEY0", DELIVER] {
+            for renewed in [None, Some(initial)] {
+                let manager =
+                    CredentialManager::start(Arc::new(PrefixTransport { initial, renewed }))
+                        .await
+                        .unwrap();
+                let revisions = manager.revisions();
+                manager.renew().await.unwrap();
+                let credential = manager.credential().await;
+                assert_eq!(credential.jwt, "renewed");
+                assert_eq!(credential.inbox_prefix, initial);
+                assert!(!revisions.has_changed().unwrap());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn inbox_prefix_renewal_refuses_changed_form_or_module() {
+        for (initial, renewed) in [
+            ("_INBOX.UKEY0", DELIVER),
+            (DELIVER, "_INBOX.UKEY0"),
+            (
+                DELIVER,
+                "ckdel.0123456789abcdef0123456789abcdef.other-module",
+            ),
+        ] {
+            let manager = CredentialManager::start(Arc::new(PrefixTransport {
+                initial,
+                renewed: Some(renewed),
+            }))
+            .await
+            .unwrap();
+            assert!(matches!(
+                manager.renew().await,
+                Err(Error::Reply("renewal changed the inbox prefix"))
+            ));
+            let credential = manager.credential().await;
+            assert_eq!(credential.jwt, "jwt");
+            assert_eq!(credential.inbox_prefix, initial);
+        }
+    }
 }

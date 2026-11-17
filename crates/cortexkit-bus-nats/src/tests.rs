@@ -2,7 +2,7 @@ use async_nats::{Event, ServerError};
 use cortexkit_bus_trait::{BusError, ConnectionFailure};
 
 use crate::error::{map_connect_error, permission_violation};
-use crate::{ConnectConfig, ASYNC_NATS_VERSION_FLOOR};
+use crate::{ConnectConfig, NatsConnection, ASYNC_NATS_VERSION_FLOOR};
 
 #[test]
 fn declared_async_nats_floor_is_not_below_the_specification() {
@@ -18,6 +18,32 @@ fn inbox_prefix_is_credential_scoped() {
     let config = ConnectConfig::new("UABC234").expect("valid public nkey");
     assert_eq!(config.inbox_prefix(), "_INBOX.UABC234");
     assert!(ConnectConfig::new("UABC.bad").is_err());
+}
+
+#[tokio::test]
+async fn custom_inbox_prefix_refuses_invalid_subjects_before_connecting() {
+    for prefix in [
+        "",
+        ".module",
+        "module.",
+        "module..reply",
+        "module.*",
+        "module.>",
+        "module.re*ply",
+        "module.re>ply",
+        "module reply",
+        "module\nreply",
+        "module\0reply",
+    ] {
+        let result = NatsConnection::connect_with_inbox_prefix(
+            "nats://127.0.0.1:1",
+            async_nats::ConnectOptions::new(),
+            ConnectConfig::new("UABC234").unwrap(),
+            prefix,
+        )
+        .await;
+        assert!(matches!(result, Err(BusError::Denied { .. })), "{prefix:?}");
+    }
 }
 
 #[test]

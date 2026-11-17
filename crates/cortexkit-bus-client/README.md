@@ -21,14 +21,25 @@ bus.publish_event("fact.created", 1, None, "fact-42", "public fact").await?;
 The client calls `ckbus.credential` over a subc route whose caller identity the
 daemon authenticates using the module's launch nonce, and connects to the
 returned plaintext `nats://127.0.0.1:<port>` endpoint. It checks
-the returned `_INBOX.{credential_public}` prefix and lets `cortexkit-bus-nats`
-set it before connecting. Nonces are signed through `ckbus.nonce_sign`; the
-module never receives a seed.
+the returned inbox prefix and lets `cortexkit-bus-nats` set it before connecting.
+The prefix is either `_INBOX.{credential_public}` or, for a module that reads
+hub records, `ckdel.{box}.{module}`. The bus module must not serve the new prefix
+until readers run bus-client 0.1.7 or later with bus-nats 0.5.4 or later.
+Nonces are signed through `ckbus.nonce_sign`; the module never receives a seed.
+
+`inbox_prefix()` returns an owned copy of the current connection's prefix. It
+changes after credential re-issue for the per-credential form and stays stable
+for the `ckdel` form. `box_id()` returns the computer's box id from the
+credential's `box_{machine_id}` account, or `None` for another account form. Use
+the id supplied by the bus module in that account; a module must never derive it
+itself.
 
 JWTs last fifteen minutes. A background task renews roughly five minutes before
 `exp`, with zero to six seconds of process jitter. The dynamic NATS auth callback
-reads the latest same-key JWT on each reconnect. Renewal does not replace the
-connection or emit a change notification.
+reads the latest JWT for that connection's credential public key on each
+reconnect. Renewal must keep the same inbox prefix; older replies that omit the
+prefix leave it unchanged. Renewal does not replace the connection or emit a
+change notification.
 
 `ckbus_credential_superseded` and `ckbus_credential_revoked` from signing or
 renewal cause one single-flight re-issue for the observed key. Managers are
@@ -41,7 +52,7 @@ credential and retry with exponential backoff from 250 ms to 30 seconds. The
 specifies backoff but no numeric schedule. Initial connect waits
 through those refusals too; cancel its future to stop waiting.
 
-Re-issue creates a **new connection with the new key's inbox prefix**.
+Re-issue creates a **new connection with the new credential's inbox prefix**.
 `connection()` returns a cloned snapshot, not a permanently updating handle.
 Watch `connection_changes()` and reopen raw subscriptions and durable pulls on
 the new snapshot whenever it changes. `EventReader` and `BucketWatch` handle this

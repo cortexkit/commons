@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.4
+
+- Add `NatsConnection::connect_with_inbox_prefix` for validated custom inbox
+  subjects without changing `ConnectConfig` or its per-credential default.
+  The bus module must not serve the new hub deliver prefix until readers run
+  bus-client 0.1.7 or later with bus-nats 0.5.4 or later.
+
 ## 0.5.3
 
 - Expose a connection-state watch for connection loss, automatic reconnection

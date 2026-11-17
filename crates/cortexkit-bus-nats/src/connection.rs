@@ -81,17 +81,35 @@ impl NatsConnection {
         options: ConnectOptions,
         config: ConnectConfig,
     ) -> BusResult<Self> {
-        Self::connect_inner(addrs, options, config, true).await
+        let inbox_prefix = config.inbox_prefix();
+        Self::connect_inner(addrs, options, config, Some(inbox_prefix)).await
+    }
+
+    /// Connects using a supplied prefix for request replies and pushed deliveries.
+    ///
+    /// The prefix must contain nonempty, dot-separated subject tokens, without
+    /// wildcards or whitespace. The caller is responsible for obtaining a prefix
+    /// that the server permits this credential to subscribe to.
+    pub async fn connect_with_inbox_prefix<A: ToServerAddrs>(
+        addrs: A,
+        options: ConnectOptions,
+        config: ConnectConfig,
+        inbox_prefix: impl Into<String>,
+    ) -> BusResult<Self> {
+        let inbox_prefix = inbox_prefix.into();
+        validate_inbox_prefix(&inbox_prefix)?;
+        Self::connect_inner(addrs, options, config, Some(inbox_prefix)).await
     }
 
     async fn connect_inner<A: ToServerAddrs>(
         addrs: A,
         options: ConnectOptions,
         config: ConnectConfig,
-        set_inbox_prefix: bool,
+        custom_inbox_prefix: Option<String>,
     ) -> BusResult<Self> {
         validate_credential_public(&config.credential_public)?;
-        let inbox_prefix = config.inbox_prefix();
+        let set_inbox_prefix = custom_inbox_prefix.is_some();
+        let inbox_prefix = custom_inbox_prefix.unwrap_or_else(|| config.inbox_prefix());
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let event_sender = events.clone();
         let (connection_state, _) = watch::channel(NatsConnectionState::Connected);
@@ -294,7 +312,7 @@ impl NatsConnection {
         options: ConnectOptions,
         config: ConnectConfig,
     ) -> BusResult<Self> {
-        Self::connect_inner(addrs, options, config, false).await
+        Self::connect_inner(addrs, options, config, None).await
     }
 }
 
@@ -328,6 +346,20 @@ fn validate_credential_public(value: &str) -> BusResult<()> {
         return Err(BusError::denied(
             format!("{INBOX_ROOT}.{value}"),
             "credential public key is not a valid inbox subject token",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_inbox_prefix(value: &str) -> BusResult<()> {
+    if value.split('.').any(str::is_empty)
+        || value.chars().any(|character| {
+            matches!(character, '*' | '>') || character.is_whitespace() || character.is_control()
+        })
+    {
+        return Err(BusError::denied(
+            value,
+            "inbox prefix must contain nonempty subject tokens without wildcards or whitespace",
         ));
     }
     Ok(())

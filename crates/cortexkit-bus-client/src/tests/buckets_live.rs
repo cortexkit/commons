@@ -9,11 +9,13 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine,
 };
+use cortexkit_bus_naming::federation::{module_deliver_prefix, BoxId};
 use cortexkit_bus_naming::{AccountNames, MODULE_BUCKETS};
 use cortexkit_bus_testkit::{
     trust::{self, TrustChain},
     BusOptions, BusServer, PreloadedAccount,
 };
+use futures_util::StreamExt;
 use nkeys::KeyPair;
 use serde_json::{json, Value};
 
@@ -40,6 +42,8 @@ fn jwt(signer: &KeyPair, subject: &str, name: &str, nats: Value) -> String {
 pub(super) struct Issuer {
     url: String,
     account: String,
+    acct: &'static str,
+    inbox_prefix: Option<String>,
     trust: TrustChain,
     module: &'static str,
     keys: Mutex<Vec<KeyPair>>,
@@ -51,10 +55,14 @@ pub(super) struct Issuer {
 
 impl Issuer {
     fn credential(&self, key: &KeyPair) -> Value {
-        let names = AccountNames::derive("box_goldenfixture").unwrap();
+        let names = AccountNames::derive(self.acct).unwrap();
         let public = key.public_key();
+        let inbox_prefix = self
+            .inbox_prefix
+            .clone()
+            .unwrap_or_else(|| format!("_INBOX.{public}"));
         // These are the module KV grant subjects emitted by ck-bus, with only
-        // the credential-scoped inbox substituted. They allow unnamed consumer
+        // the issued inbox substituted. They allow unnamed consumer
         // creation but neither named consumer creation nor consumer deletion.
         let mut publish = Vec::new();
         for owner in ["aft", "cerebellum"] {
@@ -89,14 +97,14 @@ impl Issuer {
             &public,
             "bucket-fixture-user",
             json!({"type":"user", "version":2, "issuer_account":self.account,
-                "pub":{"allow": publish}, "sub":{"allow":[format!("_INBOX.{public}.>")]},
+                "pub":{"allow": publish}, "sub":{"allow":[format!("{inbox_prefix}.>")]},
                 "subs":-1, "data":-1, "payload":-1}),
         );
         // The credential envelope is the same shape returned by the bus. Its
         // test-only signer holds throwaway keys rather than a module seed.
         json!({"jwt":jwt, "exp":now + 900,
             "acct":names.account(), "credential_public":public,
-            "server_url":self.url, "inbox_prefix":format!("_INBOX.{public}"),
+            "server_url":self.url, "inbox_prefix":inbox_prefix,
             "spawn_generation":1, "credential_epoch":0, "user_jwt_id":"fixture"})
     }
 }
@@ -136,11 +144,16 @@ impl CredentialTransport for Issuer {
 pub(super) struct Rig {
     pub(super) server: BusServer,
     account: String,
+    acct: &'static str,
     pub(super) admin: async_nats::Client,
 }
 
 impl Rig {
     pub(super) async fn start() -> Option<Self> {
+        Self::start_for("box_goldenfixture").await
+    }
+
+    async fn start_for(acct: &'static str) -> Option<Self> {
         let Some(binary) = std::env::var_os("CK_NATS_SERVER_BIN") else {
             assert_ne!(
                 std::env::var("CK_REQUIRE_NATS_SERVER").as_deref(),
@@ -218,7 +231,7 @@ impl Rig {
         .await
         .unwrap();
         let context = async_nats::jetstream::new(admin.clone());
-        let names = AccountNames::derive("box_goldenfixture").unwrap();
+        let names = AccountNames::derive(acct).unwrap();
         for declaration in MODULE_BUCKETS.iter().filter(|entry| entry.name == "views") {
             // Match bus provisioning, including the shared cap of 16 watchers.
             let bucket = names
@@ -243,6 +256,7 @@ impl Rig {
         Some(Self {
             server,
             account,
+            acct,
             admin,
         })
     }
@@ -266,9 +280,20 @@ impl Rig {
         module: &'static str,
         url: &str,
     ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
+        self.client_with_prefix(module, url, None).await
+    }
+
+    async fn client_with_prefix(
+        &self,
+        module: &'static str,
+        url: &str,
+        inbox_prefix: Option<String>,
+    ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
         let issuer = Arc::new(Issuer {
             url: url.into(),
             account: self.account.clone(),
+            acct: self.acct,
+            inbox_prefix,
             trust: self.server.trust.clone(),
             module,
             keys: Mutex::new(vec![]),
@@ -290,6 +315,103 @@ async fn next(watch: &mut BucketWatch) -> BucketItem {
         .await
         .expect("watch timed out")
         .unwrap()
+}
+
+#[tokio::test]
+async fn inbox_prefix_live_deliver_request_and_kv_watch() {
+    const BOX: &str = "0123456789abcdef0123456789abcdef";
+    let Some(rig) = Rig::start_for("box_0123456789abcdef0123456789abcdef").await else {
+        return;
+    };
+    let (owner, _) = rig.client("aft").await;
+    let prefix = module_deliver_prefix(&BoxId::parse(BOX).unwrap(), "occipital").unwrap();
+    let (reader, manager, _) = rig
+        .client_with_prefix("occipital", &rig.server.url, Some(prefix.clone()))
+        .await;
+    assert_eq!(reader.box_id().unwrap().as_str(), BOX);
+    assert_eq!(reader.inbox_prefix(), prefix);
+    let mut deliveries = rig.admin.subscribe(format!("{prefix}.>")).await.unwrap();
+    rig.admin.flush().await.unwrap();
+
+    let bucket_name = AccountNames::derive(reader.acct())
+        .unwrap()
+        .module_bucket_name("aft", "views")
+        .unwrap();
+    let reply = reader
+        .connection()
+        .client()
+        .request(format!("$JS.API.STREAM.INFO.KV_{bucket_name}"), "".into())
+        .await
+        .unwrap();
+    let info: Value = serde_json::from_slice(&reply.payload).unwrap();
+    assert_eq!(info["config"]["name"], format!("KV_{bucket_name}"));
+    let observed = tokio::time::timeout(Duration::from_secs(10), deliveries.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(observed.subject.starts_with(&format!("{prefix}.")));
+    assert_eq!(observed.payload, reply.payload);
+
+    let mut watch = reader
+        .bucket("aft", "views")
+        .unwrap()
+        .watch()
+        .await
+        .unwrap();
+    assert_eq!(next(&mut watch).await, BucketItem::CaughtUp);
+    let consumers = rig
+        .admin
+        .request(
+            format!("$JS.API.CONSUMER.LIST.KV_{bucket_name}"),
+            "{}".into(),
+        )
+        .await
+        .unwrap();
+    let consumers: Value = serde_json::from_slice(&consumers.payload).unwrap();
+    let consumers = consumers["consumers"].as_array().unwrap();
+    assert_eq!(consumers.len(), 1);
+    assert!(consumers[0]["config"]["deliver_subject"]
+        .as_str()
+        .unwrap()
+        .starts_with(&format!("{prefix}.")));
+
+    let revision = owner
+        .bucket("aft", "views")
+        .unwrap()
+        .put("key", "hub-value")
+        .await
+        .unwrap();
+    assert_eq!(
+        next(&mut watch).await,
+        BucketItem::Put {
+            key: "key".into(),
+            revision,
+            value: "hub-value".into(),
+        }
+    );
+    // The independent subscription observes the pushed value on the exported
+    // prefix as well as the watch consuming it through its own subscription.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let message = deliveries.next().await.unwrap();
+            if message.payload == "hub-value" {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    manager.renew().await.unwrap();
+    let mut changes = reader.connection_changes();
+    let public = manager.credential().await.credential_public;
+    manager.reissue(&public).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), changes.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reader.inbox_prefix(), prefix);
+    assert_eq!(reader.box_id().unwrap().as_str(), BOX);
 }
 
 #[tokio::test]

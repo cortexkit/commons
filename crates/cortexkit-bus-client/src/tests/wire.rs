@@ -211,6 +211,8 @@ async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
     let mut changes = client.connection_changes();
     let old = client.connection();
     assert_eq!(old.inbox_prefix(), "_INBOX.UKEY0");
+    assert_eq!(client.inbox_prefix(), "_INBOX.UKEY0");
+    assert_eq!(client.box_id(), None);
     manager.renew().await.unwrap();
     old.client().force_reconnect().await.unwrap();
     server.wait_for(|seen| seen.auth.len() >= 2).await;
@@ -227,6 +229,7 @@ async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
         .unwrap();
     assert_eq!(*changes.borrow_and_update(), 1);
     assert_eq!(client.connection().inbox_prefix(), "_INBOX.UKEY1");
+    assert_eq!(client.inbox_prefix(), "_INBOX.UKEY1");
     assert_eq!(
         old.inbox_prefix(),
         "_INBOX.UKEY0",

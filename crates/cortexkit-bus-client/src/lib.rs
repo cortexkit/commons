@@ -231,7 +231,7 @@ impl BusClient {
             .clone()
     }
 
-    /// Changes only after a replacement connection with a new inbox is ready.
+    /// Changes only after a replacement connection with its issued inbox prefix is ready.
     /// Reopen raw subscriptions and durable pulls when this receiver changes;
     /// [`EventReader`] handles its own rebinding automatically.
     ///
@@ -245,6 +245,23 @@ impl BusClient {
 
     pub fn acct(&self) -> &str {
         self.names.account()
+    }
+
+    /// Returns the computer's box id as supplied by the bus module's account.
+    ///
+    /// Modules must never derive this id themselves. Returns `None` unless the
+    /// account is `box_` followed by a canonical 32-character box id.
+    pub fn box_id(&self) -> Option<cortexkit_bus_naming::federation::BoxId> {
+        credentials::box_id(self.acct())
+    }
+
+    /// Returns the inbox prefix used by the current connection.
+    ///
+    /// A per-credential prefix changes after credential re-issue; a module's
+    /// `ckdel` prefix stays stable. Use [`Self::connection_changes`] to observe
+    /// replacements, or [`NatsConnection::inbox_prefix`] for a held snapshot.
+    pub fn inbox_prefix(&self) -> String {
+        self.connection().inbox_prefix().to_owned()
     }
 
     /// Attaches to an existing EVENT durable owned by this module.
@@ -415,9 +432,18 @@ async fn connect_current(
     .max_reconnects(MAX_RECONNECTS);
     let mut config = ConnectConfig::new(&credential.credential_public)?;
     config.request_timeout = timeout;
-    let connection = NatsConnection::connect(credential.server_url.as_str(), options, config)
+    let connection = if credential.inbox_prefix == config.inbox_prefix() {
+        NatsConnection::connect(credential.server_url.as_str(), options, config).await
+    } else {
+        NatsConnection::connect_with_inbox_prefix(
+            credential.server_url.as_str(),
+            options,
+            config,
+            &credential.inbox_prefix,
+        )
         .await
-        .map_err(Error::from)?;
+    }
+    .map_err(Error::from)?;
     let subject = format!("{}.{LIVENESS_SUBJECT}", connection.inbox_prefix());
     match connection.client().subscribe(subject).await {
         Ok(ended) => Ok((connection, ended)),

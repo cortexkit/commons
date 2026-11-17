@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7
+
+- Accept a credential's `ckdel.{box}.{module}` inbox prefix for hub replies and
+  pushed records, while retaining per-credential inboxes for older replies.
+  Renewals may omit the prefix, but cannot change it on an existing connection.
+- Expose the bus module's box id and the current connection's inbox prefix.
+  Per-credential prefixes change on re-issue; module deliver prefixes stay stable.
+- Require bus-nats 0.5.4. The bus module must not serve the new prefix until
+  readers run bus-client 0.1.7 or later with bus-nats 0.5.4 or later.
+
 ## 0.1.6
 
 - `publish_event` sends a non-empty body with its SHA-256 as `Ck-Content-Digest`,
