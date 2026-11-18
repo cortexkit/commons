@@ -18,6 +18,7 @@ pub(crate) async fn send<S>(
     case: &Case<'_, S>,
     session: &mut Session<S::Route>,
     params: Value,
+    before: Option<&str>,
 ) -> Result<crate::drive::RunEnd, String>
 where
     S: LlmRunnerSubject,
@@ -33,7 +34,7 @@ where
         )?,
     )?;
     session.first.get_or_insert((id, prompt));
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await
+    wait_run_end(case.subject, &session.route, case.declared, before, &reply).await
 }
 
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
@@ -93,7 +94,7 @@ where
         None,
     );
     params["stop_when"]["max_steps"] = json!(2);
-    let end = send(case, &mut session, params).await?;
+    let end = send(case, &mut session, params, None).await?;
     let result = run_result(&session.route, &end.run_id).await?;
     if result.state != "max_steps" {
         return Err(format!(
@@ -172,7 +173,7 @@ where
     if directives {
         params["directives"] = json!(["wake"]);
     }
-    let end = send(case, &mut session, params).await?;
+    let end = send(case, &mut session, params, None).await?;
     let result = run_result(&session.route, &end.run_id).await?;
     if result.state != "completed" {
         return Err(format!(
@@ -250,7 +251,7 @@ where
             None,
         );
         params["generation"]["max_output_tokens"] = json!(requested);
-        let end = send(case, &mut session, params).await?;
+        let end = send(case, &mut session, params, None).await?;
         let result = run_result(&session.route, &end.run_id).await?;
         let output = result
             .usage
@@ -333,7 +334,7 @@ where
         if with_output_cap {
             params["generation"]["max_output_tokens"] = json!(16);
         }
-        let end = send(case, &mut session, params).await?;
+        let end = send(case, &mut session, params, None).await?;
         let result = run_result(&session.route, &end.run_id).await?;
         let requests = case
             .subject
@@ -436,7 +437,7 @@ where
         if suppress {
             params["tools"] = json!([]);
         }
-        send(case, &mut session, params).await?;
+        send(case, &mut session, params, None).await?;
         let requests = case
             .subject
             .model_requests(&session.name)
@@ -486,7 +487,7 @@ where
             ));
         }
     }
-    send(case, &mut session, params).await?;
+    send(case, &mut session, params, None).await?;
     let before = read_all(&session.route).await?.1;
     for tools in [json!([]), json!([crate::SCRIPTED_TOOL])] {
         let mut params = case.params(

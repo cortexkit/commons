@@ -85,6 +85,14 @@ async fn accept<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
+    let before = if session.first.is_some() {
+        crate::drive::head(&session.route)
+            .await?
+            .last_run_state
+            .map(|run| run.run_id)
+    } else {
+        None
+    };
     let reply: SendReply = decode(
         "cache send",
         expect_ok(
@@ -93,7 +101,14 @@ where
         )?,
     )?;
     session.first.get_or_insert((id, "cache prompt".into()));
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        before.as_deref(),
+        &reply,
+    )
+    .await?;
     Ok(())
 }
 

@@ -73,7 +73,7 @@ where
             "adapter supplies no plan carrying senders".into(),
         ));
     };
-    send_and_wait(
+    let opening_run = send_and_wait(
         case,
         &mut session,
         Some(&fields),
@@ -102,7 +102,14 @@ where
             call(&route, ops::SESSION_SEND, Value::Object(params)).await?,
         )?,
     )?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    let keyed_run = wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&opening_run),
+        &reply,
+    )
+    .await?;
     check_entry(&session.route, &prompt, Some(&send_id), required).await?;
 
     let prompt = case.mint.next("unkeyed-prompt");
@@ -125,7 +132,14 @@ where
         "unkeyed identity send",
         expect_ok("unkeyed identity send", response)?,
     )?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&keyed_run.run_id),
+        &reply,
+    )
+    .await?;
     check_entry(
         &session.route,
         &prompt,

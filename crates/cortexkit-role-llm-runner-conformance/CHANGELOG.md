@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.77
+
+- Wait for the original send's own run in `sender_succession_changed_payload_refused`
+  before checking that the refused retry wrote no message. Keep the previous
+  run ID in other follow-up send checks so a `pending` reply without a run ID
+  cannot make them mistake an earlier run for the new one.
+
 ## 0.17.76
 
 - Treat undeclared optional tool-routing and fork-tool groups as inapplicable,

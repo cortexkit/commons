@@ -77,14 +77,15 @@ where
 pub(crate) async fn run_once<S>(
     case: &Case<'_, S>,
     session: &mut Session<S::Route>,
-) -> Result<(), String>
+    before: Option<&str>,
+) -> Result<String, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
     let reply = send(case, session, "next run").await?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
-    Ok(())
+    let end = wait_run_end(case.subject, &session.route, case.declared, before, &reply).await?;
+    Ok(end.run_id)
 }
 
 pub(crate) async fn baseline<R: RunnerRoute>(route: &R) -> Result<Baseline, String> {
@@ -226,7 +227,7 @@ where
             },
         )
         .await?;
-    run_once(case, &mut session).await?;
+    let opening_run = run_once(case, &mut session, None).await?;
     let before_change = baseline(&session.route).await?;
     if !tool_rungs(&before_change)?
         .iter()
@@ -253,7 +254,7 @@ where
     if baseline(&session.route).await?.accepted_generation != 1 {
         return Err("session.baseline does not show the accepted generation 1".into());
     }
-    run_once(case, &mut session).await?;
+    run_once(case, &mut session, Some(&opening_run)).await?;
     let next = request_at(&requests(case, &session.name).await?, 1, "the next run")?;
     if !uses_new_plan(&next, &first, &plan) {
         return Err(format!(
@@ -300,7 +301,7 @@ where
             },
         )
         .await?;
-    run_once(case, &mut session).await?;
+    let opening_run = run_once(case, &mut session, None).await?;
     let stated = tool_rungs(&baseline(&session.route).await?)?;
     let Some(rung) = stated
         .iter()
@@ -324,7 +325,7 @@ where
             "a refresh on an idle session answered {body}, with run_in_progress: true"
         ));
     }
-    run_once(case, &mut session).await?;
+    run_once(case, &mut session, Some(&opening_run)).await?;
     let next = request_at(&requests(case, &session.name).await?, 1, "the next run")?;
     let after = baseline(&session.route).await?;
     if reply.applies_from_next_run {
@@ -476,7 +477,7 @@ where
         .await
         .map_err(|e| format!("releasing the held call: {e}"))?;
     let first = checked?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    let held_run = wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
     let seen = requests(case, &session.name).await?;
     let later = request_at(&seen, 1, "the held run's step after the release")?;
     if later != first {
@@ -486,7 +487,7 @@ where
             if flush { "flush" } else { "refresh" }
         ));
     }
-    run_once(case, &mut session).await?;
+    run_once(case, &mut session, Some(&held_run.run_id)).await?;
     let next = request_at(&requests(case, &session.name).await?, 2, "the next run")?;
     if !uses_new_plan(&next, &first, &plan) {
         return Err(format!(
@@ -524,7 +525,7 @@ where
             },
         )
         .await?;
-    run_once(case, &mut session).await?;
+    run_once(case, &mut session, None).await?;
     let stated = tool_rungs(&baseline(&session.route).await?)?;
     if stated.is_empty() {
         return Err("the session states no rung for tools".into());
@@ -799,7 +800,10 @@ where
                 return Ok(Ending::Inapplicable(reason));
             }
         };
-        wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+        let mut previous_run =
+            wait_run_end(case.subject, &session.route, case.declared, None, &reply)
+                .await?
+                .run_id;
         if request_at(
             &requests(case, &session.name).await?,
             1,
@@ -809,7 +813,7 @@ where
             return Err("a pending relaunch changed tools inside a running run".into());
         }
         if policy == rungs::ON_PREFIX_REBUILD {
-            run_once(case, &mut session).await?;
+            previous_run = run_once(case, &mut session, Some(&previous_run)).await?;
             if request_at(&requests(case, &session.name).await?, 2, "run before flush")? != before
                 || baseline(&session.route).await?.applied_generation != 0
             {
@@ -830,7 +834,7 @@ where
                 .await?,
             )?;
         }
-        run_once(case, &mut session).await?;
+        run_once(case, &mut session, Some(&previous_run)).await?;
         let seen = requests(case, &session.name).await?;
         if !uses_new_plan(
             seen.last().ok_or("no post-relaunch request")?,

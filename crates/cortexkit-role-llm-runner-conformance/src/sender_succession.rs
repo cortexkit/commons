@@ -123,7 +123,8 @@ where
         }
         return Ok(Ending::Passed);
     }
-    send_and_wait(case, &mut session, Some(&fields), "opening", &Map::new()).await?;
+    let opening_run =
+        send_and_wait(case, &mut session, Some(&fields), "opening", &Map::new()).await?;
     let route_a = case
         .subject
         .session_route(case.handle.inner(), &session.name, &a.stamp)
@@ -146,7 +147,14 @@ where
             call(original_route, ops::SESSION_SEND, original_params.clone()).await?,
         )?,
     )?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &first).await?;
+    let original_run = wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&opening_run),
+        &first,
+    )
+    .await?;
     let receipt = expect_ok(
         "original receipt",
         call(original_route, ops::SESSION_SEND, original_params.clone()).await?,
@@ -205,7 +213,14 @@ where
                 call(&session.route, ops::SESSION_SEND, original_params).await?,
             )?;
             let sent: SendReply = decode("third sender", reply.clone())?;
-            wait_run_end(case.subject, &session.route, case.declared, None, &sent).await?;
+            wait_run_end(
+                case.subject,
+                &session.route,
+                case.declared,
+                Some(&original_run.run_id),
+                &sent,
+            )
+            .await?;
             if reply == receipt {
                 return Err("third sender got the predecessor's receipt".into());
             }

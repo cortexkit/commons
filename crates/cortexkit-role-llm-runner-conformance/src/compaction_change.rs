@@ -85,7 +85,8 @@ where
         )?,
     )?;
     session.first = Some((send_id, "before refresh".into()));
-    wait_run_end(case.subject, &session.route, case.declared, None, &sent).await?;
+    let opening_run =
+        wait_run_end(case.subject, &session.route, case.declared, None, &sent).await?;
     let before = baseline(&session.route).await?;
     let before_head = head(&session.route).await?;
     if !adding && !removing {
@@ -139,7 +140,7 @@ where
     {
         return Err("compaction-item refresh did not stay pending until the next run".into());
     }
-    run_once(case, &mut session).await?;
+    run_once(case, &mut session, Some(&opening_run.run_id)).await?;
     applied(&session.route, 1).await?;
     if baseline(&session.route)
         .await?

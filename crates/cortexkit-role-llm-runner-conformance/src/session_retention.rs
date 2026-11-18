@@ -2,7 +2,7 @@
 
 use crate::{
     cases::{Case, Ending, Session},
-    drive::{decode, expect_code, expect_error, expect_field, expect_ok, wait_run_end, Mint},
+    drive::{decode, expect_code, expect_error, expect_field, expect_ok, head, wait_run_end, Mint},
     route::{Reply, RunnerRoute},
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
@@ -180,6 +180,11 @@ async fn send<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
+    let before = if settle && s.first.is_some() {
+        head(&s.route).await?.last_run_state.map(|run| run.run_id)
+    } else {
+        None
+    };
     let id = case.mint.next("policy-send");
     let prompt = case.mint.next("policy-prompt");
     let mut params = case.params(s, &prompt, &id, None);
@@ -196,7 +201,14 @@ where
         s.first = Some((id, prompt));
     }
     if settle {
-        wait_run_end(case.subject, &s.route, case.declared, None, &reply).await?;
+        wait_run_end(
+            case.subject,
+            &s.route,
+            case.declared,
+            before.as_deref(),
+            &reply,
+        )
+        .await?;
     }
     Ok(reply)
 }
@@ -1035,8 +1047,16 @@ where
     if let Some(fields) = case.subject.attachment_model_fields(&s.name, true) {
         params.as_object_mut().unwrap().extend(fields);
     }
+    let before = head(&s.route).await?.last_run_state.map(|run| run.run_id);
     let sent: SendReply = decode("media send", ok(&s.route, ops::SESSION_SEND, params).await?)?;
-    wait_run_end(case.subject, &s.route, case.declared, None, &sent).await?;
+    wait_run_end(
+        case.subject,
+        &s.route,
+        case.declared,
+        before.as_deref(),
+        &sent,
+    )
+    .await?;
     let read = ok(
         &s.route,
         ops::SESSION_MEDIA_READ,

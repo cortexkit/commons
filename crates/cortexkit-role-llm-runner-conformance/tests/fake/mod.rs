@@ -1306,6 +1306,8 @@ pub struct Module {
     kill_hook: Mutex<Option<String>>,
     hook_fired: AtomicBool,
     sessions: Arc<Mutex<BTreeMap<String, Sess>>>,
+    // Deferred idle starts, recording whether a head poll has seen the old run.
+    succession_idle_starts: Mutex<BTreeMap<String, bool>>,
     /// Request tracing, not session state: distinguish attempted explicit
     /// starts from the legacy fixtures' implicitly existing host sessions.
     host_start_attempts: Mutex<BTreeSet<String>>,
@@ -1472,6 +1474,7 @@ impl Module {
             hook_fired: AtomicBool::new(false),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             host_start_attempts: Mutex::new(BTreeSet::new()),
+            succession_idle_starts: Mutex::new(BTreeMap::new()),
             sender_observer: Mutex::new(None),
             user_command_gate: Mutex::new(()),
             replayed: AtomicBool::new(false),
@@ -4856,7 +4859,17 @@ impl Module {
                     "session_structured_output_jcs": session_structured_output_jcs,
                     "request": params }),
         )?;
-        self.deliver_idle(session)?;
+        if self.world.defects.succession == Some("late_idle_start")
+            && wanted.modes == [Mode::IdleStart]
+            && sess.senders.iter().any(|sender| sender.succeeds.is_some())
+        {
+            self.succession_idle_starts
+                .lock()
+                .unwrap()
+                .insert(session.to_owned(), false);
+        } else {
+            self.deliver_idle(session)?;
+        }
         let sess = self.sessions.lock().unwrap()[session].clone();
         Ok(ordered_reply(
             &self.world.defects,
@@ -6370,6 +6383,32 @@ impl RunnerRoute for FakeRoute {
         let result = self
             .module
             .handle(&self.stamp, &self.session, method, params.clone());
+        if world.defects.succession == Some("late_idle_start")
+            && matches!(method, ops::SESSION_HEAD | ops::SESSION_READ)
+        {
+            // Let the first head poll see the opening run. If the caller reads
+            // the transcript instead of continuing to poll, serve the read
+            // before the queued send starts.
+            let start = {
+                let mut deferred = self.module.succession_idle_starts.lock().unwrap();
+                if let Some(seen_head) = deferred.get_mut(&self.session) {
+                    if *seen_head || method == ops::SESSION_READ {
+                        deferred.remove(&self.session);
+                        true
+                    } else {
+                        *seen_head = true;
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+            if start {
+                self.module
+                    .deliver_idle(&self.session)
+                    .map_err(|Killed| RouteFailure::new("the module was killed"))?;
+            }
+        }
         if world.early_idle_turn_receipt
             && matches!(
                 method,

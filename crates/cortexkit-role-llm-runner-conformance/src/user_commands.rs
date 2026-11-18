@@ -76,7 +76,8 @@ where
     }
     let send: SendReply = decode("admission", expect_ok("admission", admission)?)?;
     session.first = Some((send_id, "ordinary prompt".into()));
-    wait_run_end(case.subject, &session.route, case.declared, None, &send).await?;
+    let admission_run =
+        wait_run_end(case.subject, &session.route, case.declared, None, &send).await?;
     let baseline: BaselineReply = decode(
         "baseline",
         expect_ok(
@@ -234,7 +235,14 @@ where
                 call(&session.route, ops::SESSION_SEND, params).await?,
             )?,
         )?;
-        wait_run_end(case.subject, &session.route, case.declared, None, &send).await?;
+        wait_run_end(
+            case.subject,
+            &session.route,
+            case.declared,
+            Some(&admission_run.run_id),
+            &send,
+        )
+        .await?;
         let (_, messages) = read_all(&session.route).await?;
         let observed = case
             .subject

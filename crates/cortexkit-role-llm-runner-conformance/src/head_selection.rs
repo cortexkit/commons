@@ -5,14 +5,13 @@ use cortexkit_role_llm_runner::{
     describe::RoleDescribe,
     ops,
     read::HeadMeta,
-    send::SendReply,
     session_change::{RefreshReply, RefreshRequest},
 };
 use serde_json::{json, Value};
 
 use crate::{
     cases::{Case, Ending, Session},
-    drive::{call, decode, expect_error, expect_ok, run_result, wait_run_end},
+    drive::{call, decode, expect_error, expect_ok, run_result, wait_run_end, RunEnd},
     route::RunnerRoute,
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
@@ -28,7 +27,8 @@ async fn send<S: LlmRunnerSubject>(
     case: &Case<'_, S>,
     session: &mut Session<S::Route>,
     tier: Option<&str>,
-) -> Result<SendReply, String>
+    before: Option<&str>,
+) -> Result<RunEnd, String>
 where
     S::Route: RunnerRoute,
 {
@@ -45,8 +45,7 @@ where
         )?,
     )?;
     session.first.get_or_insert((id, "answer briefly".into()));
-    wait_run_end(case.subject, &session.route, case.declared, None, &sent).await?;
-    Ok(sent)
+    wait_run_end(case.subject, &session.route, case.declared, before, &sent).await
 }
 
 pub async fn run<S: LlmRunnerSubject>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
@@ -113,7 +112,7 @@ where
             "adapter supplies no admission plan".into(),
         ));
     };
-    send(case, &mut session, None).await?;
+    let opening_run = send(case, &mut session, None, None).await?;
     let before = head(&session.route).await?;
     if before.service_tier.as_deref().unwrap_or("standard") != "standard" {
         return Err("head-selection fixture must begin with a standard default tier".into());
@@ -277,12 +276,8 @@ where
         }
         "head_selection_plan_tier" | "head_selection_send_overrides" => {
             let explicit = (name == "head_selection_send_overrides").then_some("standard");
-            let sent = send(case, &mut session, explicit).await?;
-            let result = run_result(
-                &session.route,
-                sent.run_id.as_deref().ok_or("send has no run id")?,
-            )
-            .await?;
+            let end = send(case, &mut session, explicit, Some(&opening_run.run_id)).await?;
+            let result = run_result(&session.route, &end.run_id).await?;
             let usage = result.usage.ok_or("run has no usage")?;
             if usage.service_tier_applied.as_deref().unwrap_or("standard")
                 != explicit.unwrap_or("fast")

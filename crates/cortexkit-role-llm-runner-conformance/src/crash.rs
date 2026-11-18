@@ -249,7 +249,8 @@ where
             call(&route_b, ops::SESSION_SEND, params_b).await?,
         )?,
     )?;
-    wait_run_end(subject, &route_b, declared, earlier_run.as_deref(), &retry).await?;
+    let recovered_run =
+        wait_run_end(subject, &route_b, declared, earlier_run.as_deref(), &retry).await?;
     let (_, after_a) = read_all(&route_a).await?;
     let (_, after_b) = read_all(&route_b).await?;
     let head_b = head(&route_b).await?;
@@ -310,7 +311,14 @@ where
                         .await?,
                     )?,
                 )?;
-                wait_run_end(subject, &route_b, declared, None, &reply).await?;
+                wait_run_end(
+                    subject,
+                    &route_b,
+                    declared,
+                    Some(&recovered_run.run_id),
+                    &reply,
+                )
+                .await?;
                 let (_, messages) = read_all(&route_b).await?;
                 if subject.tool_invocations(&b_call.arguments).await != 0 {
                     return Err("the never-sent call was dispatched on the follow-up".into());

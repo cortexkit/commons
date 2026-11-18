@@ -206,6 +206,7 @@ where
         session: &mut Session<S::Route>,
         seconds: Option<u64>,
         title: Option<&str>,
+        before: Option<&str>,
     ) -> Result<(String, HeadMeta), String> {
         let prompt = self.mint.next("retention-prompt");
         let id = self.mint.next("send");
@@ -226,7 +227,7 @@ where
         if session.first.is_none() {
             session.first = Some((id, prompt.clone()));
         }
-        wait_run_end(self.subject, &session.route, self.declared, None, &reply).await?;
+        wait_run_end(self.subject, &session.route, self.declared, before, &reply).await?;
         Ok((prompt, head(&session.route).await?))
     }
 
@@ -253,7 +254,12 @@ where
         let mut session = self.open("retention", Script { turns }).await?;
         let title = self.mint.next("retention-title");
         let (prompt, meta) = self
-            .retained_send(&mut session, seconds, content.then_some(title.as_str()))
+            .retained_send(
+                &mut session,
+                seconds,
+                content.then_some(title.as_str()),
+                None,
+            )
             .await?;
         let (_, messages) = read_all(&session.route).await?;
         if holding(&messages, &prompt) != 1 || (content && holding(&messages, &markers[0]) != 1) {
@@ -415,7 +421,7 @@ where
                 // The idle session is still within its previous retention period.
                 // Shortening it must preserve its existing history and version.
                 let (_, meta) = self
-                    .retained_send(&mut seed.session, Some(seconds), None)
+                    .retained_send(&mut seed.session, Some(seconds), None, Some(&seed.run_id))
                     .await?;
                 if meta.history_version != seed.history_version {
                     return Err(
@@ -432,7 +438,9 @@ where
                     .run_id;
                 seed.last_activity = meta.updated_at.ok_or("changed session has no activity")?;
                 if name == "retention_equal_noop" {
-                    let (_, meta) = self.retained_send(&mut seed.session, None, None).await?;
+                    let (_, meta) = self
+                        .retained_send(&mut seed.session, None, None, Some(&seed.run_id))
+                        .await?;
                     seed.run_id = meta
                         .last_run_state
                         .ok_or("absent retention has no run")?
@@ -469,7 +477,9 @@ where
                 // Fresh admission fields and no retention: the recreated session
                 // is kept forever, without inheriting the expired record's policy.
                 seed.session.first = None;
-                let (_, meta) = self.retained_send(&mut seed.session, None, None).await?;
+                let (_, meta) = self
+                    .retained_send(&mut seed.session, None, None, None)
+                    .await?;
                 if meta.history_version == seed.history_version {
                     return Err("fresh send reused the expired history_version".into());
                 }

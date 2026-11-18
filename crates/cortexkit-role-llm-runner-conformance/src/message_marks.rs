@@ -96,6 +96,7 @@ where
                 json!({}),
             ]
         };
+        let mut previous_run = None;
         for marks in probes {
             let before = read_all(&session.route).await?.1;
             let prompt = case.mint.next("marked-prompt");
@@ -109,7 +110,15 @@ where
                 name,
                 expect_ok(name, call(&session.route, ops::SESSION_SEND, params).await?)?,
             )?;
-            wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+            let end = wait_run_end(
+                case.subject,
+                &session.route,
+                case.declared,
+                previous_run.as_deref(),
+                &reply,
+            )
+            .await?;
+            previous_run = Some(end.run_id);
             session.first.get_or_insert((send_id, prompt));
             let (pages, defaults) = read_all(&session.route).await?;
             let version = pages
@@ -324,6 +333,7 @@ where
             },
         )
         .await?;
+    let mut previous_run = None;
     for (marks, changed, field) in probes {
         let send_id = case.mint.next("marks-retry-send");
         let prompt = case.mint.next("marks-retry-prompt");
@@ -339,7 +349,15 @@ where
                 call(&session.route, ops::SESSION_SEND, params.clone()).await?,
             )?,
         )?;
-        wait_run_end(case.subject, &session.route, case.declared, None, &accepted).await?;
+        let end = wait_run_end(
+            case.subject,
+            &session.route,
+            case.declared,
+            previous_run.as_deref(),
+            &accepted,
+        )
+        .await?;
+        previous_run = Some(end.run_id);
         session.first.get_or_insert((send_id, prompt));
         // Settle the run before comparing full answers: run state may advance
         // between acceptance and a retry, but retrying never creates a new send.

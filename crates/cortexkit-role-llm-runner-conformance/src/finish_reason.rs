@@ -125,7 +125,7 @@ where
         &case.mint.next("finish-send"),
         None,
     );
-    let end = crate::run_parameters::send(case, &mut session, params).await?;
+    let end = crate::run_parameters::send(case, &mut session, params, None).await?;
     let count = case
         .subject
         .model_invocations(&session.name)
@@ -177,7 +177,7 @@ where
     if params.pointer("/generation/max_output_tokens").is_some() {
         return Err("the send carried generation.max_output_tokens; this case must not".into());
     }
-    let end = crate::run_parameters::send(case, &mut session, params).await?;
+    let end = crate::run_parameters::send(case, &mut session, params, None).await?;
     check(case, &session.route, &end.run_id, Some(Finish::Length)).await?;
     Ok(Ending::Passed)
 }
@@ -212,7 +212,7 @@ where
         None,
     );
     params["budget"] = json!({"max_input_tokens":1});
-    crate::run_parameters::send(case, &mut session, params).await?;
+    let warmup = crate::run_parameters::send(case, &mut session, params, None).await?;
     let before = case
         .subject
         .model_invocations(&session.name)
@@ -224,7 +224,7 @@ where
         &case.mint.next("finish-no-step"),
         None,
     );
-    let end = crate::run_parameters::send(case, &mut session, params).await?;
+    let end = crate::run_parameters::send(case, &mut session, params, Some(&warmup.run_id)).await?;
     let after = case
         .subject
         .model_invocations(&session.name)

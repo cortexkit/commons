@@ -148,7 +148,7 @@ where
         .subject
         .send_fields_with_plan(&session.name, true, members.as_object().unwrap())
         .ok_or("adapter supplies sender identities but no plan carrying senders")?;
-    send_and_wait(
+    let opening_run = send_and_wait(
         case,
         &mut session,
         Some(&fields),
@@ -198,7 +198,7 @@ where
                 let _: SendReply = expect_ok("sender join", reply)
                     .and_then(|value| decode("sender join", value))
                     .map_err(RouteFailure::new)?;
-                wait_run_end(case.subject, &session.route, case.declared, None, &started)
+                wait_run_end(case.subject, &session.route, case.declared, Some(&opening_run), &started)
                     .await.map_err(RouteFailure::new)?;
                 // Ordered sends may answer pending at acceptance. Retry the
                 // same keyed send after delivery to inspect its settled receipt.
@@ -215,7 +215,7 @@ where
         } else {
             unavailable.push("message_senders_join: adapter cannot hold a steerable run open; checked start only".into());
         }
-        wait_run_end(case.subject, &session.route, case.declared, None, &started).await?;
+        wait_run_end(case.subject, &session.route, case.declared, Some(&opening_run), &started).await?;
         check_rows(&session.route, &wanted, &observed, &b.module, &answer_marker,
             describe.declares(groups::READ_DISPLAY_FACTS)).await
     }.await;

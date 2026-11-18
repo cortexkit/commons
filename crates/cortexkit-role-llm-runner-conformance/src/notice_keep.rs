@@ -88,6 +88,7 @@ where
         } else {
             vec![expected.clone()]
         };
+        let mut previous_run = None;
         for sent in sends {
             let before = read_all(&session.route).await?.1;
             let prompt = case.mint.next("kept-words");
@@ -101,7 +102,15 @@ where
                 name,
                 expect_ok(name, call(&session.route, ops::SESSION_SEND, params).await?)?,
             )?;
-            wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+            let end = wait_run_end(
+                case.subject,
+                &session.route,
+                case.declared,
+                previous_run.as_deref(),
+                &reply,
+            )
+            .await?;
+            previous_run = Some(end.run_id);
             session.first.get_or_insert((send_id, prompt));
             let (pages, defaults) = read_all(&session.route).await?;
             let version = pages

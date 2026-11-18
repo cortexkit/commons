@@ -142,7 +142,7 @@ where
         )?;
         return Ok(Ending::Passed);
     }
-    send_and_wait(
+    let opening_run = send_and_wait(
         case,
         &mut session,
         Some(&fields),
@@ -177,7 +177,14 @@ where
         name,
         expect_ok(name, call(&route, ops::SESSION_SEND, params.clone()).await?)?,
     )?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        Some(&opening_run),
+        &reply,
+    )
+    .await?;
     let messages = fact_page(&session.route).await?;
     let message = messages
         .iter()

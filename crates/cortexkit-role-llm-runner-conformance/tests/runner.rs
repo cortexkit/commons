@@ -9422,6 +9422,19 @@ async fn sender_succession_correct_runner_passes_all_cases() {
 }
 
 #[tokio::test]
+async fn sender_succession_waits_for_a_pending_idle_start() {
+    let report = run(&succession_subject(Some("late_idle_start"))).await;
+    assert_eq!(
+        report.outcome("sender_succession_changed_payload_refused"),
+        Some(&CaseOutcome::Passed)
+    );
+    for name in SUCCESSION_CASES {
+        assert_feature_passed(&report, name);
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
 async fn sender_succession_each_fault_is_rejected_by_case_name() {
     for (defect, name) in [
         ("same_fresh", SUCCESSION_CASES[0]),

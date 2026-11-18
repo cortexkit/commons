@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::{
     cases::{Case, Ending, Session},
-    drive::{call, decode, expect_code, expect_error, expect_ok, wait_run_end},
+    drive::{call, decode, expect_code, expect_error, expect_ok, head, wait_run_end},
     route::RunnerRoute,
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
@@ -35,6 +35,14 @@ async fn accept<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
+    let before = if session.first.is_some() {
+        head(&session.route)
+            .await?
+            .last_run_state
+            .map(|run| run.run_id)
+    } else {
+        None
+    };
     let id = case.mint.next("class-send");
     let reply: SendReply = decode(
         "session_class send",
@@ -49,7 +57,14 @@ where
         )?,
     )?;
     session.first.get_or_insert((id, "class prompt".into()));
-    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        before.as_deref(),
+        &reply,
+    )
+    .await?;
     Ok(())
 }
 

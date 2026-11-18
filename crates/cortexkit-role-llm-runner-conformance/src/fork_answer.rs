@@ -670,6 +670,10 @@ async fn isolation<S: LlmRunnerSubject<Route: RunnerRoute>>(case: &Case<'_, S>) 
     )
     .await?;
     let fork = prepare(&session.route).await?;
+    let previous_run = head(&session.route)
+        .await?
+        .last_run_state
+        .map(|run| run.run_id);
     case.subject
         .hold_next_model_step(&session.name)
         .await
@@ -737,7 +741,14 @@ async fn isolation<S: LlmRunnerSubject<Route: RunnerRoute>>(case: &Case<'_, S>) 
         .release_model_step(&session.name)
         .await
         .map_err(|e| e.to_string())?;
-    wait_run_end(case.subject, &session.route, case.declared, None, &receipt).await?;
+    wait_run_end(
+        case.subject,
+        &session.route,
+        case.declared,
+        previous_run.as_deref(),
+        &receipt,
+    )
+    .await?;
     checked
 }
 
