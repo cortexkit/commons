@@ -37,6 +37,16 @@ encoding the result gives back the same RFC 8785 (JCS) canonical bytes. The
 `describe.detail`, `format` and `check` values in `replies.json` are
 deliberately arbitrary, to show they pass through untouched.
 
+`replies.json` also includes a display participant that declares
+`optional: true`; the existing describe samples without the flag are
+unchanged. The describe tests pin the original serialization when the flag
+is absent, round-trip true, and omit false. If the receiver lacks the
+optional participant, the move orchestrator reports its stream as `dropped`
+and the move as completed with losses, naming the participant and source
+computer, while leaving that participant's source copy unreleased. The
+overall move outcome wire shape belongs to the move orchestrator, not this
+crate.
+
 `SHA256SUMS` pins every file in this directory, this README included, in
 `sha256sum` format. Changing a vector changes the contract: bump the crate's
 version, regenerate `SHA256SUMS`, and say why in the commit.

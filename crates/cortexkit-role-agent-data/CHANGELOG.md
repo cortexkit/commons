@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.2
+
+- Let a participant declare `optional: true` in its describe reply. When
+  the receiver does not run that participant, the move completes with losses
+  naming the participant and source computer instead of refusing the move.
+  The driver skips release for that participant, leaving its source data
+  available for a later move back or re-carry. Required participants and
+  optional participants present on the receiver keep their usual behaviour.
+- Keep existing describe replies byte-identical when the flag is absent.
+  Upgrade the move orchestrator on every computer a participant moves
+  between to read 0.3.2 before sending the flag: strict 0.3.1 readers reject
+  it. Add an optional display participant sample and boolean round-trip tests.
+  The wire version stays `agent-data/v1`.
+
 ## 0.3.1
 
 - State the envelope every op travels in (§3): `{"method", "params"}` out and

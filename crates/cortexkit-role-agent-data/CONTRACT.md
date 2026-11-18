@@ -90,6 +90,23 @@ The crate's source files use these words as defined here.
 - A participant lists `agent-data/v1` in its manifest's
   `capabilities.provides` (`PROVIDES`). Entorhinal finds participants
   through the daemon catalog.
+- Every participant that declares the agent's ref kind takes part in the
+  move. Participants are required unless their `describe` reply declares
+  `optional: true` (§7.1). A required participant missing on the receiver
+  still causes the move to be refused.
+- If an optional participant is missing on the receiver, the receiver skips
+  that participant's items. The move orchestrator records its stream as
+  `dropped` and reports the finished move as **completed with losses**, not
+  clean success, using the same presentation as import drops (§7.7). The
+  loss names the participant and the source computer.
+- The driver does not call `release` on an optional participant whose items
+  the receiver skipped. Its data stays on the source untouched, available
+  to a later move back or a re-carry.
+- If the receiver runs an optional participant, that participant follows
+  the same protocol as a required one, including `busy`, `prepare`,
+  `export`, `import`, `activate` and `release`. Optional does not mean
+  empty: a participant with no data exports `items: []`, whether required
+  or optional.
 - A participant answers all ten ops (`REQUIRED_OPS`), since any participant
   can be a source or a receiver. Each op is a request whose method is the
   op's name (`ops`):
@@ -328,7 +345,7 @@ code outside the closed set is in no row.
 - Request: `{}` (`describe::DescribeRequest`). Any member is
   `invalid_request`.
 - Reply: `{ref_kinds: [string], stores: [{name, sync_class}], external:
-  bool, detail?}` (`describe::DescribeReply`).
+  bool, optional?: bool, detail?}` (`describe::DescribeReply`).
   - `ref_kinds`: the ref kinds this participant holds.
   - `stores`: its per-agent stores, each with the `sync_class` AGENT_SYNC
     assigns it (Terms). The set is closed; a store declares exactly one of:
@@ -348,6 +365,17 @@ code outside the closed set is in no row.
     behind THALAMUS's harness. A participant whose data a door item can
     carry ships it through the door as items and declares `external:
     false`: the OpenCode and Pi harnesses do.
+  - `optional`: a boolean that permits skipping this participant's items
+    when the receiver does not run it (§1). Send only `true`; omit the
+    member for a required participant. Absent or false means required,
+    preserving existing replies byte for byte. A display module may use
+    `optional: true` for data whose absence should not block a move; data
+    whose loss would be harmful stays required.
+    **Readers first:** upgrade the move orchestrator on every computer the
+    participant moves between to read agent-data 0.3.2 before the
+    participant sends `optional`. A strict 0.3.1 decoder rejects this
+    unknown member; it does not ignore it or treat the participant as
+    required. Drivers must honour the flag before participants set it.
   - `detail`: optional and opaque. It accepts any JSON value, and entorhinal
     passes it on without reading it, so a newer participant can add to it
     without breaking an older entorhinal.

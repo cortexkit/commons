@@ -1,6 +1,23 @@
 {
   "replies": [
     {
+      "name": "describe, optional display participant",
+      "method": "agent_data.describe",
+      "reply": {
+        "ref_kinds": [
+          "display.session"
+        ],
+        "stores": [
+          {
+            "name": "cards",
+            "sync_class": "agent"
+          }
+        ],
+        "external": false,
+        "optional": true
+      }
+    },
+    {
       "name": "describe, no external data",
       "method": "agent_data.describe",
       "reply": {

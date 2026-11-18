@@ -21,7 +21,7 @@ impl DescribeRequest {
     }
 }
 
-/// The `describe` reply: `{ref_kinds, stores, external, detail?}`.
+/// The `describe` reply: `{ref_kinds, stores, external, optional?, detail?}`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -36,6 +36,11 @@ pub struct DescribeReply {
     /// items can carry (the OpenCode and Pi harnesses among them) declares
     /// `false`.
     pub external: bool,
+    /// True when a receiver may skip this participant if it does not run it.
+    /// The move then completes with losses, and the source keeps its copy.
+    /// Absent or false means required; only true is serialized.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub optional: bool,
     /// Optional and opaque: any JSON value is accepted and entorhinal
     /// passes it on without reading it, so a newer participant can add to
     /// it without breaking an older entorhinal.
@@ -49,8 +54,15 @@ impl DescribeReply {
             ref_kinds,
             stores,
             external,
+            optional: false,
             detail: None,
         }
+    }
+
+    /// Set whether a participant missing on the receiver may be skipped.
+    pub fn with_optional(mut self, optional: bool) -> Self {
+        self.optional = optional;
+        self
     }
 
     pub fn with_detail(mut self, detail: Value) -> Self {
@@ -62,6 +74,10 @@ impl DescribeReply {
     pub fn holds_kind(&self, ref_kind: &str) -> bool {
         self.ref_kinds.iter().any(|kind| kind == ref_kind)
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// One per-agent store: `{name, sync_class}`. `sync_class` is the class the
