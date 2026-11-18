@@ -1675,6 +1675,12 @@ fn assert_passed(report: &SuiteReport, case: &str) {
             }
         }
     }
+    if case == "delivery_order_datetime_samples"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason.starts_with("missing groups:"))
+    {
+        return;
+    }
     if case == "delivery_order_template_renders_as_system"
         && matches!(
             report.outcome(case),
@@ -2443,6 +2449,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             || spec.name.starts_with("read_display_facts_")
             || spec.name == "notice_keep_undeclared"
             || spec.name == "tag_read_undeclared"
+            || spec.name == "delivery_order_datetime_samples"
             || spec.name == "delivery_deadline_retry_keeps_original_expiry"
         {
             assert_eq!(
@@ -5094,6 +5101,21 @@ async fn the_last_possible_mode_winning_fails_the_order_cases() {
 }
 
 #[tokio::test]
+async fn datetime_samples_without_group_are_optional() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::TemplateDatetime);
+    let report = run(&subject).await;
+    let name = "delivery_order_datetime_samples";
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Inapplicable {
+            reason: "missing groups: template_datetime".into(),
+        })
+    );
+    assert_passed(&report, name);
+}
+
+#[tokio::test]
 async fn without_the_new_groups_their_cases_skip_by_name() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.remove(&Capability::DeliveryOrder);
@@ -5108,10 +5130,12 @@ async fn without_the_new_groups_their_cases_skip_by_name() {
         (Capability::SendStatus, SEND_STATUS_PREFIXES),
     ] {
         // The one case that asks a runner without the group runs here.
-        for name in cases_of(prefixes)
-            .into_iter()
-            .filter(|name| *name != "delivery_order_list_refused_without_group")
-        {
+        for name in cases_of(prefixes).into_iter().filter(|name| {
+            !matches!(
+                *name,
+                "delivery_order_list_refused_without_group" | "delivery_order_datetime_samples"
+            )
+        }) {
             assert!(
                 matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&capability)),
                 "{name}: {:?}",

@@ -429,6 +429,17 @@ pub enum Slot {
     PartTag,
     /// Exactly one of the strings in `values`.
     Enum { values: Vec<String> },
+    /// Unix seconds in `[0, 4102444800)`, rendered in the declared UTC format.
+    Datetime { format: DatetimeFormat },
+}
+
+/// The closed set of datetime slot formats. Unknown wire names are refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DatetimeFormat {
+    /// English weekday and month, with zero-padded day and time: `Ddd DD Mon HH:MMZ`.
+    UtcMinute,
 }
 
 /// A template a plan declares for one sender: its text, with `{name}`
@@ -609,17 +620,32 @@ pub fn plan_senders(plan: &Map<String, Value>) -> Result<Vec<PlanSender>, &'stat
 }
 
 /// Admission's check of a plan's `senders` against `declared`: a malformed
-/// member, or any present member on a runner without `delivery_order`, is
-/// refused `invalid_params` naming [`PLAN_SENDERS_FIELD`], writing nothing.
+/// member, any present member on a runner without `delivery_order`, or a
+/// datetime template without `template_datetime`, is refused `invalid_params`
+/// naming [`PLAN_SENDERS_FIELD`], writing nothing.
 pub fn check_plan<S: AsRef<str>>(
     plan: &Map<String, Value>,
     declared: &[S],
 ) -> Result<(), &'static str> {
-    plan_senders(plan)?;
+    let senders = plan_senders(plan)?;
     if plan.contains_key(PLAN_SENDERS)
         && !declared
             .iter()
             .any(|name| name.as_ref() == capabilities::DELIVERY_ORDER)
+    {
+        return Err(PLAN_SENDERS_FIELD);
+    }
+    if !declared
+        .iter()
+        .any(|name| name.as_ref() == capabilities::TEMPLATE_DATETIME)
+        && senders.iter().any(|sender| {
+            sender.templates.iter().any(|template| {
+                template
+                    .slots
+                    .values()
+                    .any(|slot| matches!(slot, Slot::Datetime { .. }))
+            })
+        })
     {
         return Err(PLAN_SENDERS_FIELD);
     }
@@ -776,6 +802,52 @@ fn format_part_tag(number: u64) -> Option<String> {
     (number > 0).then(|| format!("§{number}§"))
 }
 
+fn format_utc_minute(seconds: u64) -> String {
+    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let days = seconds / 86_400;
+    let weekday = WEEKDAYS[(days % 7) as usize];
+    let mut day = days;
+    let mut year = 1970;
+    let leap_year = |year| year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    loop {
+        let year_days = if leap_year(year) { 366 } else { 365 };
+        if day < year_days {
+            break;
+        }
+        day -= year_days;
+        year += 1;
+    }
+    let month_days = [
+        31,
+        if leap_year(year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 0;
+    while day >= month_days[month] {
+        day -= month_days[month];
+        month += 1;
+    }
+    let hour = (seconds / 3_600) % 24;
+    let minute = (seconds / 60) % 60;
+    format!(
+        "{weekday} {:02} {} {hour:02}:{minute:02}Z",
+        day + 1,
+        MONTHS[month]
+    )
+}
+
 /// Render `use_` from the templates the plan declares for its sender: the
 /// send's one text, used for whichever mode carries it. `shown` answers the
 /// number the request carrying the send shows for a part, or `None` when
@@ -827,6 +899,15 @@ pub fn render(
             Slot::Percentage => {
                 let n = value.as_u64().filter(|n| *n <= 100).ok_or_else(invalid)?;
                 n.to_string()
+            }
+            Slot::Datetime { format } => {
+                let seconds = value
+                    .as_u64()
+                    .filter(|seconds| *seconds < 4_102_444_800)
+                    .ok_or_else(invalid)?;
+                match format {
+                    DatetimeFormat::UtcMinute => format_utc_minute(seconds),
+                }
             }
             Slot::PartTag => {
                 let part: PartRef = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
@@ -1188,6 +1269,118 @@ mod tests {
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }
         }
+    }
+
+    #[test]
+    fn datetime_templates_pin_samples_and_refusals() {
+        let file = file();
+        let samples = &file["datetime_templates"];
+        let sender: PlanSender =
+            vectors::round_trip("datetime template sender", &samples["sender"]);
+        for case in samples["uses"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let use_: TemplateUse = vectors::round_trip(name, &case["use"]);
+            assert_eq!(template_digest(&sender.templates[0]), use_.digest, "{name}");
+            match render(&sender.templates, &use_, |_| None) {
+                Ok(text) => assert_eq!(text, case["rendered"].as_str().unwrap(), "{name}"),
+                Err(problem) => {
+                    assert_eq!(problem, problem_of(&case["problem"]), "{name}");
+                    let (code, detail) = problem.refusal();
+                    assert_eq!(code, case["refusal"]["code"], "{name}");
+                    assert_eq!(detail, case["refusal"]["detail"], "{name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn datetime_slots_bound_values_and_pin_calendar_edges() {
+        let slot = Slot::Datetime {
+            format: DatetimeFormat::UtcMinute,
+        };
+        let template = Template::new("clock", "{now}", BTreeMap::from([("now".into(), slot)]));
+        let use_ = |value| {
+            TemplateUse::new(
+                "clock",
+                template_digest(&template),
+                Map::from_iter([("now".into(), value)]),
+            )
+        };
+        for value in [
+            json!(-1),
+            json!(1.5),
+            json!(1.0),
+            json!("1795042320"),
+            json!(4_102_444_800_u64),
+            json!(u64::MAX),
+            json!(null),
+            json!(true),
+        ] {
+            assert_eq!(
+                render(
+                    std::slice::from_ref(&template),
+                    &use_(value.clone()),
+                    |_| None
+                ),
+                Err(TemplateProblem::InvalidSlot("now".into())),
+                "{value}"
+            );
+        }
+        for (seconds, expected) in [
+            (0, "Thu 01 Jan 00:00Z"),
+            (59, "Thu 01 Jan 00:00Z"),
+            (60, "Thu 01 Jan 00:01Z"),
+            (951_782_459, "Tue 29 Feb 00:00Z"),
+            (4_102_444_799_u64, "Thu 31 Dec 23:59Z"),
+        ] {
+            assert_eq!(
+                render(
+                    std::slice::from_ref(&template),
+                    &use_(json!(seconds)),
+                    |_| None
+                ),
+                Ok(expected.into()),
+                "{seconds}"
+            );
+        }
+    }
+
+    #[test]
+    fn datetime_templates_require_the_capability_and_a_known_format() {
+        let samples = file()["datetime_templates"].clone();
+        let mut plan = json!({"senders": [samples["sender"].clone()]});
+        assert_eq!(
+            check_plan(plan.as_object().unwrap(), &[capabilities::DELIVERY_ORDER]),
+            Err(PLAN_SENDERS_FIELD)
+        );
+        let declared = [
+            capabilities::DELIVERY_ORDER,
+            capabilities::TEMPLATE_DATETIME,
+        ];
+        assert_eq!(check_plan(plan.as_object().unwrap(), &declared), Ok(()));
+        let original: Template =
+            serde_json::from_value(plan["senders"][0]["templates"][0].clone()).unwrap();
+        let mut integer = original.clone();
+        integer
+            .slots
+            .insert("now".into(), Slot::Integer { min: 0, max: 100 });
+        assert_ne!(template_digest(&original), template_digest(&integer));
+        for slot in [
+            json!({"type": "datetime", "format": "local_minute"}),
+            json!({"type": "datetime"}),
+            json!({"type": "datetime", "format": "utc_minute", "extra": true}),
+            json!({"type": "unknown"}),
+        ] {
+            plan["senders"][0]["templates"][0]["slots"]["now"] = slot;
+            assert_eq!(
+                check_plan(plan.as_object().unwrap(), &declared),
+                Err(PLAN_SENDERS_FIELD)
+            );
+        }
+        assert_eq!(
+            capabilities::group_ops(capabilities::TEMPLATE_DATETIME),
+            Some([crate::ops::SESSION_SEND].as_slice())
+        );
     }
 
     #[test]

@@ -570,6 +570,53 @@
       }
     ]
   },
+  "datetime_templates": {
+    "sender": {
+      "module": "context-module",
+      "templates": [
+        {
+          "id": "clock_notice",
+          "text": "Now: {now}",
+          "slots": {
+            "now": {
+              "type": "datetime",
+              "format": "utc_minute"
+            }
+          }
+        }
+      ]
+    },
+    "uses": [
+      {
+        "name": "datetime UTC minute notice",
+        "use": {
+          "id": "clock_notice",
+          "digest": "5911265df354e1dda1e6910d790c1eedcec6e0d79cd1cafe48ce0c3d8ff30d21",
+          "slots": {"now": 1795042320}
+        },
+        "rendered": "Now: Wed 18 Nov 22:52Z"
+      },
+      {
+        "name": "datetime pads day hour and minute and drops seconds",
+        "use": {
+          "id": "clock_notice",
+          "digest": "5911265df354e1dda1e6910d790c1eedcec6e0d79cd1cafe48ce0c3d8ff30d21",
+          "slots": {"now": 90061}
+        },
+        "rendered": "Now: Fri 02 Jan 01:01Z"
+      },
+      {
+        "name": "datetime refuses the exclusive upper bound",
+        "use": {
+          "id": "clock_notice",
+          "digest": "5911265df354e1dda1e6910d790c1eedcec6e0d79cd1cafe48ce0c3d8ff30d21",
+          "slots": {"now": 4102444800}
+        },
+        "problem": {"kind": "invalid_slot", "slot": "now"},
+        "refusal": {"code": "invalid_params", "detail": {"field": "template"}}
+      }
+    ]
+  },
   "fall_through": [
     {
       "name": "a rendered template goes out as system",

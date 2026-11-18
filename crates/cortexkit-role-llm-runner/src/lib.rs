@@ -240,6 +240,9 @@ pub mod capabilities {
     /// Plan-carried system-text facts accepted and forwarded to opt-in providers.
     pub const PLAN_FACTS: &str = "plan_facts";
 
+    /// Plan template datetime slots rendered as pinned UTC text on sends.
+    pub const TEMPLATE_DATETIME: &str = "template_datetime";
+
     /// Session-scoped uploads, upload references on sends and media by digest.
     pub const ATTACHMENTS: &str = "attachments";
     /// Non-template sends may omit or empty `prompt` when `content` is
@@ -622,6 +625,7 @@ pub mod capabilities {
         (SESSION_USAGE, &[ops::SESSION_HEAD]),
         (HEAD_SENDER, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
+        (TEMPLATE_DATETIME, &[ops::SESSION_SEND]),
         (SENDER_SUCCESSION, &[ops::SESSION_SEND]),
         (APP_READERS, &[]),
         (SEND_STATUS, &[ops::SESSION_SEND_STATUS, ops::SEND_STATUS]),

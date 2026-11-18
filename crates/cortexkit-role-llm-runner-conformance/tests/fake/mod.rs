@@ -469,6 +469,8 @@ pub struct Defects {
     /// A template send's slots are substituted without validation, so an
     /// out-of-range value renders and goes out as system text.
     pub order_template_slots_unchecked: bool,
+    /// A datetime template renders its raw Unix seconds instead of UTC text.
+    pub order_datetime_unformatted: bool,
     /// A `delivery_order` send from a module the plan does not name is
     /// admitted.
     pub order_admits_any_sender: bool,
@@ -4797,6 +4799,18 @@ impl Module {
                     numbers.get(&(part.mid.clone(), part.part.clone())).copied()
                 };
                 match order::render(&templates, template, shown) {
+                    Ok(_)
+                        if self.world.defects.order_datetime_unformatted
+                            && templates.iter().any(|candidate| {
+                                candidate.id == template.id
+                                    && candidate
+                                        .slots
+                                        .values()
+                                        .any(|slot| matches!(slot, order::Slot::Datetime { .. }))
+                            }) =>
+                    {
+                        (unchecked_render(&templates, template), true)
+                    }
                     Ok(text) => (text, true),
                     Err(order::TemplateProblem::PartGone(_))
                         if self.world.defects.order_template_part_gone_accepted =>

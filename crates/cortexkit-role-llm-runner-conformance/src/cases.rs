@@ -337,8 +337,10 @@ where
             }
             name if name.starts_with("cleared_ride_") => crate::notices::run(self, name).await,
             name if name.starts_with("delivery_order_") => {
-                if name == "delivery_order_template_renders_as_system"
-                    && !self.declares(Capability::Steer)
+                if matches!(
+                    name,
+                    "delivery_order_template_renders_as_system" | "delivery_order_datetime_samples"
+                ) && !self.declares(Capability::Steer)
                     && !self.subject.turn_system_supported()
                 {
                     Ok(Ending::Inapplicable(

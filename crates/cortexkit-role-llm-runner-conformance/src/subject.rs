@@ -140,6 +140,8 @@ pub enum Capability {
     /// `session.send` with `delivery_order`, plan-named senders and plan
     /// templates.
     DeliveryOrder,
+    /// Plan template datetime slots with pinned UTC minute rendering.
+    TemplateDatetime,
     /// One-hop retry/status lookup through a plan sender's predecessor.
     SenderSuccession,
     /// Trusted relay headers, verified facts and header-free display rows.
@@ -271,6 +273,7 @@ impl Capability {
         Self::FinishReason,
         Self::SessionUsage,
         Self::DeliveryOrder,
+        Self::TemplateDatetime,
         Self::SenderSuccession,
         Self::SenderAttribution,
         Self::Notices,
@@ -360,6 +363,7 @@ impl Capability {
             Self::FinishReason => groups::FINISH_REASON,
             Self::SessionUsage => groups::SESSION_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
+            Self::TemplateDatetime => groups::TEMPLATE_DATETIME,
             Self::SenderSuccession => groups::SENDER_SUCCESSION,
             Self::SenderAttribution => groups::SENDER_ATTRIBUTION,
             Self::Notices => groups::NOTICES,

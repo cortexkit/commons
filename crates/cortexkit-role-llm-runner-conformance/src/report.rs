@@ -746,6 +746,8 @@ pub const CASES: &[CaseSpec] = &[
         "a plan-named sender granted idle_start sends the string queue (not a list): it is admitted, its message is written once and starts a run that completes"),
     case("delivery_order_template_renders_as_system", ORDER,
         "a template send carrying an empty prompt is refused invalid_params naming template and writes nothing; a plan sender's template send with valid slots and no prompt goes out once with the rendered text, as turn_system where the adapter's route supports it and as a steer otherwise"),
+    case("delivery_order_datetime_samples", &[Capability::DeliveryOrder, Capability::TemplateDatetime, Queue, TranscriptReads, Capability::RenderedModelInput],
+        "a declaring runner renders the datetime clock-notice and padding samples byte for byte in model input, and refuses the out-of-range sample invalid_params naming template without writing"),
     case("delivery_order_bad_slot_refused", ORDER,
         "a template send whose percentage slot is 101 is refused invalid_params naming template, writes nothing, and nothing goes out as turn_system"),
     case("delivery_order_template_part_gone_refused", &[Capability::DeliveryOrder, Queue, TranscriptReads],

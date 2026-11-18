@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.75
+
+- Pin llm-runner 0.8.62 and add a `template_datetime`-gated case checking
+  datetime clock notices against the contract's byte-pinned samples,
+  including padding, dropped seconds and the out-of-range refusal.
+- Verify the case rejects an intentionally incorrect datetime renderer by
+  its case name.
+- Treat the datetime case as inapplicable when its capability requirements
+  are not declared, without changing the runner's conformance verdict.
+
 ## 0.17.74
 
 - Pin the runner contract to `=0.8.61` for shared tool output views and

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.62
+
+- Add the typed `datetime` plan-template slot with the closed `utc_minute`
+  format: integer Unix seconds in `[0, 4102444800)` render as pinned English
+  UTC minute text with zero-padded day and time. Invalid values retain the
+  existing `invalid_params {field: "template"}` refusal.
+- Add the `template_datetime` capability group on `session.send`. Readers
+  first: runners declare and render first; a composer sends `datetime`
+  templates only to declaring runners. Non-declaring runners refuse such a
+  plan as an unknown slot type. Template digests include the slot declaration.
+- Pin clock-notice, padding and out-of-range samples with checksums.
+
 ## 0.8.61
 
 - Add `serializer_profile::owned_broca::tool_output(output, is_error)` and

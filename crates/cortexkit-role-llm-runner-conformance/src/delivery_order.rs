@@ -74,7 +74,7 @@ where
         | "delivery_order_unnamed_sender_refused"
         | "delivery_order_steer_receipt_durable_across_restart"
         | "send_status_answers_as_a_resend_after_restart" => &[Mode::Steer],
-        "delivery_order_template_renders_as_system" => {
+        "delivery_order_template_renders_as_system" | "delivery_order_datetime_samples" => {
             if case.subject.turn_system_supported() {
                 &[Mode::TurnSystem]
             } else {
@@ -121,6 +121,9 @@ where
         "delivery_order_list_refused_without_group" => passed(list_without_group(case).await),
         "delivery_order_unnamed_sender_refused" => passed(unnamed_sender(case).await),
         "delivery_order_template_renders_as_system" => passed(template_renders(case).await),
+        "delivery_order_datetime_samples" => {
+            passed(datetime_samples(case).await).map_err(|error| format!("{name}: {error}"))
+        }
         "delivery_order_bad_slot_refused" => passed(bad_slot(case).await),
         "delivery_order_template_part_gone_refused" => part_gone(case).await,
         "delivery_order_ungranted_interrupt_refused" => passed(ungranted_interrupt(case).await),
@@ -1438,6 +1441,89 @@ where
     delivered_once(&messages, &accepted, modes::STEER)
 }
 
+async fn datetime_samples<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let samples: Value = serde_json::from_str(
+        cortexkit_role_llm_runner::vectors::file("delivery-order.json")
+            .ok_or("missing delivery-order samples")?,
+    )
+    .map_err(|error| error.to_string())?;
+    let samples = &samples["datetime_templates"];
+    for sample in samples["uses"].as_array().ok_or("missing datetime uses")? {
+        let what = sample["name"].as_str().ok_or("missing sample name")?;
+        let mut session = case
+            .open(
+                "datetime-template",
+                Script {
+                    turns: vec![
+                        ScriptedTurn::new(vec![case.mint.text("opening-answer").0]),
+                        ScriptedTurn::new(vec![case.mint.text("datetime-answer").0]),
+                    ],
+                },
+            )
+            .await?;
+        require_declared(&session.route, groups::TEMPLATE_DATETIME, what).await?;
+        let identity = sender(case)?;
+        let mut entry: PlanSender =
+            serde_json::from_value(samples["sender"].clone()).map_err(|error| error.to_string())?;
+        entry.module = identity.module;
+        let members = Map::from_iter([("senders".into(), json!([entry]))]);
+        let fields = case
+            .subject
+            .send_fields_with_plan(&session.name, true, &members)
+            .ok_or("the subject builds no plan carrying datetime templates")?;
+        let opening = case.mint.next("opening");
+        send_and_wait(case, &mut session, Some(&fields), &opening, &Map::new()).await?;
+        let named = case
+            .subject
+            .session_route(case.handle.inner(), &session.name, &identity.stamp)
+            .await
+            .map_err(|error| error.to_string())?;
+        let use_: TemplateUse =
+            serde_json::from_value(sample["use"].clone()).map_err(|error| error.to_string())?;
+        let order = DeliveryOrder::new(vec![Mode::TurnSystem, Mode::Steer]).with_template(use_);
+        let before = snapshot(&session.route).await?;
+        let reply = ordered(case, &session, &named, "", &case.mint.next("send"), &order).await?;
+        if sample.get("refusal").is_some() {
+            let error = expect_error(what, reply)?;
+            expect_field(what, &error, errors::INVALID_PARAMS, TEMPLATE_FIELD)?;
+            if !same(&before, &snapshot(&session.route).await?) {
+                return Err(format!("{what} was refused but changed the transcript"));
+            }
+            continue;
+        }
+        expect_ok(what, reply)?;
+        let prompt = case.mint.next("owner-turn");
+        send_and_wait(case, &mut session, None, &prompt, &Map::new()).await?;
+        let expected = sample["rendered"]
+            .as_str()
+            .ok_or("missing rendered sample")?;
+        let requests = case
+            .subject
+            .model_requests(&session.name)
+            .await
+            .map_err(|error| error.to_string())?;
+        if !requests
+            .iter()
+            .any(|request| request.rendered.iter().any(|text| text == expected))
+        {
+            return Err(format!(
+                "{what}: model input lacks exact datetime bytes {expected:?}"
+            ));
+        }
+        let mode = if case.subject.turn_system_supported() {
+            modes::TURN_SYSTEM
+        } else {
+            modes::STEER
+        };
+        delivered_once(&read_all(&session.route).await?.1, expected, mode)?;
+    }
+    Ok(())
+}
+
 async fn template_renders<S>(case: &Case<'_, S>) -> Check
 where
     S: LlmRunnerSubject,
@@ -1997,6 +2083,68 @@ where
 #[cfg(test)]
 mod declaration_tests {
     use super::*;
+
+    async fn datetime_case(unformatted: bool, turn_system: bool) -> Result<Ending, String> {
+        use crate::{
+            drive::Mint,
+            fork_fake::{Defects, FakeSubject},
+        };
+        use cortexkit_role_harness::CrashDriver;
+
+        let mut fake = FakeSubject::new(Defects {
+            order_datetime_unformatted: unformatted,
+            ..Defects::default()
+        });
+        fake.turn_system = turn_system;
+        fake.capabilities.insert(Capability::TemplateDatetime);
+        let declared = fake.capabilities();
+        let mint = Mint::default();
+        let root = tempfile::tempdir().unwrap();
+        let mut driver = CrashDriver::new(&fake);
+        let handle = driver.spawn(root.path()).await.unwrap();
+        let case = Case {
+            subject: &fake,
+            handle: &handle,
+            declared: &declared,
+            mint: &mint,
+        };
+        case.run("delivery_order_datetime_samples").await
+    }
+
+    #[tokio::test]
+    async fn datetime_samples_declaring_runner_renders_exact_bytes() {
+        for turn_system in [true, false] {
+            assert!(matches!(
+                datetime_case(false, turn_system).await.unwrap(),
+                Ending::Passed
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn datetime_samples_reject_an_unformatted_renderer_by_name() {
+        let error = datetime_case(true, true)
+            .await
+            .err()
+            .expect("incorrect renderer passed");
+        assert!(error.contains("delivery_order_datetime_samples"), "{error}");
+        assert!(error.contains("exact datetime bytes"), "{error}");
+    }
+
+    #[test]
+    fn datetime_sample_case_requires_the_runner_and_observation_capabilities() {
+        let spec = crate::CASES
+            .iter()
+            .find(|spec| spec.name == "delivery_order_datetime_samples")
+            .unwrap();
+        for capability in [
+            Capability::DeliveryOrder,
+            Capability::TemplateDatetime,
+            Capability::RenderedModelInput,
+        ] {
+            assert!(spec.requires.contains(&capability));
+        }
+    }
 
     #[test]
     fn cleared_ride_mode_probes_require_explicit_advertisement() {

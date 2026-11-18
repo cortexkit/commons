@@ -392,6 +392,7 @@ alias until the next breaking release.
 | `session_usage` | `session.head` with durable, incremental session spend in `usage` | §4.3 |
 | `head_sender` | `session.head` with the attested caller's effective delivery grant in `sender`; absence means no grant | §4.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
+| `template_datetime` | `session.send` with plan template `datetime` slots; no added op | §9.7 |
 | `app_readers` | Plan-named read admission; adds no operation of its own | §9.19 |
 | `send_status` | `session.send_status` | §9.8 |
 | `send_promote` | `session.promote`; only where `steer` is declared | §9.24 |
@@ -5074,12 +5075,41 @@ say who may send and which texts are system text.
   (`delivery_order::template_digest`). Slots are typed
   (`delivery_order::Slot`), and none takes free text: `integer {min, max}`
   (inclusive), `percentage` (an integer from 0 to 100), `part_tag` (a part
-  of this session, `{mid, part}`, above) and `enum {values}` (one of the
-  listed values). Integers render in decimal, a `part_tag` as the number
+  of this session, `{mid, part}`, above), `enum {values}` (one of the
+  listed values), and `datetime {format}` (Unix seconds, below). Integers
+  render in decimal, a `part_tag` as the number
   the carrying request shows (`§N§`), and an enum value as itself. The
   `part_tag` slot replaced llm-runner 0.3's `tag` slot, which took a
   number: a template declaring `tag` no longer decodes, and a template with
   a `part_tag` slot has a different digest than it had with `tag`.
+- [pinned] A datetime slot is `{"type": "datetime", "format": "utc_minute"}`.
+  Its format set is closed: `utc_minute` is the only format; any other
+  format is an invalid slot declaration. Its value is an integer number of
+  Unix seconds, at least 0 and strictly less than 4102444800
+  (2100-01-01T00:00:00Z). Negative, non-integer, string and out-of-range
+  values are refused like any other invalid slot value:
+  `invalid_params {field: "template"}`, writing nothing.
+- [pinned] `utc_minute` renders exactly `Ddd DD Mon HH:MMZ` in UTC.
+  Weekdays are `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun`; months are
+  `Jan`, `Feb`, `Mar`, `Apr`, `May`, `Jun`, `Jul`, `Aug`, `Sep`, `Oct`, `Nov`,
+  `Dec`. Day of month, hour and minute are zero-padded to two decimal
+  digits. Seconds are dropped (floor to the minute); spaces, colons and the
+  literal `Z` are exactly as shown. The rendering is a pure function of
+  value and format, independent of locale, local timezone and the current
+  clock, so later requests re-render a persistent notice identically.
+  For template `{"id":"clock_notice","text":"Now: {now}","slots":{"now":{"type":"datetime","format":"utc_minute"}}}`,
+  `now: 1795042320` renders exactly `Now: Wed 18 Nov 22:52Z`;
+  `now: 90061` renders exactly `Now: Fri 02 Jan 01:01Z` (including dropped
+  seconds). The template digest covers the complete slot declaration,
+  including `type` and `format`, like every other slot.
+- [pinned] The runner declares `template_datetime` in `role.describe` when
+  it renders datetime slots. Readers first: runners declare and render
+  before composers send datetime templates. A composer includes a template
+  using a datetime slot only for a runner declaring `template_datetime`.
+  A runner without the group refuses a plan containing such a template
+  exactly as an unknown slot type: `invalid_params {field: "plan.senders"}`,
+  writing nothing (`delivery_order::check_plan`). No arbitrary format or
+  free-text slot is introduced.
 
 **Senders.**
 
