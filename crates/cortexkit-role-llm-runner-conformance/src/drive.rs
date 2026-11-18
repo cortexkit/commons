@@ -8,7 +8,7 @@ use std::{
 
 use cortexkit_role_llm_runner::{
     errors, ops,
-    read::{HeadMeta, ReadMessage, ReadPage, ReadRequest},
+    read::{HeadMeta, HeadModel, ReadMessage, ReadPage, ReadRequest},
     run::{RunResult, RunResultRequest, RunState},
     send::SendReply,
 };
@@ -177,7 +177,7 @@ pub async fn read_refusal<R: RunnerRoute>(
     )
 }
 
-/// `session.head`, checked for record identity, ordinal bounds and marker metadata.
+/// `session.head`, with the shared head metadata checks.
 pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
     let body = expect_ok(
         "session.head",
@@ -186,7 +186,7 @@ pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
     checked_head(body)
 }
 
-/// Decode a `session.head` answer and check record identity, ordinal bounds and marker metadata.
+/// Decode a `session.head` answer and check its cross-field constraints.
 pub fn checked_head(body: Value) -> Result<HeadMeta, String> {
     let head: HeadMeta = decode("session.head", body.clone())?;
     if !head.incarnation_valid() {
@@ -199,7 +199,17 @@ pub fn checked_head(body: Value) -> Result<HeadMeta, String> {
             "session.head answered {body}, inconsistent record identity, ordinal bounds or marker metadata"
         ));
     }
+    if body.get("model").is_some_and(|model| {
+        model.get("variant").is_some() && model.get("default_variant").is_some()
+    }) {
+        return Err("session.head.model includes both variant and default_variant".into());
+    }
     Ok(head)
+}
+
+/// The recorded selection, excluding any reasoning effort inferred from the catalog.
+pub(crate) fn head_model_selection(model: &HeadModel) -> (&str, &str, Option<&str>) {
+    (&model.provider, &model.model, model.variant.as_deref())
 }
 
 /// Every entry on the active path, from ordinal 1, including below a model

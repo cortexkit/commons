@@ -330,6 +330,7 @@ pub struct Defects {
     pub session_usage_reset_on_rewind: bool,
     pub session_usage_unknown_zero: bool,
     pub head_model_from_plan: bool,
+    pub head_model_variant_conflict: bool,
     pub output_refs: Option<&'static str>,
     pub shown_part_numbers_missing: bool,
     pub held_calls_never_listed: bool,
@@ -5485,6 +5486,13 @@ impl Module {
                 }
                 head = head.with_usage(usage);
             }
+        }
+        if self.world.defects.head_model_variant_conflict {
+            let mut model =
+                cortexkit_role_llm_runner::read::HeadModel::new(FAKE_PROVIDER, FAKE_MODEL)
+                    .with_variant("high");
+            model.default_variant = Some("xhigh".into());
+            head = head.with_model(model);
         }
         if self.world.serves(groups::ATTACHMENTS) {
             let accepts = sess.attachment_accepts.unwrap_or(true);

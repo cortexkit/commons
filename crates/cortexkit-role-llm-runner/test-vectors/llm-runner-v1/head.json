@@ -88,6 +88,41 @@
       }
     },
     {
+      "name": "model selection with a documented default effort",
+      "answer": {
+        "history_version": 1,
+        "incarnation": "log-1",
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.4",
+          "default_variant": "xhigh"
+        }
+      }
+    },
+    {
+      "name": "model selection with an explicit effort",
+      "answer": {
+        "history_version": 1,
+        "incarnation": "log-1",
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.4",
+          "variant": "high"
+        }
+      }
+    },
+    {
+      "name": "model selection without an effort sent",
+      "answer": {
+        "history_version": 1,
+        "incarnation": "log-1",
+        "model": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4"
+        }
+      }
+    },
+    {
       "name": "a pre-adoption host cut shares the whole-path count: model input starts at ordinal 3",
       "answer": {
         "last_ordinal": 5,

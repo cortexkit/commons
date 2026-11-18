@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.78
+
+- Pin llm-runner `=0.8.64`. Reject `session.head.model` replies with both
+  `variant` and `default_variant`, and compare recorded selections without
+  treating the default as part of the selection.
+
 ## 0.17.77
 
 - Wait for the original send's own run in `sender_succession_changed_payload_refused`

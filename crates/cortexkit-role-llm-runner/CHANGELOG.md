@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.64
+
+- Add optional `default_variant` to `HeadModel` so readers
+  can label the reasoning effort sent by default without treating it as a
+  chosen `variant`. Readers that ignore it are unaffected.
+
 ## 0.8.63
 
 - Add `session_held_elsewhere` for a session whose agent moved

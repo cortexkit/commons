@@ -944,7 +944,7 @@ pub const CASES: &[CaseSpec] = &[
     case(
         "head_has_no_bodies",
         READS,
-        "session.head of a written session decodes as consistent head metadata matching the transcript and carries no message body",
+        "session.head of a written session matches the transcript, carries no message body, and never reports both model.variant and model.default_variant",
     ),
     case(
         "run_result_completed_final_text",

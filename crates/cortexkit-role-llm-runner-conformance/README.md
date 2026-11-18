@@ -1,6 +1,9 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.76** pins runner **0.8.63**. `tool_routes_*` cases use
+Version **0.17.78** pins runner **0.8.64**. Checked `session.head` replies
+reject `model.default_variant` alongside `model.variant`.
+
+`tool_routes_*` cases use
 `tool_routes_plan_fields` for one scripted item and a second provider,
 `conformance-route-target`. Supply the default catalog's independent pin,
 the offered schema captured at the model boundary, target provider/body

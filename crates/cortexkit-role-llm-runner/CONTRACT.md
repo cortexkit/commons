@@ -1154,8 +1154,9 @@ that a model meant as content; it does not tell decoration from content.
   Absent means unknown for either fact. Existing heads omit both fields when
   the limits are unknown; reporting a limit requires admission enforcement
   for committed uploads (§9.12).
-- [pinned] `model?: {provider, model, variant?}` (`read::HeadModel`, added
-  in 0.6.1) is the selection a send without a named model would use next.
+- [pinned] `model?: {provider, model, variant?, default_variant?}`
+  (`read::HeadModel`, added in 0.6.1) is the selection a send without a
+  named model would use next.
   It is optional, needs no describe group, and absent means unknown. The
   `variant` member is absent when the selection names none, exactly as in
   `by_model` (§6.4). The runner reads its own record of the latest model
@@ -1165,6 +1166,19 @@ that a model meant as content; it does not tell decoration from content.
   a later host-side switch. This describes the next send, not history;
   each run's `by_model` already describes what that run used. Like `input`,
   `model` is independent of the session record and may be known before the first send.
+- [pinned] `default_variant` (added in 0.8.64) is a string naming the
+  documented reasoning effort the runner will send on the next request when
+  the selection names none. For example, OpenAI families can use the
+  model catalog's `capability.reasoning_default`. Omit `default_variant`
+  whenever `variant` is present or the runner sends no effort. For Anthropic
+  and Google, sending an effort also turns thinking on, so with no selected
+  variant the runner sends no effort and omits `default_variant`.
+- [pinned] Readers display `variant` if present, otherwise `default_variant`
+  marked as the default (for example, `xhigh (default)`), otherwise no
+  effort. `variant` still means what the selection named. A reader echoing
+  the selection back must never send `default_variant` as the chosen
+  `variant`. Readers that ignore the new member are unaffected, so
+  writers may emit it as soon as they build against this version.
 - [pinned] Optional top-level `service_tier` is the tier a send naming none
   would use next, not the last run's tier. It is an open string on read.
   Under `head_selection`, absent means `standard`; without that group,

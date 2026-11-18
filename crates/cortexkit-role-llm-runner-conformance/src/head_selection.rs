@@ -11,7 +11,10 @@ use serde_json::{json, Value};
 
 use crate::{
     cases::{Case, Ending, Session},
-    drive::{call, decode, expect_error, expect_ok, run_result, wait_run_end, RunEnd},
+    drive::{
+        call, decode, expect_error, expect_ok, head_model_selection, run_result, wait_run_end,
+        RunEnd,
+    },
     route::RunnerRoute,
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
@@ -270,7 +273,13 @@ where
                 "unchanged refresh",
                 call(&session.route, ops::SESSION_REFRESH, json!(request)).await?,
             )?;
-            if head(&session.route).await?.model.as_ref() != Some(&switched) {
+            if head(&session.route)
+                .await?
+                .model
+                .as_ref()
+                .map(head_model_selection)
+                != Some(head_model_selection(&switched))
+            {
                 return Err("unchanged refresh overrode the later host-side switch".into());
             }
         }

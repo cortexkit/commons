@@ -8,7 +8,9 @@ use cortexkit_role_llm_runner::{
 
 use crate::{
     cases::{Case, Ending},
-    drive::{call, decode, expect_ok, head, run_result, send_params, wait_run_end},
+    drive::{
+        call, decode, expect_ok, head, head_model_selection, run_result, send_params, wait_run_end,
+    },
     route::RunnerRoute,
     subject::{LlmRunnerSubject, Script, ScriptedTurn, ScriptedUsage},
 };
@@ -92,11 +94,12 @@ where
                 "adapter cannot record a model switch".into(),
             ));
         };
-        if before.as_ref() == Some(&expected) {
+        let expected_selection = head_model_selection(&expected);
+        if before.as_ref().map(head_model_selection) == Some(expected_selection) {
             return Err("model switch fixture returned the unchanged original selection".into());
         }
         let got = head(&session.route).await?.model;
-        if got.as_ref() != Some(&expected) {
+        if got.as_ref().map(head_model_selection) != Some(expected_selection) {
             return Err(format!(
                 "head.model did not reflect recorded switch: got {got:?}, expected {expected:?}"
             ));

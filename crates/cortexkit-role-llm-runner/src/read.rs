@@ -1294,6 +1294,10 @@ pub struct HeadModel {
     /// Absent when the recorded selection names no variant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
+    /// The documented reasoning effort the runner will send if no variant is
+    /// selected. Absent if `variant` is present or the runner sends no effort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_variant: Option<String>,
 }
 
 impl HeadModel {
@@ -1302,6 +1306,7 @@ impl HeadModel {
             provider: provider.into(),
             model: model.into(),
             variant: None,
+            default_variant: None,
         }
     }
 
@@ -2018,6 +2023,19 @@ mod tests {
             let head: HeadMeta = vectors::round_trip(name, &case["answer"]);
             assert!(case["answer"].get("messages").is_none(), "{name}");
             assert!(head.snapshot_consistent(), "{name}");
+            if let Some(model) = head.model {
+                let wire = &case["answer"]["model"];
+                assert_eq!(model.variant.as_deref(), wire["variant"].as_str(), "{name}");
+                assert_eq!(
+                    model.default_variant.as_deref(),
+                    wire["default_variant"].as_str(),
+                    "{name}"
+                );
+                assert!(
+                    model.variant.is_none() || model.default_variant.is_none(),
+                    "{name}"
+                );
+            }
         }
         assert!(HeadMeta::empty(1, "log-1").snapshot_consistent());
     }

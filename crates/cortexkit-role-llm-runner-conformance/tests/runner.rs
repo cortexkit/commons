@@ -4570,6 +4570,20 @@ async fn session_usage_plan_model_fails_by_name() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn head_default_variant_alongside_explicit_variant_fails_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        head_model_variant_conflict: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        failed(&report, "head_has_no_bodies"),
+        "session.head.model includes both variant and default_variant"
+    );
+}
+
 const SEND_STATUS_PREFIXES: &[&str] = &["send_status_"];
 
 /// The steer-receipt case that follows a delivered steer by re-sending it.

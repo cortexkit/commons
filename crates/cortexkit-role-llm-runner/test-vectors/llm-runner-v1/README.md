@@ -107,6 +107,9 @@ entry, not a message ordinal. Stale after-mid cursors are refused
 bounds. The vector identities are opaque; neither a mid nor a part key may
 be derived from an ordinal by a reader.
 
+`head.json` includes selections with a documented `model.default_variant`,
+an explicit `model.variant`, and neither when the runner sends no effort.
+
 `read-renumbering-switch.json` illustrates one session before and after it
 adopts 0.8 numbering. The same two messages move from ordinals 0,1 to 1,2.
 The before page carries `lineage_id` and neither `history_version` nor
