@@ -85,7 +85,17 @@ fn permission_validator_accepts_declared_module_principals_and_rejects_unknown()
     use cortexkit_bus_naming::{EVENT_CONSUMERS, LIVE_HINT_READERS, MODULE_BUCKETS};
 
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
-    let bucket_only = MODULE_BUCKETS
+    let validate = |principal: &str| {
+        let document =
+            format!("{CHECKED_IN_GOLDEN}allow {principal} publish ck.box_goldenfixture.example\n");
+        validate_permission_file(&document, &account)
+    };
+    // A principal that only owns or reads a bucket, with no event durable, must
+    // be accepted: the validator may not derive its principals from the event
+    // table alone. Entorhinal was the last such principal until it gained an
+    // event durable, so this runs only while the tables still hold one. The
+    // loop below still validates every bucket principal either way.
+    if let Some(bucket_only) = MODULE_BUCKETS
         .iter()
         .flat_map(|bucket| std::iter::once(bucket.owner).chain(bucket.readers.iter().copied()))
         .find(|module| {
@@ -93,13 +103,9 @@ fn permission_validator_accepts_declared_module_principals_and_rejects_unknown()
                 .iter()
                 .any(|entry| entry.module_id == *module)
         })
-        .expect("a bucket principal without an event durable is required for this regression");
-    let validate = |principal: &str| {
-        let document =
-            format!("{CHECKED_IN_GOLDEN}allow {principal} publish ck.box_goldenfixture.example\n");
-        validate_permission_file(&document, &account)
-    };
-    validate(bucket_only).expect("bucket-only principal must be accepted");
+    {
+        validate(bucket_only).expect("bucket-only principal must be accepted");
+    }
     validate("occipital").expect("the views reader and event consumer must be accepted");
 
     for module in MODULE_BUCKETS
@@ -630,6 +636,14 @@ fn participants_publish_only_their_own_module_events() {
         &foreign
     ));
     assert!(participant_permissions(&account, "ckgithub", "git.hub", &[]).is_err());
+
+    let allows = participant_permissions(&account, "ckcallosum", "callosum", &[]).unwrap();
+    assert!(allowed(
+        &allows,
+        Principal::Participant,
+        Operation::Publish,
+        "ck.box_goldenfixture.event.callosum.device_removed.v1"
+    ));
 }
 
 #[test]
@@ -776,6 +790,7 @@ fn event_consumer_grants_and_federation_publishes_are_exact() {
         "plexus",
         "wernicke",
         "colliculus",
+        "entorhinal",
     ] {
         let baseline = participant_permissions(&account, "UPFC", "ordinary", &[])
             .unwrap()

@@ -132,7 +132,8 @@
         "$JS.hub.API.CONSUMER.INFO.HUB_MEMORY.>",
         "$JS.hub.API.CONSUMER.DELETE.HUB_MEMORY.>",
         "ck.fleet.memory.*.*",
-        "$JS.ACK.HUB_MEMORY.>"
+        "$JS.ACK.HUB_MEMORY.>",
+        "$JS.FC.HUB_MEMORY.*.*"
       ],
       "subscribe": [
         "ckdel.0123456789abcdef0123456789abcdef.magic-context.>"
@@ -174,7 +175,8 @@
         "$JS.hub.API.CONSUMER.INFO.HUB_ROOMS.>",
         "$JS.hub.API.CONSUMER.DELETE.HUB_ROOMS.>",
         "ck.fleet.room.>",
-        "$JS.ACK.HUB_ROOMS.>"
+        "$JS.ACK.HUB_ROOMS.>",
+        "$JS.FC.HUB_ROOMS.*.*"
       ],
       "subscribe": [
         "ckdel.0123456789abcdef0123456789abcdef.prefrontal.>"

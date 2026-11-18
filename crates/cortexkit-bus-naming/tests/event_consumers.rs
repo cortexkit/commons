@@ -219,6 +219,10 @@ fn live_hint_subscriptions_preserve_event_only_readers_and_validate_modules() {
             "ck.box_hints.live.thalamus.step.finished.v1",
         ]
     );
+    assert_eq!(
+        live_hint_subscriptions(&account, "entorhinal").unwrap(),
+        ["ck.box_hints.live.callosum.device_removed.v1"]
+    );
     for module in ["", "*", ">", "reader.module"] {
         assert_eq!(
             live_hint_subscriptions(&account, module)
@@ -398,10 +402,15 @@ fn new_reader_rows_pin_exact_subjects_and_explicit_durable_names() {
                 "event.broca.run.ended.v1",
             ],
         ),
+        (
+            "entorhinal",
+            "m_entorhinal",
+            &["event.callosum.device_removed.v1"],
+        ),
     ];
     let names = AccountNames::derive("box_readers").unwrap();
     let specs = event_consumer_specs(&names).unwrap();
-    assert_eq!(EVENT_CONSUMERS.len(), 19);
+    assert_eq!(EVENT_CONSUMERS.len(), 20);
     for (module, durable, filters) in expected {
         let row = EVENT_CONSUMERS
             .iter()

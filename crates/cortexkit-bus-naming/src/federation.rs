@@ -416,6 +416,7 @@ pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant>
             vec![
                 HUB_MEMORY_SUBJECT.to_owned(),
                 format!("$JS.ACK.{HUB_MEMORY_STREAM}.>"),
+                format!("$JS.FC.{HUB_MEMORY_STREAM}.*.*"),
             ],
         ),
         HUB_ROOMS_MODULE | HUB_ROOMS_MODULE_LEGACY => (
@@ -423,6 +424,7 @@ pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant>
             vec![
                 HUB_ROOMS_SUBJECT.to_owned(),
                 format!("$JS.ACK.{HUB_ROOMS_STREAM}.>"),
+                format!("$JS.FC.{HUB_ROOMS_STREAM}.*.*"),
             ],
         ),
         HUB_IDLOG_MODULE => (

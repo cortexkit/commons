@@ -228,6 +228,11 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.broca.run.ended.v1",
         ],
     },
+    EventConsumer {
+        module_id: "entorhinal",
+        durable: "m_entorhinal",
+        filter_subjects: &["event.callosum.device_removed.v1"],
+    },
 ];
 
 /// A module allowed to subscribe to exact live hints. Each row names live

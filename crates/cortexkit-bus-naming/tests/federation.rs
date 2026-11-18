@@ -394,6 +394,22 @@ fn federation_hub_module_refuses_other_ids() {
 }
 
 #[test]
+fn federation_hub_modules_can_reply_to_ordered_consumer_flow_control() {
+    let box_id = sample_box();
+    for (module, subject) in [
+        ("magic-context", "$JS.FC.HUB_MEMORY.*.*"),
+        ("prefrontal", "$JS.FC.HUB_ROOMS.*.*"),
+        ("prefrontal-core", "$JS.FC.HUB_ROOMS.*.*"),
+    ] {
+        let grant = hub_module_grant(&box_id, module).unwrap();
+        assert!(
+            grant.publish.iter().any(|allow| allow == subject),
+            "{module}: missing {subject}"
+        );
+    }
+}
+
+#[test]
 fn federation_hub_module_alias_uses_attested_deliver_prefix() {
     let box_id = sample_box();
     assert!(is_hub_module("prefrontal-core"));

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.5
+
+- Allow the memory and rooms modules to reply to flow-control requests from
+  ordered consumers on `HUB_MEMORY` and `HUB_ROOMS`, the account-wide streams
+  on the federation hub that every paired computer shares.
+- Declare a durable event reader for device removals in the identity-log module.
+
 ## 0.5.4
 
 - Add per-module user grants for direct hub access from the federation account.
