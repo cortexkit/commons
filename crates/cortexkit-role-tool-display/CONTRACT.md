@@ -435,11 +435,32 @@ by readers; required strings obey the opaque-field rule unless stated below.
 | `work_result` | `{task, run?, item?}` | optional refs are validated when present |
 | `sidekick_answer` | `{id}` | required |
 | `approval_card` | `{id}` | starts `acc_` or `el_` |
+| `ask_answer` | `{ask, question, answer, by, round?}` | `ask` is an opaque ask id starting with `ask_`; other refs are described below |
 | `notice` | `{family, title}` | `family` is an opaque identifier; `title` is nonempty plain text |
 
+For `ask_answer`, `question` is nonempty plain text of at most 200 Unicode
+scalar values. For a form it is the form's title. `answer` is an object with
+exactly one member:
+
+- `option`: the selected option's label, nonempty plain text of at most 80
+  Unicode scalar values.
+- `text`: the person's words as plain text, at most 200 Unicode scalar values.
+- `form`: an object with only `answered` and `total`, both integers, with
+  `1 <= total <= 6` and `0 <= answered <= total`.
+
+When `question` or `answer.text` is cut, it ends with `…`, counted in the limit
+as for `excerpt`. `by` is `"person"` or `"default"`; `"default"` means the ask's
+default applied because nobody answered. `round`, when present, is an integer
+of at least 2 indicating a form's follow-up round.
+
+Display servers must adopt 0.1.11 or later before any writer emits `ask_answer`:
+older servers refuse the new kind on write. Older readers still preserve the
+record and draw a plain card for the unfamiliar kind.
+
 `notice` covers every bundle member outside the other kinds, including consult
-results, ask answers, flow digests, stall alerts, worker notices and module
-notices, so a stack never silently loses part of its bundle.
+results, flow digests, stall alerts, worker notices and module notices, so a
+stack never silently loses part of its bundle. Ask answers use `ask_answer`
+once writers switch; `notice` remains valid for ask answers in the meantime.
 
 ### 8.3 Limits and refusals
 

@@ -65,6 +65,10 @@ requests every listed preset from a live provider.
 unknown pin, plus malformed requests and replies. Record field kinds are owned
 by `tool-display/v1`; that package carries an identical copy of this vector.
 
+`view-halves.json` pins the optional `half_of` marker on a per-pin manifest.
+It covers pairings with a peer-message card, an ask-answer card and a notice,
+forward-compatible reader behavior, and named refusals for invalid markers.
+
 `view-tools.json` pins a matching `tool` definition, a definition with mismatched
 semantics, and a legacy view without `tool`, including its exact serialized
 bytes. It uses the digest of `{"type":"object"}` from `schema-digest.json`.

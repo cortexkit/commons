@@ -85,6 +85,65 @@
               },
               "at": 1700000000000,
               "excerpt": "A background step finished."
+            },
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_review",
+                "question": "Should the optional review run?",
+                "answer": {
+                  "option": "Skip the optional review"
+                },
+                "by": "default"
+              },
+              "at": 1700000001000,
+              "excerpt": "The default applied: Skip the optional review."
+            },
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_heading",
+                "question": "What heading should the report use?",
+                "answer": {
+                  "text": "June highlights"
+                },
+                "by": "person"
+              },
+              "at": 1700000002000,
+              "excerpt": "You answered: June highlights"
+            },
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_preferences",
+                "question": "Report preferences",
+                "answer": {
+                  "form": {
+                    "answered": 1,
+                    "total": 2
+                  }
+                },
+                "by": "person"
+              },
+              "at": 1700000003000,
+              "excerpt": "You answered 1 of 2 questions."
+            },
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_preferences",
+                "question": "Report preferences",
+                "answer": {
+                  "form": {
+                    "answered": 2,
+                    "total": 2
+                  }
+                },
+                "by": "person",
+                "round": 2
+              },
+              "at": 1700000004000,
+              "excerpt": "You answered 2 of 2 questions in round 2."
             }
           ]
         }
@@ -2188,6 +2247,223 @@
         "module_id": "wake-writer"
       },
       "code": "invalid_params"
+    },
+    {
+      "tag": "ask_answer_missing_ask",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-ask-answer",
+        "body": {
+          "items": [
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "question": "What heading should the report use?",
+                "answer": {
+                  "option": "June highlights"
+                },
+                "by": "person"
+              },
+              "at": 1700000000000,
+              "excerpt": "An ask resolved."
+            }
+          ]
+        }
+      },
+      "writer": {
+        "kind": "reserved",
+        "module_id": "wake-writer"
+      },
+      "code": "invalid_params",
+      "field": "refs.ask"
+    },
+    {
+      "tag": "ask_answer_wrong_ask_prefix",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-ask-answer",
+        "body": {
+          "items": [
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "question_heading",
+                "question": "What heading should the report use?",
+                "answer": {
+                  "option": "June highlights"
+                },
+                "by": "person"
+              },
+              "at": 1700000000000,
+              "excerpt": "An ask resolved."
+            }
+          ]
+        }
+      },
+      "writer": {
+        "kind": "reserved",
+        "module_id": "wake-writer"
+      },
+      "code": "invalid_params",
+      "field": "refs.ask"
+    },
+    {
+      "tag": "ask_answer_two_answer_members",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-ask-answer",
+        "body": {
+          "items": [
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_heading",
+                "question": "What heading should the report use?",
+                "answer": {
+                  "option": "June highlights",
+                  "text": "June highlights"
+                },
+                "by": "person"
+              },
+              "at": 1700000000000,
+              "excerpt": "An ask resolved."
+            }
+          ]
+        }
+      },
+      "writer": {
+        "kind": "reserved",
+        "module_id": "wake-writer"
+      },
+      "code": "invalid_params",
+      "field": "refs.answer"
+    },
+    {
+      "tag": "ask_answer_overlong_option",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-ask-answer",
+        "body": {
+          "items": [
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_heading",
+                "question": "What heading should the report use?",
+                "answer": {
+                  "option": "12345678901234567890123456789012345678901234567890123456789012345678901234567890!"
+                },
+                "by": "person"
+              },
+              "at": 1700000000000,
+              "excerpt": "An ask resolved."
+            }
+          ]
+        }
+      },
+      "writer": {
+        "kind": "reserved",
+        "module_id": "wake-writer"
+      },
+      "code": "invalid_params",
+      "field": "refs.answer.option"
+    },
+    {
+      "tag": "ask_answer_answered_above_total",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-ask-answer",
+        "body": {
+          "items": [
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_preferences",
+                "question": "Report preferences",
+                "by": "person",
+                "answer": {
+                  "form": {
+                    "answered": 3,
+                    "total": 2
+                  }
+                }
+              },
+              "at": 1700000000000,
+              "excerpt": "An ask resolved."
+            }
+          ]
+        }
+      },
+      "writer": {
+        "kind": "reserved",
+        "module_id": "wake-writer"
+      },
+      "code": "invalid_params",
+      "field": "refs.answer.form.answered"
+    },
+    {
+      "tag": "ask_answer_round_one",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-ask-answer",
+        "body": {
+          "items": [
+            {
+              "kind": "ask_answer",
+              "refs": {
+                "ask": "ask_preferences",
+                "question": "Report preferences",
+                "by": "person",
+                "answer": {
+                  "form": {
+                    "answered": 2,
+                    "total": 2
+                  }
+                },
+                "round": 1
+              },
+              "at": 1700000000000,
+              "excerpt": "An ask resolved."
+            }
+          ]
+        }
+      },
+      "writer": {
+        "kind": "reserved",
+        "module_id": "wake-writer"
+      },
+      "code": "invalid_params",
+      "field": "refs.round"
     }
   ],
   "lookups": [

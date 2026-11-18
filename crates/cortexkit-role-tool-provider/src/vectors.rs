@@ -145,6 +145,9 @@ pub const RICH_UI_STAMP_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/rich-ui-stamp.json");
 /// Schema-pinned view manifests, unknown pins and malformed requests/replies.
 pub const VIEWS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/views.json");
+/// Paired wake markers, including forward-compatible reads and writer refusals.
+pub const VIEW_HALVES_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/view-halves.json");
 /// Refetched views compared with a kept view: same, newer template, stale
 /// revision, and the conflicts `ViewManifest::compare_with_kept` reports.
 pub const VIEW_REVISIONS_JSON: &str =
@@ -198,6 +201,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("presets.json", PRESETS_JSON),
     ("rich-ui-stamp.json", RICH_UI_STAMP_JSON),
     ("views.json", VIEWS_JSON),
+    ("view-halves.json", VIEW_HALVES_JSON),
     ("view-revisions.json", VIEW_REVISIONS_JSON),
     ("view-tools.json", VIEW_TOOLS_JSON),
     ("model-visible-size.json", MODEL_VISIBLE_SIZE_JSON),

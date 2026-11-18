@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.13
+
+- Add optional `half_of` to `tool.views` rows so apps can show or hide a row
+  together with the wake record for the same event. Readers preserve unknown
+  wake kinds; existing rows without the member keep their wire bytes.
+
 ## 0.15.12
 
 - Add a per-tool `read_only: true` promise for calls carrying the role-owned

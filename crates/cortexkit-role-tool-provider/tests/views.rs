@@ -2,7 +2,10 @@ use cortexkit_role_tool_provider::{
     catalog::CatalogTool,
     describe::{check_describe, Major, RoleDescribe},
     ops,
-    views::{ViewChange, ViewEntry, ViewManifest, ViewRead, ViewTool, ViewsReply, ViewsRequest},
+    views::{
+        ViewChange, ViewEntry, ViewHalfOf, ViewManifest, ViewRead, ViewTool, ViewsReply,
+        ViewsRequest,
+    },
     PROVIDES, TOOL_VIEWS_CAPABILITY,
 };
 use serde_json::{json, Value};
@@ -39,6 +42,51 @@ fn shared_views_vectors_validate_and_round_trip() {
             assert!(reply.validate_for(&request).is_err(), "{case}");
         }
     }
+}
+
+#[test]
+fn view_halves_validate_reader_and_writer_vectors() {
+    let fixture: Value =
+        serde_json::from_str(cortexkit_role_tool_provider::vectors::VIEW_HALVES_JSON).unwrap();
+    let pin = fixture["pin"].as_str().unwrap();
+    let request = ViewsRequest::new(vec![pin.into()]);
+
+    for case in fixture["cases"].as_array().unwrap() {
+        let wire = json!({"views": {pin: case["view"]}});
+        let reply: ViewsReply = serde_json::from_value(wire.clone()).unwrap();
+        for (result, field) in [
+            (reply.validate_for(&request), "reader_error_field"),
+            (reply.validate_writer_for(&request), "writer_error_field"),
+        ] {
+            if let Some(expected) = case[field].as_str() {
+                let error = result.expect_err(case["name"].as_str().unwrap());
+                assert_eq!(error.code, "invalid_request", "{}", case["name"]);
+                assert_eq!(error.detail.unwrap()["field"], expected, "{}", case["name"]);
+            } else {
+                assert!(result.is_ok(), "{}: {result:?}", case["name"]);
+            }
+        }
+        if case["reader_error_field"].is_null() {
+            assert_eq!(serde_json::to_value(&reply).unwrap(), wire);
+        }
+    }
+}
+
+#[test]
+fn view_halves_use_template_revision_to_refresh_a_kept_view() {
+    let kept: ViewManifest =
+        serde_json::from_value(view_tools_fixture()["cases"][2]["view"].clone()).unwrap();
+    assert!(kept.half_of.is_none());
+    let fetched = kept
+        .clone()
+        .with_half_of(ViewHalfOf::new("ask_answer", None));
+    assert_eq!(fetched.compare_with_kept(&kept), ViewChange::Same);
+    let revised = fetched.with_template_revision(1);
+    assert_eq!(revised.compare_with_kept(&kept), ViewChange::NewerTemplate);
+    assert_eq!(
+        serde_json::to_value(&revised).unwrap()["half_of"],
+        json!({"kind": "ask_answer"})
+    );
 }
 
 #[test]

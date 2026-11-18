@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Add the `ask_answer` wake kind so apps can display answers as structured
+  records, including defaults and form follow-up rounds. Upgrade display
+  servers before any writer emits `ask_answer`: older servers reject the new
+  kind. Writers may continue sending ask answers as `notice` until they switch.
+
 ## 0.1.10
 
 - Add the privileged `message` kind for `say`, with a closed, validated body,

@@ -11,7 +11,7 @@ use subc_protocol::ErrorBody;
 pub use cortexkit_role_tool_display::{FieldKind, RecordSchema};
 
 use crate::{
-    call::{validate_schema_pin, SchemaPin},
+    call::{validate_call_key, validate_schema_pin, SchemaPin},
     catalog::{schema_digest, CatalogTool},
     errors,
 };
@@ -97,6 +97,49 @@ impl From<&CatalogTool> for ViewTool {
     }
 }
 
+/// The wake record paired with a tool row for the same event.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ViewHalfOf {
+    /// Wake kind as defined by tool-display. Readers retain unfamiliar kinds.
+    pub kind: String,
+    /// Writers require an opaque family for `notice` and omit it otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
+}
+
+impl ViewHalfOf {
+    pub fn new(kind: impl Into<String>, family: Option<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            family,
+        }
+    }
+
+    fn check(&self) -> Result<(), (&'static str, &'static str)> {
+        match &self.family {
+            Some(family) if validate_call_key(family).is_err() => {
+                Err(("family", "invalid opaque family"))
+            }
+            None if self.kind == "notice" => Err(("family", "required for notice")),
+            _ => Ok(()),
+        }
+    }
+
+    fn check_writer(&self) -> Result<(), (&'static str, &'static str)> {
+        self.check()?;
+        match self.kind.as_str() {
+            "notice" => Ok(()),
+            "peer_message" | "room_post" | "worker_question" | "work_result"
+            | "sidekick_answer" | "approval_card" | "ask_answer" => match &self.family {
+                Some(_) => Err(("family", "only allowed for notice")),
+                None => Ok(()),
+            },
+            _ => Err(("kind", "unknown wake kind")),
+        }
+    }
+}
+
 /// Provider schema, the detail reads the app server may call, and a template
 /// that only the app server interprets.
 ///
@@ -119,6 +162,9 @@ pub struct ViewManifest {
     /// structural input schema and `semantics`, not `description` text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ViewTool>,
+    /// The paired wake record. An absent marker means an ordinary row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half_of: Option<Box<ViewHalfOf>>,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -153,6 +199,7 @@ impl ViewManifest {
             template,
             template_revision: 0,
             tool: None,
+            half_of: None,
         }
     }
 
@@ -163,6 +210,11 @@ impl ViewManifest {
 
     pub fn with_tool(mut self, tool: ViewTool) -> Self {
         self.tool = Some(tool);
+        self
+    }
+
+    pub fn with_half_of(mut self, half_of: ViewHalfOf) -> Self {
+        self.half_of = Some(Box::new(half_of));
         self
     }
 
@@ -241,8 +293,23 @@ impl ViewsReply {
         Self { views }
     }
 
-    /// Require exactly one entry for each requested pin, and valid schemas.
+    /// Check pin coverage, schemas and paired wake markers, accepting unknown
+    /// wake kinds so the display server can pass them on to apps.
     pub fn validate_for(&self, request: &ViewsRequest) -> Result<(), ErrorBody> {
+        self.validate_with(request, ViewHalfOf::check)
+    }
+
+    /// Check a provider's reply before sending it. Writers use only known wake
+    /// kinds and must omit the family for every kind other than `notice`.
+    pub fn validate_writer_for(&self, request: &ViewsRequest) -> Result<(), ErrorBody> {
+        self.validate_with(request, ViewHalfOf::check_writer)
+    }
+
+    fn validate_with(
+        &self,
+        request: &ViewsRequest,
+        check_half_of: fn(&ViewHalfOf) -> Result<(), (&'static str, &'static str)>,
+    ) -> Result<(), ErrorBody> {
         request.validate()?;
         if request.pins.iter().any(|pin| !self.views.contains_key(pin))
             || self.views.keys().any(|pin| !request.pins.contains(pin))
@@ -260,6 +327,11 @@ impl ViewsReply {
                         "invalid record schema",
                     )
                 })?;
+                if let Some(half_of) = &view.half_of {
+                    check_half_of(half_of).map_err(|(field, reason)| {
+                        errors::invalid_request(&format!("views.{pin}.half_of.{field}"), reason)
+                    })?;
+                }
             }
         }
         Ok(())

@@ -12,6 +12,9 @@ pub const MAX_WAKE_ITEMS: usize = 64;
 pub const MAX_WAKE_EXCERPT_CHARS: usize = 200;
 pub const WAKE_RETENTION_DAYS: u64 = 180;
 
+const MAX_ASK_TEXT_CHARS: usize = 200;
+const MAX_ASK_OPTION_CHARS: usize = 80;
+
 /// Registry identity and optional fallback name, using the fleet's agent_id/display_name concepts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -129,6 +132,7 @@ impl WakeItem {
                     return Err(InvalidParams::new("refs.id"));
                 }
             }
+            "ask_answer" => self.check_ask_answer()?,
             "notice" => {
                 self.id("family")?;
                 if self
@@ -150,8 +154,42 @@ impl WakeItem {
         self.check()?;
         match self.kind.as_str() {
             "peer_message" | "room_post" | "worker_question" | "work_result"
-            | "sidekick_answer" | "approval_card" | "notice" => Ok(()),
+            | "sidekick_answer" | "approval_card" | "ask_answer" | "notice" => Ok(()),
             _ => Err(InvalidParams::new("kind")),
+        }
+    }
+
+    fn check_ask_answer(&self) -> Result<(), InvalidParams> {
+        if !self.id("ask")?.starts_with("ask_") {
+            return Err(InvalidParams::new("refs.ask"));
+        }
+        check_ask_text(
+            self.refs.get("question"),
+            "refs.question",
+            1,
+            MAX_ASK_TEXT_CHARS,
+        )?;
+        if !matches!(
+            self.refs.get("by").and_then(Value::as_str),
+            Some("person" | "default")
+        ) {
+            return Err(InvalidParams::new("refs.by"));
+        }
+        if self.refs.contains_key("round") && self.sequence("round")? < 2 {
+            return Err(InvalidParams::new("refs.round"));
+        }
+        let (kind, value) = self
+            .refs
+            .get("answer")
+            .and_then(Value::as_object)
+            .filter(|answer| answer.len() == 1)
+            .and_then(|answer| answer.iter().next())
+            .ok_or_else(|| InvalidParams::new("refs.answer"))?;
+        match kind.as_str() {
+            "option" => check_ask_text(Some(value), "refs.answer.option", 1, MAX_ASK_OPTION_CHARS),
+            "text" => check_ask_text(Some(value), "refs.answer.text", 0, MAX_ASK_TEXT_CHARS),
+            "form" => check_ask_form(value),
+            _ => Err(InvalidParams::new("refs.answer")),
         }
     }
 
@@ -169,6 +207,39 @@ impl WakeItem {
             .and_then(Value::as_u64)
             .ok_or_else(|| InvalidParams::new(format!("refs.{field}")))
     }
+}
+
+fn check_ask_text(
+    value: Option<&Value>,
+    field: &str,
+    min: usize,
+    max: usize,
+) -> Result<(), InvalidParams> {
+    if value
+        .and_then(Value::as_str)
+        .is_some_and(|text| (min..=max).contains(&text.chars().count()))
+    {
+        Ok(())
+    } else {
+        Err(InvalidParams::new(field))
+    }
+}
+
+fn check_ask_form(value: &Value) -> Result<(), InvalidParams> {
+    let form = value
+        .as_object()
+        .filter(|form| form.len() == 2)
+        .ok_or_else(|| InvalidParams::new("refs.answer.form"))?;
+    let total = form
+        .get("total")
+        .and_then(Value::as_u64)
+        .filter(|total| (1..=6).contains(total))
+        .ok_or_else(|| InvalidParams::new("refs.answer.form.total"))?;
+    form.get("answered")
+        .and_then(Value::as_u64)
+        .filter(|answered| *answered <= total)
+        .ok_or_else(|| InvalidParams::new("refs.answer.form.answered"))?;
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

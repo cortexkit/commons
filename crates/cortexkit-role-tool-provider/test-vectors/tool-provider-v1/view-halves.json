@@ -1,0 +1,39 @@
+{
+  "pin": "pin:example",
+  "cases": [
+    {
+      "name": "A sent message and its received-message card",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"peer_message"}}
+    },
+    {
+      "name": "An ask row and its answer card",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"ask_answer"}}
+    },
+    {
+      "name": "A row paired with a notice",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"notice","family":"example_family"}}
+    },
+    {
+      "name": "A reader preserves an unfamiliar kind and its family",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"future_kind","family":"example_family"}},
+      "writer_error_field": "views.pin:example.half_of.kind"
+    },
+    {
+      "name": "A notice requires a family",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"notice"}},
+      "reader_error_field": "views.pin:example.half_of.family",
+      "writer_error_field": "views.pin:example.half_of.family"
+    },
+    {
+      "name": "A writer omits the family for non-notice kinds",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"peer_message","family":"example_family"}},
+      "writer_error_field": "views.pin:example.half_of.family"
+    },
+    {
+      "name": "The family must be opaque",
+      "view": {"record_schema":{"name":"example","revision":1,"fields":{}},"reads":[],"template":null,"half_of":{"kind":"notice","family":"bad family"}},
+      "reader_error_field": "views.pin:example.half_of.family",
+      "writer_error_field": "views.pin:example.half_of.family"
+    }
+  ]
+}

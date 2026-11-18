@@ -74,6 +74,7 @@ fn wake_vectors_cover_every_kind_caps_and_keyed_riding_notice() {
                     "work_result",
                     "sidekick_answer",
                     "approval_card",
+                    "ask_answer",
                     "notice"
                 ]
                 .into_iter()
@@ -96,6 +97,12 @@ fn wake_refusal_vectors_and_claimed_senders_are_rejected() {
         let principal: Principal = serde_json::from_value(case["writer"].clone()).unwrap();
         let error = write.check(&principal).unwrap_err();
         assert_eq!(error.code, case["code"], "{}", case["tag"]);
+        if let Some(field) = case.get("field") {
+            let reader_error = write.body.check().unwrap_err();
+            for refusal in [error, reader_error] {
+                assert_eq!(refusal.detail.unwrap()["field"], *field, "{}", case["tag"]);
+            }
+        }
     }
     let valid = &fixture["writes"][0]["write"];
     for field in ["envelope", "body"] {
@@ -130,7 +137,10 @@ fn wake_checks_all_required_refs_and_peer_agents() {
         for field in item.refs.keys() {
             let mut missing = item.clone();
             missing.refs.remove(field);
-            if item.kind == "work_result" && ["run", "item"].contains(&field.as_str()) {
+            if matches!(
+                (item.kind.as_str(), field.as_str()),
+                ("work_result", "run" | "item") | ("ask_answer", "round")
+            ) {
                 missing.check().unwrap();
             } else {
                 assert!(missing.check().is_err(), "{} missing {field}", item.kind);
@@ -158,6 +168,79 @@ fn wake_checks_all_required_refs_and_peer_agents() {
     for bad in ["acc_", "el_", "other_example"] {
         approval.refs.insert("id".into(), json!(bad));
         assert!(approval.check().is_err());
+    }
+}
+
+#[test]
+fn wake_ask_answer_validates_text_and_form_boundaries() {
+    let valid = json!({"items":[{
+        "kind":"ask_answer",
+        "refs":{
+            "ask":"ask_example",
+            "question":format!("{}…", "é".repeat(199)),
+            "answer":{"text":format!("{}…", "é".repeat(199))},
+            "by":"person"
+        },
+        "at":0,
+        "excerpt":"You answered"
+    }]});
+    serde_json::from_value::<WakeRecord>(valid.clone())
+        .unwrap()
+        .check_writer()
+        .unwrap();
+    for (key, value, invalid_field) in [
+        ("answer", json!({"text":""}), None),
+        ("answer", json!({"option":"é".repeat(80)}), None),
+        ("answer", json!({"form":{"answered":0,"total":1}}), None),
+        ("answer", json!({"form":{"answered":6,"total":6}}), None),
+        ("ask", json!("ask_bad id"), Some("refs.ask")),
+        ("question", json!(""), Some("refs.question")),
+        ("question", json!("é".repeat(201)), Some("refs.question")),
+        ("by", json!("agent"), Some("refs.by")),
+        ("round", json!(2.5), Some("refs.round")),
+        ("answer", json!({"unknown":"Yes"}), Some("refs.answer")),
+        ("answer", json!({"option":""}), Some("refs.answer.option")),
+        (
+            "answer",
+            json!({"text":"é".repeat(201)}),
+            Some("refs.answer.text"),
+        ),
+        (
+            "answer",
+            json!({"form":{"answered":0,"total":0}}),
+            Some("refs.answer.form.total"),
+        ),
+        (
+            "answer",
+            json!({"form":{"answered":0,"total":7}}),
+            Some("refs.answer.form.total"),
+        ),
+        (
+            "answer",
+            json!({"form":{"answered":1.5,"total":2}}),
+            Some("refs.answer.form.answered"),
+        ),
+        (
+            "answer",
+            json!({"form":{"answered":-1,"total":2}}),
+            Some("refs.answer.form.answered"),
+        ),
+        (
+            "answer",
+            json!({"form":{"answered":0,"total":1,"extra":0}}),
+            Some("refs.answer.form"),
+        ),
+    ] {
+        let mut edited = valid.clone();
+        edited["items"][0]["refs"][key] = value;
+        let result = serde_json::from_value::<WakeRecord>(edited)
+            .unwrap()
+            .check_writer();
+        if let Some(field) = invalid_field {
+            assert_eq!(result.unwrap_err().detail.unwrap()["field"], field);
+        } else {
+            result.unwrap();
+        }
     }
 }
 

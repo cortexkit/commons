@@ -135,7 +135,7 @@ ASCII bytes (`0x21`–`0x7e`), compared byte for byte. An invalid request is
 `invalid_request {field}`, naming `pins` or `pins[i]`. Empty requests are valid.
 Its bare answer is `{views: {<pin>: <ViewManifest> | "unknown"}}`, with exactly
 the requested keys (repeated pins share one key). A known view is
-`{record_schema: {name, revision, fields}, reads: [{op, ...}], template, tool?}`.
+`{record_schema: {name, revision, fields}, reads: [{op, ...}], template, tool?, half_of?}`.
 `revision` is a u64 integer. `fields` declares provider extension fields only,
 using the kinds in [`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
 Standard display fields retain their fixed validators. `reads` declares the
@@ -160,6 +160,21 @@ checks only that binding, not whether `input_schema` is a valid argument
 schema. A failed check is `unknown` for joining, never a fallback to the
 catalog check (tool-display §6). Older providers may omit `tool`; an absent
 member emits no bytes, preserving existing views.
+
+`half_of` is `{kind, family?}` (`views::ViewHalfOf`). It tells the app to show
+or hide this tool row together with the named wake record for the same event.
+The display server passes the marker from the accepted view through to apps
+unchanged. An absent marker is omitted from the answer and means an ordinary row.
+Writers use the wake kinds from [tool-display §8](../cortexkit-role-tool-display/CONTRACT.md#8-wake-records):
+`peer_message`, `room_post`, `worker_question`, `work_result`, `sidekick_answer`,
+`approval_card`, `ask_answer` and `notice`. Writers require `family` for `notice`
+and omit it for all other kinds. When present, `family` follows the opaque-field
+rule for pins above. `ViewsReply::validate_writer_for` checks these writer rules.
+On the wire `kind` is an open string: `ViewsReply::validate_for` requires an
+opaque family for `notice` and checks any family present, but preserves unknown
+kinds; apps treat those rows as ordinary. A provider that adds or changes
+`half_of` on an existing view bumps that view's `template_revision` so display
+servers replace the cached copy under the refetch rules below.
 
 A known view may also carry `template_revision`, a u64 that defaults to 0 and
 is omitted when 0. For a pin, `record_schema` and `reads` never change:
