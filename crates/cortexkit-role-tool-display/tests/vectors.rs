@@ -1,12 +1,16 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use cortexkit_role_tool_display::{
-    canonical_body, check_writer, idempotency_key, not_ready, schema::*, validate_write,
-    write_outcome, DisplayKind, DisplayLimits, DisplayRead, DisplayRecordReady, DisplayWrite,
-    Principal, RecordSchema, WriteReply, DISPLAY_READ, DISPLAY_READ_DENIED,
-    DISPLAY_RECORD_READY_EVENT, DISPLAY_RECORD_READY_VERSION, DISPLAY_RECORD_UNKNOWN,
-    DISPLAY_WRITER_UNVERIFIED, MAX_COMPLETION_BYTES, MAX_DETAIL_BYTES, MAX_RECORD_BYTES,
-    MAX_WRITE_FRAME_BYTES,
+    canonical_body, check_writer, idempotency_key, not_ready, schema::*, validate_message,
+    validate_write, write_outcome, DisplayKind, DisplayLimits, DisplayRead, DisplayRecordReady,
+    DisplayWrite, MessageRecord, Principal, RecordSchema, WriteReply, DISPLAY_READ,
+    DISPLAY_READ_DENIED, DISPLAY_RECORD_READY_EVENT, DISPLAY_RECORD_READY_VERSION,
+    DISPLAY_RECORD_UNKNOWN, DISPLAY_WRITE, DISPLAY_WRITER_UNVERIFIED, MAX_COMPLETION_BYTES,
+    MAX_DETAIL_BYTES, MAX_RECORD_BYTES, MAX_WRITE_FRAME_BYTES,
 };
 use serde_json::{json, Map, Value};
 
@@ -39,6 +43,7 @@ fn every_json_vector_is_exercised() {
         "views.json",
         "view-tools.json",
         "wakes.json",
+        "messages.json",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -454,4 +459,187 @@ fn only_daemon_verified_modules_may_write() {
         let refusal = check_writer(&writer).unwrap_err();
         assert_eq!(refusal.code, DISPLAY_WRITER_UNVERIFIED);
     }
+}
+
+fn message_arguments(fixture: &Value, name: &Value) -> Value {
+    let request: Value = serde_json::from_str(
+        fixture["requests"][name.as_str().unwrap()]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(request["name"], DISPLAY_WRITE);
+    request["arguments"].clone()
+}
+
+fn message_limits() -> DisplayLimits {
+    serde_json::from_value(vector("writes.json")["limits"].clone()).unwrap()
+}
+
+#[test]
+fn message_vectors_round_trip_exact_canonical_requests() {
+    let fixture = vector("messages.json");
+    let limits = message_limits();
+    for (name, raw) in object(&fixture["requests"]) {
+        let arguments = message_arguments(&fixture, &json!(name));
+        let write: DisplayWrite = serde_json::from_value(arguments).unwrap();
+        assert_eq!(write.kind, DisplayKind::Message);
+        let stored = validate_write(&write, &limits).unwrap();
+        let decoded = validate_message(&write.body).unwrap();
+        let serde: MessageRecord = serde_json::from_value(Value::Object(write.body)).unwrap();
+        assert_eq!(decoded, serde);
+        assert_eq!(serde_jcs::to_vec(&serde).unwrap(), stored);
+        let typed = DisplayWrite::new(
+            write.runner,
+            write.call_key,
+            write.kind,
+            write.schema_pin,
+            object(&serde_json::to_value(&serde).unwrap()).clone(),
+        );
+        let frame = json!({"name": DISPLAY_WRITE, "arguments": typed});
+        assert_eq!(
+            serde_jcs::to_vec(&frame).unwrap(),
+            raw.as_str().unwrap().as_bytes(),
+            "{name}"
+        );
+        if name == "maximal" {
+            assert_eq!(stored.len(), 16_384);
+            assert_eq!(typed.body["media"].as_array().unwrap().len(), 8);
+            assert_eq!(
+                typed.body["media"][0]["files"].as_array().unwrap().len(),
+                200
+            );
+            assert_eq!(serde.quote.unwrap().chars().count(), 280);
+            assert_eq!(serde.key.unwrap().chars().count(), 64);
+        }
+    }
+}
+
+#[test]
+fn message_vectors_admit_only_the_verified_writer_and_share_the_key_on_rename() {
+    let fixture = vector("messages.json");
+    let limits = message_limits();
+    let mut stored = BTreeMap::<Vec<u8>, Vec<u8>>::new();
+    for case in fixture["writes"].as_array().unwrap() {
+        let write: DisplayWrite =
+            serde_json::from_value(message_arguments(&fixture, &case["request"])).unwrap();
+        let writer: Principal = serde_json::from_value(case["writer"].clone()).unwrap();
+        let outcome = write.check_writer(&writer).and_then(|()| {
+            let key = idempotency_key(&writer, &write).unwrap();
+            let incoming = validate_write(&write, &limits).unwrap();
+            let outcome = write.write_outcome(stored.get(&key).map(Vec::as_slice), &incoming)?;
+            if outcome == WriteReply::Stored {
+                assert!(stored.insert(key, incoming).is_none());
+            }
+            Ok(outcome)
+        });
+        let reply = match outcome {
+            Ok(reply) => serde_json::to_value(reply).unwrap(),
+            Err(refusal) => json!({"code": refusal.code}),
+        };
+        assert_eq!(reply, case["outcome"], "{case}");
+    }
+    assert_eq!(stored.len(), 3);
+    assert!(stored.contains_key(br#"[{"kind":"reserved","module_id":"prefrontal"},{"kind":"reserved","module_id":"runner"},"call:say:1","message"]"#.as_slice()));
+    let mut write: DisplayWrite =
+        serde_json::from_value(message_arguments(&fixture, &json!("chat"))).unwrap();
+    for writer in [Principal::Direct, Principal::Unverified] {
+        assert_eq!(
+            write.check_writer(&writer).unwrap_err().code,
+            DISPLAY_WRITER_UNVERIFIED
+        );
+    }
+    write.kind = DisplayKind::Record;
+    let old = Principal::Reserved {
+        module_id: "prefrontal-core".into(),
+    };
+    let new = Principal::Reserved {
+        module_id: "prefrontal".into(),
+    };
+    assert_ne!(
+        idempotency_key(&old, &write).unwrap(),
+        idempotency_key(&new, &write).unwrap()
+    );
+    assert_eq!(
+        write
+            .write_outcome(Some(b"first"), b"different")
+            .unwrap_err()
+            .code,
+        "display_write_conflict"
+    );
+}
+
+#[test]
+fn message_vectors_refuse_malformed_members_with_their_paths() {
+    let fixture = vector("messages.json");
+    let limits = message_limits();
+    for case in fixture["invalid"].as_array().unwrap() {
+        let mut arguments = message_arguments(&fixture, &case["request"]);
+        if let Some(padding) = case["clear_padding"].as_str() {
+            *arguments.pointer_mut(padding).unwrap() = json!("");
+        }
+        let path = case["path"].as_str().unwrap();
+        if case["append_last"] == true {
+            let items = arguments.pointer_mut(path).unwrap().as_array_mut().unwrap();
+            items.push(items.last().unwrap().clone());
+        } else if let Some(member) = arguments
+            .pointer_mut(path)
+            .filter(|_| case["remove"] != true)
+        {
+            *member = case["value"].clone();
+        } else {
+            let (parent, member) = path.rsplit_once('/').unwrap();
+            let members = arguments
+                .pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap();
+            if case["remove"] == true {
+                assert!(members.remove(member).is_some());
+            } else {
+                assert!(members
+                    .insert(member.into(), case["value"].clone())
+                    .is_none());
+            }
+        }
+        if case["structural"] == true {
+            assert!(
+                serde_json::from_value::<MessageRecord>(arguments["body"].clone()).is_err(),
+                "{case}"
+            );
+        }
+        let write: DisplayWrite = serde_json::from_value(arguments).unwrap();
+        let error = validate_write(&write, &limits).unwrap_err();
+        assert_eq!(error.code, "invalid_params", "{case}");
+        assert_eq!(
+            error.detail,
+            Some(json!({"field": case["field"]})),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn message_vectors_refuse_excess_bytes_at_the_pinned_and_served_limits() {
+    let fixture = vector("messages.json");
+    let case = &fixture["too_large"];
+    let mut arguments = message_arguments(&fixture, &case["request"]);
+    let mut limits = message_limits();
+    let valid: DisplayWrite = serde_json::from_value(arguments.clone()).unwrap();
+    let title = arguments
+        .pointer_mut(case["append_to"].as_str().unwrap())
+        .unwrap();
+    *title = json!(format!("{}x", title.as_str().unwrap()));
+    let oversized: DisplayWrite = serde_json::from_value(arguments).unwrap();
+    let error = validate_write(&oversized, &limits).unwrap_err();
+    assert_eq!(error.code, case["code"]);
+    assert_eq!(error.detail, Some(case["detail"].clone()));
+    limits.max_record_bytes -= 1;
+    let error = validate_write(&valid, &limits).unwrap_err();
+    assert_eq!(error.code, case["code"]);
+    assert_eq!(
+        error.detail,
+        Some(json!({"kind":"message", "max_bytes":16383}))
+    );
+    assert_eq!(not_ready().code, fixture["not_ready_code"]);
 }

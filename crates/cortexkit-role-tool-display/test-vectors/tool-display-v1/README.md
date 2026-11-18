@@ -15,6 +15,13 @@ existing spelling. Lookup examples describe server behavior, not an app read op.
 - `details.json`: free-form detail objects and standard cut metadata.
 - `writes.json`: limits, wire params, stored/already-stored/conflict/too-large
   answers and invalid params, with the retryable not-ready code.
+- `messages.json`: exact JCS `display.write` requests for `message`, all media
+  kinds and diff selectors, malformed-member paths, writer admission, and
+  identical/conflicting retries across the writer rename. The maximal request
+  has a 16 KiB body with 8 media items and 200 diff files. Refusal cases name a
+  request and a JSON pointer to replace, remove or append to. `clear_padding`
+  empties the maximal sample's padding title before a malformed-member edit,
+  so the byte limit does not mask the member refusal.
 - `reads.json`: a management-surface pull request, its unchanged write params
   reply, final denied/unknown refusals, invalid params, retryable not-ready, and
   the identifier-only record-ready event without a reader suffix.

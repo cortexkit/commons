@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.10
+
+- Add the privileged `message` kind for `say`, with a closed, validated body,
+  five media kinds, and the existing record byte limit. The two attested names
+  for the message writer share a storage key during the rename; different
+  bytes at that key are refused as `display_record_conflict`.
+- Add byte-exact message vectors covering media, validation, writer admission,
+  idempotency and the pinned limits.
+
 ## 0.1.9
 
 - Relax `display.read` retention: a provider keeps a record readable for as

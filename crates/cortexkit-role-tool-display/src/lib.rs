@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod message;
 pub mod schema;
 #[cfg(feature = "test-vectors")]
 pub mod vectors;
@@ -17,6 +18,7 @@ use subc_protocol::{
     ErrorBody,
 };
 
+pub use message::*;
 pub use schema::{FieldKind, RecordSchema};
 pub use subc_protocol::Principal;
 pub use wake::*;
@@ -38,6 +40,7 @@ pub const MAX_DETAIL_BYTES: u64 = 3 * 1024 * 1024;
 pub const MAX_WRITE_FRAME_BYTES: u64 = 4 * 1024 * 1024;
 pub const INVALID_PARAMS: &str = "invalid_params";
 pub const DISPLAY_WRITE_CONFLICT: &str = "display_write_conflict";
+pub const DISPLAY_RECORD_CONFLICT: &str = "display_record_conflict";
 pub const DISPLAY_TOO_LARGE: &str = "display_too_large";
 pub const DISPLAY_WRITER_UNVERIFIED: &str = "display_writer_unverified";
 pub const DISPLAY_READ_DENIED: &str = "display_read_denied";
@@ -45,13 +48,14 @@ pub const DISPLAY_RECORD_UNKNOWN: &str = "display_record_unknown";
 /// The existing retryable route refusal used while the display server is not ready.
 pub const NOT_READY: &str = subc_protocol::error_codes::MODULE_WARMING;
 
-/// Readers retain unknown kinds; a server admits only the three defined kinds.
+/// Readers retain unknown kinds. Wake writes use the separate [`WakeWrite`] envelope.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DisplayKind {
     Record,
     Detail,
     Completion,
+    Message,
     Unknown(String),
 }
 
@@ -61,6 +65,7 @@ impl DisplayKind {
             Self::Record => "record",
             Self::Detail => "detail",
             Self::Completion => "completion",
+            Self::Message => "message",
             Self::Unknown(value) => value,
         }
     }
@@ -78,6 +83,7 @@ impl<'de> Deserialize<'de> for DisplayKind {
             "record" => Self::Record,
             "detail" => Self::Detail,
             "completion" => Self::Completion,
+            "message" => Self::Message,
             value => Self::Unknown(value.to_owned()),
         })
     }
@@ -109,6 +115,32 @@ impl DisplayWrite {
             kind,
             schema_pin: schema_pin.into(),
             body,
+        }
+    }
+
+    /// Check the route's daemon-attested opener before storing the write.
+    pub fn check_writer(&self, writer: &Principal) -> Result<(), ErrorBody> {
+        check_writer(writer)?;
+        if self.kind == DisplayKind::Message && !message::is_message_writer(writer) {
+            return Err(ErrorBody::new(
+                DISPLAY_WRITER_UNVERIFIED,
+                "message writes come only from the privileged message writer",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Compare canonical bytes at this write's storage key using its kind's refusal code.
+    /// The caller persists the first bytes atomically with returning `stored`.
+    pub fn write_outcome(
+        &self,
+        previous: Option<&[u8]>,
+        incoming: &[u8],
+    ) -> Result<WriteReply, ErrorBody> {
+        if self.kind == DisplayKind::Message {
+            compare_body(previous, incoming, DISPLAY_RECORD_CONFLICT)
+        } else {
+            write_outcome(previous, incoming)
         }
     }
 }
@@ -203,7 +235,7 @@ impl DisplayLimits {
 
     pub fn max_bytes(&self, kind: &DisplayKind) -> Result<u64, InvalidParams> {
         match kind {
-            DisplayKind::Record => Ok(self.max_record_bytes),
+            DisplayKind::Record | DisplayKind::Message => Ok(self.max_record_bytes),
             DisplayKind::Detail => Ok(self.max_detail_bytes),
             DisplayKind::Completion => Ok(self.max_completion_bytes),
             DisplayKind::Unknown(_) => Err(InvalidParams::new("kind")),
@@ -251,6 +283,19 @@ pub fn idempotency_key(
     writer: &Principal,
     write: &DisplayWrite,
 ) -> Result<Vec<u8>, serde_json::Error> {
+    // The two attested names refer to the same writer during its rename. Keep
+    // the actual attested principal in storage; only the message key is normalized.
+    let normalized;
+    let writer = if write.kind == DisplayKind::Message
+        && matches!(writer, Principal::Reserved { module_id } if module_id == message::MESSAGE_WRITER_ALIAS)
+    {
+        normalized = Principal::Reserved {
+            module_id: message::MESSAGE_WRITER.into(),
+        };
+        &normalized
+    } else {
+        writer
+    };
     serde_jcs::to_vec(&(writer, &write.runner, &write.call_key, &write.kind))
 }
 
@@ -269,8 +314,14 @@ pub fn validate_write(write: &DisplayWrite, limits: &DisplayLimits) -> Result<Ve
     if bytes.len() as u64 > max_bytes {
         return Err(too_large(&write.kind, max_bytes));
     }
-    if write.kind == DisplayKind::Detail {
-        schema::validate_detail(&write.body).map_err(|error| error.refusal())?;
+    match write.kind {
+        DisplayKind::Detail => {
+            schema::validate_detail(&write.body).map_err(|error| error.refusal())?;
+        }
+        DisplayKind::Message => {
+            validate_message(&write.body).map_err(|error| error.refusal())?;
+        }
+        _ => {}
     }
     Ok(bytes)
 }
@@ -286,12 +337,21 @@ pub enum WriteReply {
 
 /// Compare canonical body bytes for an already selected idempotency key.
 /// The caller persists the first bytes atomically with returning `stored`.
+/// Use [`DisplayWrite::write_outcome`] for tool-call writes so the kind is checked.
 pub fn write_outcome(previous: Option<&[u8]>, incoming: &[u8]) -> Result<WriteReply, ErrorBody> {
+    compare_body(previous, incoming, DISPLAY_WRITE_CONFLICT)
+}
+
+fn compare_body(
+    previous: Option<&[u8]>,
+    incoming: &[u8],
+    conflict: &str,
+) -> Result<WriteReply, ErrorBody> {
     match previous {
         None => Ok(WriteReply::Stored),
         Some(bytes) if bytes == incoming => Ok(WriteReply::AlreadyStored),
         Some(_) => Err(ErrorBody::new(
-            DISPLAY_WRITE_CONFLICT,
+            conflict,
             "display body differs from the first write",
         )),
     }
@@ -300,7 +360,8 @@ pub fn write_outcome(previous: Option<&[u8]>, incoming: &[u8]) -> Result<WriteRe
 /// Admit a write only from a daemon-verified module. `writer` is the route's
 /// attested opener. A `direct` or `unverified` opener can't serve a catalog, so
 /// no join could accept its writes; the display server refuses them before
-/// storing anything.
+/// storing anything. Use [`DisplayWrite::check_writer`] for tool-call writes
+/// so the additional restriction on the message kind is enforced.
 pub fn check_writer(writer: &Principal) -> Result<(), ErrorBody> {
     match writer {
         Principal::Reserved { .. } => Ok(()),

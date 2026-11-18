@@ -39,6 +39,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/tool-display-v1/wakes.json"),
     ),
     (
+        "messages.json",
+        include_str!("../test-vectors/tool-display-v1/messages.json"),
+    ),
+    (
         "README.md",
         include_str!("../test-vectors/tool-display-v1/README.md"),
     ),

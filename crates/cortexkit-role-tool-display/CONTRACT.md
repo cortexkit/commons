@@ -49,8 +49,10 @@ ASCII (`0x21`–`0x7e`); values are compared byte for byte, without interpretati
   the route's attested principal. For a relayed call it is `origin.carrier`.
 - `call_key` is the runner's key, obeying subc-protocol's opaque-field rule.
   For a relayed call it is `origin.call_key`.
-- `kind` is `record`, `detail` or `completion`. Readers preserve an unknown
-  kind as a string; the server refuses it as `invalid_params {field: "kind"}`.
+- `kind` is `record`, `detail`, `completion` or `message` for these params.
+  The same operation accepts `wake` with the separate envelope in §8. Readers
+  preserve an unknown kind as a string; the server refuses it as
+  `invalid_params {field: "kind"}`.
 - `schema_pin` is the pin the provider says it served and obeys the opaque-field
   rule. For a relayed call it is `origin.schema_pin`, defined by subc-protocol
   **0.34.2 and later**. This crate depends on 0.34.1 for `Principal` and opaque
@@ -58,44 +60,46 @@ ASCII (`0x21`–`0x7e`); values are compared byte for byte, without interpretati
   A provider reads those fields from the call itself.
 - `body` is a JSON object, never null, an array or a scalar.
 
-The display server MUST store every record, detail and completion with the
-writer as the daemon attested it on that `display.write` route: the route's
+The display server MUST store every record, detail, completion and message with
+the writer as the daemon attested it on that `display.write` route: the route's
 **attested opener**, never a writer claimed in the body or params. Only a
 daemon-verified module (`Principal::Reserved`) may write. A route opened
 `direct` or `unverified` is refused as `display_writer_unverified` before
-anything is stored, because no join could ever accept its writes
-(`check_writer`). The app
-server's join uses that stored attested writer. The display server stores once
-per `(attested writer, runner, call_key, kind)`, not per pin. Keying by the
+anything is stored, because no join could ever accept its writes. `message`
+admits only the specific reserved writer in §9 (`DisplayWrite::check_writer`).
+The app server's join uses that stored attested writer. The display server
+stores once per `(attested writer, runner, call_key, kind)`, not per pin. Keying by the
 attested writer means a write from another module never blocks the real
-provider's write for the same call; the join (§6) then uses only a writer that
-serves the runner's pin.
+provider's write for the same call; the provider-view join (§6) then uses only
+a writer that serves the runner's pin. For `message` only, the two attested
+writer names in §9 share a key.
 It compares the body's RFC 8785 JCS canonical bytes, not received spacing or key
 order. `canonical_body` computes those bytes; `idempotency_key` encodes the
 tuple unambiguously as JCS. The first write answers `{"result":"stored"}`.
 The same bytes again answer `{"result":"already_stored"}`. Different bytes
-are refused as `display_write_conflict`; they never replace the first write.
-The check and insertion must be atomic. `write_outcome` classifies a comparison
+are refused as `display_write_conflict` (`display_record_conflict` for
+`message`); they never replace the first write. The check and insertion must
+be atomic. `DisplayWrite::write_outcome` classifies a comparison for the kind
 but performs no persistence or concurrency control.
 
 Refusals use subc-protocol's `ErrorBody` (`code`, `message`, optional `detail`):
 
 - `display_too_large`, detail `{kind, max_bytes}`, before anything is stored;
 - `invalid_params`, detail `{field}`, for an invalid parameter;
-- `display_write_conflict`, for different bytes at the same key;
+- `display_write_conflict`, for different bytes at the same key for `record`,
+  `detail` or `completion`;
+- `display_record_conflict`, for a different `message` body at the same key;
 - `display_writer_unverified`, for a write whose route opener isn't a
-  daemon-verified module;
+  daemon-verified module or isn't the authorized writer for `message`;
 - `module_warming`, the existing retryable refusal, while the display server is not
   ready. Retrying remains optional for display writers.
 
-`validate_write` checks params, canonical size and detail cut metadata without
-fetching a view. Record/completion schema checks are separate so accepting a
-write never needs a network read or a previously fetched view. A decoder's
+`validate_write` checks params, canonical size, detail cut metadata and the
+`message` body without fetching a view. Record/completion schema checks are
+separate so accepting a write never needs a network read or a previously
+fetched view. A decoder's
 structural error (including an invalid Principal or non-object body) must be
 mapped to `invalid_params` naming the field by the serving implementation.
-
-The same operation also accepts the separate `kind: "wake"` envelope in §8.
-It does not require a tool call key, schema pin or provider view.
 
 ### 2.1 Pull read: `display.read`
 
@@ -123,7 +127,8 @@ It does not require a tool call key, schema pin or provider view.
    the daemon's catalog lists that module as daemon-verified. The storage key
    and idempotency rules are the same as `display.write` in §2: a record arriving
    by both paths is stored once (`already_stored`), and different canonical body
-   bytes at that key are still `display_write_conflict`.
+   bytes at that key are still `display_write_conflict` for provider display data.
+   `message` uses the push path in §9.
 5. **Wake event.** After a record commits, the provider publishes one bus event
    per record on subject `event.<provider>.display_record_ready.v1`: event name
    `display_record_ready` (`DISPLAY_RECORD_READY_EVENT`), version 1
@@ -194,7 +199,8 @@ schema describes records and completions; standard fields are always validated
 by their fixed rules, never by declarations. There is no free-text kind: each
 kind is a code, an identifier, a number, a boolean, a project path, a web
 origin or an app id, checked by its lexical rule. The validators can't tell
-whether a string that passes those rules is meaningful.
+whether a string that passes those rules is meaningful. The fixed `message`
+body (§9) is not a provider extension schema and adds no `FieldKind`.
 
 The display server doesn't check bodies against the schema when it stores a
 write, because the schema comes from the view, fetched later (§6). The app
@@ -245,9 +251,10 @@ The display server includes the `tool_display` (`DESCRIBE_GROUP`) group in
 ```
 
 The four fields are u64 JSON integers (`DisplayLimits`). Byte counts measure
-the body's JCS bytes. Pinned ceilings are 16 KiB for a record or completion,
-and 3 MiB for a detail. A server may serve less (including zero); clients read
-the served values rather than assuming the ceilings. `loading_window_ms` is
+the body's JCS bytes. Pinned ceilings are 16 KiB for a record, completion or
+message, and 3 MiB for a detail. Messages use `max_record_bytes`. A server may
+serve less (including zero); clients read the served values rather than assuming
+the ceilings. `loading_window_ms` is
 how long a reader may show a call as loading its display data, counted from
 when the runner's transcript records the call's answer. After it, a reader
 shows the call without display data until any arrives. Every complete write frame, including envelope and params,
@@ -256,7 +263,8 @@ and identity overhead as well as the body; a body ceiling is not a frame limit.
 
 ## 6. Join and view authorization: app-server obligations
 
-The display server stores a write first; the app server checks it when joining
+For `record`, `detail` and `completion`, the display server stores a write
+first; the app server checks it when joining
 a transcript. The app server uses a write only when the **runner's own stored
 call pin** has a view that the write's attested writer (§2) served. The runner
 pin comes from the runner's stored call, never from the write's `schema_pin`,
@@ -316,8 +324,9 @@ schema and reads forever; it replaces the template only with a higher
 
 ## 7. Tool-provider obligations
 
-A provider writes only **after its handler has produced the call's reply**
-(a held reply included), asynchronously, off the reply path. It never waits on
+For `record`, `detail` and `completion`, a provider writes only **after its
+handler has produced the call's reply** (a held reply included), asynchronously,
+off the reply path. It never waits on
 the write, never delays the reply for it, and never fails a call because of
 it. The rule doesn't require proof that the reply frame was flushed first:
 starting the write once the handler has returned the reply is enough. Records
@@ -444,3 +453,71 @@ and never cuts it itself. Malformed known kinds, missing peer agents and
 overlong excerpts are `invalid_params` naming the field. `WakeWrite::check`
 checks the envelope, verified writer, record and closed writer vocabulary;
 structural decode failures must also be mapped to `invalid_params`.
+
+## 9. Message records
+
+- [pinned] For `say`, the writer sends one `display.write` with `kind: "message"`
+  before answering the call. `runner`, `call_key` and `schema_pin` come from the
+  call as in §2. `body` is a `MessageRecord`; it never carries the message text.
+  The app server takes that text from the runner's stored `say` input and uses
+  the record as message metadata only when the stored call succeeded and has
+  string `text`. This path does not use provider views (§6).
+- [pinned] In this version, only `reserved:prefrontal` and its compatibility
+  alias `reserved:prefrontal-core` may write a message. The alias lets the same
+  writer retry under its old or new name during rollout. The display
+  server checks the daemon-attested route opener (`DisplayWrite::check_writer`)
+  and refuses any other writer, even a different reserved module, as
+  `display_writer_unverified`.
+- [pinned] The server keeps the actual attested writer. For `message` only,
+  `idempotency_key` encodes both permitted names as `reserved:prefrontal` in §2's
+  tuple, so a retry under either name addresses the same immutable record.
+  Identical canonical body bytes answer `already_stored`; different bytes at
+  that key are refused as `display_record_conflict`. When an agent moves to
+  another computer, its chats' message records move with the rest of its
+  display records, under the same key, so the chat still draws them there.
+- [pinned] The body and every nested object are closed. All listed members
+  are required unless marked `?`; optional members are omitted, not `null`.
+  All counts, sizes, dimensions, durations and pull request numbers are u64
+  JSON integers (non-negative, not strings or floats). The body is:
+
+  | Member | Rule |
+  | --- | --- |
+  | `v` | Integer `1`. |
+  | `reply_to?` | String: the runner's message id of the person's message being answered. |
+  | `quote?` | String, at most 280 Unicode scalar values. Requires `reply_to`. The writer includes it only if it exactly matches the person's words in that message. |
+  | `media` | Array of at most 8 media objects; empty when there are none. |
+  | `level` | `chat`, `info`, `attention` or `urgent`. |
+  | `key?` | String naming a standing condition, at most 64 Unicode scalar values. |
+  | `done?` | Boolean; requires `key`. If true, this message clears that condition. |
+  | `deliver?` | `desktop`, `phone` or `none`. Required unless `level` is `chat`. |
+
+- [pinned] Each media object has a `kind` tag and exactly the members for that
+  kind. `artifact` and `mime` are strings; artifacts identify resolved files.
+
+  | `kind` | Other members |
+  | --- | --- |
+  | `image` | `artifact`, `mime`, `byteCount`, `width`, `height`, `title?`. |
+  | `video` | `artifact`, `mime`, `byteCount`, `width`, `height`, `durationMs?`, `poster?` (`{artifact, width, height}`), `title?`. |
+  | `file` | `artifact`, `mime`, `byteCount`, `name` (display name). |
+  | `link` | `url` (absolute `http://` or `https://` URL with a host), `title?`, `description?`. Apps do not fetch it; without a title they display the host. |
+  | `diff` | `artifact` (the `text/x-diff` unified diff), `repo` (`{host?, owner?, name}`), exactly one of `commit` (SHA), `range` (`{base, head}`, both SHAs) or `pr` (`{number, head?}`, optional SHA), `files`, `added`, `removed`. A local checkout can use `{name}` alone and draws no repo link. |
+
+  A SHA is a full 40- or 64-digit hexadecimal Git object id. `files` is an array
+  of at most 200 entries, each `{path, added, removed, from?}` or
+  `{path, binary: true, from?}`. `path` and `from` are strings; `from` is the
+  previous path of a renamed file. Apps draw the diff card from these members,
+  reading the artifact only when the person opens it.
+- [pinned] The verified quote and media titles are bounded plain-text strings
+  written by the privileged writer, not a free-text kind under §3.1. The quote
+  has its own character limit; titles, file names, link descriptions and repo
+  members are strings bounded by the body's byte cap. The link target is a
+  separate, validated `url` member; display strings are not link targets.
+- [pinned] The canonical JCS body is subject to `max_record_bytes`, at most
+  16 KiB (§5). The server refuses excess bytes as `display_too_large` with
+  `{kind: "message", max_bytes}` and does not truncate. Malformed bodies are
+  `invalid_params` with `{field}` naming the member, for example
+  `body.media[0].poster.width`. A missing or conflicting diff selector names
+  its media item. `validate_message` decodes the closed body and validates its
+  member rules; `validate_write` also checks the envelope and canonical size.
+  The writer is responsible for verifying the quote and resolving artifacts;
+  structural envelope decode failures must also be mapped to `invalid_params`.
