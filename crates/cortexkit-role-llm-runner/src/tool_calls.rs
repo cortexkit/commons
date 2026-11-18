@@ -129,6 +129,9 @@ pub struct RunToolCall {
     /// dispatched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatched_to: Option<String>,
+    /// Routing argument and chosen value; omitted for default dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_route: Option<crate::tool_routes::ToolRoute>,
     /// The `session.read` ordinal of the requesting assistant message, for
     /// open and finished calls (or the ordinal it will take once written).
     pub ordinal: u64,
@@ -158,6 +161,7 @@ impl RunToolCall {
             outcome: outcome.into(),
             result_bytes: None,
             dispatched_to: None,
+            tool_route: None,
             ordinal,
             position: None,
             result_ordinal: None,
@@ -186,6 +190,11 @@ impl RunToolCall {
 
     pub fn with_dispatched_to(mut self, module: impl Into<String>) -> Self {
         self.dispatched_to = Some(module.into());
+        self
+    }
+
+    pub fn with_tool_route(mut self, route: crate::tool_routes::ToolRoute) -> Self {
+        self.tool_route = Some(route);
         self
     }
 }

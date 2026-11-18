@@ -111,6 +111,11 @@ pub const CASES: &[CaseSpec] = &[
         checks: "a session-notices/v1 provider accepts notice_templates: true with a present list within provider bounds, an unasked answer omits it, and a non-declarer refuses the flag as invalid_request naming notice_templates; no slot validation, plan composition or runner behavior is checked",
     },
     CaseSpec {
+        name: "fork_calls_honour_marker",
+        requires: &[],
+        checks: "every read_only tool has a fork probe; calls change no observable state or approval activity and malformed fork_id is refused",
+    },
+    CaseSpec {
         name: "call_mode_matches_catalog",
         requires: &[CallModes],
         checks: "the restricted probe is refused on a route with a known bind mode its catalog entry does not list, and served on a route with a listed mode",

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.13
+
+- Report the fork-call probe as inapplicable when the catalog marks no tool
+  read-only, rather than passing an unexercised promise.
+
+- Pin tool-provider `=0.15.12`. Probe every marked read-only tool with a fork
+  marker and independently observe application state and approval activity.
+- Check malformed fork markers are refused, and prove the named check rejects
+  providers that ignore the marker or change observable state.
+
 ## 0.15.12
 
 - Follows tool-provider 0.15.11, which accepts cortexkit-bus-naming 0.5; no new

@@ -75,6 +75,18 @@ pub const SEND_PROMOTE_JSON: &str = include_str!("../test-vectors/llm-runner-v1/
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "session-held-elsewhere.json",
+        include_str!("../test-vectors/llm-runner-v1/session-held-elsewhere.json"),
+    ),
+    (
+        "fork-tools.json",
+        include_str!("../test-vectors/llm-runner-v1/fork-tools.json"),
+    ),
+    (
+        "tool-routes.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-routes.json"),
+    ),
+    (
         "display-host-codes.json",
         include_str!("../test-vectors/llm-runner-v1/display-host-codes.json"),
     ),

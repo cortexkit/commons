@@ -158,6 +158,11 @@ pub struct RoleDescribe {
     /// the `fork_answer` group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_idle_s: Option<u64>,
+    /// Model-provider id to framing placement, present exactly with `fork_tools`.
+    /// The values are closed: `system` (also permits developer) or `prefix`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_tools:
+        Option<std::collections::BTreeMap<String, crate::fork_answer::FramingPlacement>>,
     pub majors: Vec<Major>,
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
@@ -428,6 +433,14 @@ impl RoleDescribe {
         self
     }
 
+    pub fn with_fork_tools(
+        mut self,
+        placements: std::collections::BTreeMap<String, crate::fork_answer::FramingPlacement>,
+    ) -> Self {
+        self.fork_tools = Some(placements);
+        self
+    }
+
     /// Declare the step-transform hook call sites this runner runs for every
     /// session (see [`step_hooks`]).
     pub fn with_step_hooks<I, S>(mut self, hooks: I) -> Self
@@ -679,6 +692,17 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             )]);
         }
     }
+    if let Some(placements) = raw.get("fork_tools") {
+        if serde_json::from_value::<
+            std::collections::BTreeMap<String, crate::fork_answer::FramingPlacement>,
+        >(placements.clone())
+        .is_err()
+        {
+            return Err(vec![DescribeProblem::Undecodable(
+                "fork_tools_placement_invalid".into(),
+            )]);
+        }
+    }
     if raw
         .get("fork_idle_s")
         .is_some_and(|value| value.as_u64().is_none_or(|seconds| seconds == 0))
@@ -719,6 +743,20 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    if describe.declares(capabilities::FORK_TOOLS) != describe.fork_tools.is_some() {
+        problems.push(DescribeProblem::Undecodable(
+            "fork_tools_placement_declaration".into(),
+        ));
+    }
+    if describe
+        .fork_tools
+        .as_ref()
+        .is_some_and(|placements| placements.keys().any(|provider| provider.is_empty()))
+    {
+        problems.push(DescribeProblem::Undecodable(
+            "fork_tools_placement_provider".into(),
+        ));
+    }
     if let Some(extensions) = &describe.extensions {
         let mut seen = std::collections::HashSet::new();
         if extensions.iter().any(|name| !seen.insert(name)) {
@@ -776,6 +814,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     for (group, dependency, problem) in [
+        (
+            capabilities::FORK_TOOLS,
+            capabilities::FORK_ANSWER,
+            "fork_tools_without_fork_answer",
+        ),
         (
             capabilities::FORK_EFFORT,
             capabilities::FORK_ANSWER,

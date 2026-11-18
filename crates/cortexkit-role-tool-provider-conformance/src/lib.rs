@@ -27,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 mod call_yield;
+mod fork_calls;
 mod notice_templates;
 mod reply_custody;
 mod report;

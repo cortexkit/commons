@@ -1,0 +1,15 @@
+{
+  "_about": "The role owns fork_id outside subc-protocol's ToolCallRequest. A catalog mark, not the marker alone, promises fork isolation.",
+  "catalog": {
+    "generation": "g1", "catalog_digest": "d1",
+    "tools": [
+      {"name": "read", "schema_digest": "53582d9d7229826e75097ac478787ca403c94ce74e4611571be1b03c706952cc", "semantics": 1, "capabilities": [], "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}, "read_only": true},
+      {"name": "edit", "schema_digest": "53582d9d7229826e75097ac478787ca403c94ce74e4611571be1b03c706952cc", "semantics": 1, "capabilities": [], "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}}
+    ]
+  },
+  "call": {"name": "read", "arguments": {"path": "notes.txt"}, "call_key": "runner:fork:1", "schema_pin": "tp1:read:53582d9d7229826e75097ac478787ca403c94ce74e4611571be1b03c706952cc:1", "fork_id": "fork:1"},
+  "refusals": [
+    {"name": "unmarked", "call": {"name": "edit", "arguments": {}, "fork_id": "fork:1"}, "read_only": false, "would_prompt": false, "error": {"code": "fork_call_refused", "message": "this tool call cannot run on a fork", "detail": {"tool": "edit", "reason": "not_read_only"}}},
+    {"name": "needs consent", "call": {"name": "read", "arguments": {"path": "protected.txt"}, "fork_id": "fork:1"}, "read_only": true, "would_prompt": true, "error": {"code": "fork_call_refused", "message": "this tool call cannot run on a fork", "detail": {"tool": "read", "reason": "approval_required"}}}
+  ]
+}

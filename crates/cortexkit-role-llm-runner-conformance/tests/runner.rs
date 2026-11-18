@@ -1447,6 +1447,18 @@ async fn tool_media_refs_non_declaring_runner_is_never_asked() {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("tool_routes_") || case.starts_with("fork_tools_") {
+        if let Some(CaseOutcome::Inapplicable { reason }) = report.outcome(case) {
+            assert!(
+                reason.starts_with("missing groups:")
+                    || reason == "runner does not declare tool_routes"
+                    || reason == "runner does not declare fork_tools"
+                    || reason == "runner declares fork_tools",
+                "{case}: {reason}"
+            );
+            return;
+        }
+    }
     if case.starts_with("host_start_")
         && matches!(report.outcome(case), Some(CaseOutcome::SkippedWithReason { reason, .. })
             if reason == "role.describe.extensions does not list harness.host_start")
@@ -2447,6 +2459,8 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")
+            || spec.name.starts_with("tool_routes_")
+            || spec.name.starts_with("fork_tools_")
             || spec.name == "notice_keep_undeclared"
             || spec.name == "tag_read_undeclared"
             || spec.name == "delivery_order_datetime_samples"
@@ -9279,6 +9293,22 @@ async fn rich_ui_stamp_two_conflicting_values_accepted_fails_by_name() {
 }
 
 const UPFRONT_PRESERVES: &str = "tool_upfront_preserves_offered_tools";
+
+#[tokio::test]
+async fn optional_tool_groups_without_declarations_are_inapplicable() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for spec in CASES.iter().filter(|spec| {
+        spec.name.starts_with("tool_routes_") || spec.name.starts_with("fork_tools_")
+    }) {
+        assert!(
+            matches!(report.outcome(spec.name), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "runner does not declare tool_routes" || reason.starts_with("missing groups:")),
+            "{}: {:?}",
+            spec.name,
+            report.outcome(spec.name)
+        );
+    }
+}
 const UPFRONT_STALE: &str = "tool_upfront_stale_refused";
 
 fn upfront_subject(defects: Defects) -> FakeSubject {

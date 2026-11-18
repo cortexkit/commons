@@ -10,6 +10,34 @@ use serde_json::{Map, Value};
 
 use crate::{capabilities, session_change, usage::RunUsage};
 
+/// Fixed branch-only result for a tool the quick question cannot use.
+pub const TOOL_UNAVAILABLE: &str = "This tool isn't available on a quick question.";
+/// Appended after the cached base when the ask reaches its request cap.
+pub const ANSWER_NOW: &str = "Answer now from what you have; no more tools.";
+pub const MAX_MODEL_REQUESTS: usize = 8;
+
+/// Placement declared per model provider in `role.describe.fork_tools`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FramingPlacement {
+    /// A system or developer message immediately before the question.
+    System,
+    /// Framing, a blank line, and the question in one user message.
+    Prefix,
+}
+
+fn present_tools<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error> {
+    Vec::<String>::deserialize(deserializer).map(Some)
+}
+
+fn present_framing<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
 pub const PLAN_FORK_CALLERS: &str = "fork_callers";
 pub const PLAN_FORK_CALLERS_FIELD: &str = "plan.fork_callers";
 
@@ -57,8 +85,8 @@ fn present_effort<'de, D: serde::Deserializer<'de>>(
 }
 
 /// Strict `session.fork_ask` request. Validate bounds with [`Self::check`]
-/// and capability support with [`Self::check_effort`] before looking up a fork
-/// or making a model call.
+/// and capability support with [`Self::check_effort`] and [`Self::check_tools`]
+/// before looking up a fork or making a model call.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -73,6 +101,20 @@ pub struct ForkAskRequest {
         deserialize_with = "present_effort"
     )]
     pub effort: Option<ForkEffort>,
+    /// Presence selects read-only tool use; absence keeps the no-tools behavior.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_tools"
+    )]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Framing always follows the frozen head bytes, never changes them.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_framing"
+    )]
+    pub framing: Option<String>,
 }
 
 impl ForkAskRequest {
@@ -86,17 +128,37 @@ impl ForkAskRequest {
             ask_id: ask_id.into(),
             question: question.into(),
             effort: None,
+            allowed_tools: None,
+            framing: None,
         }
     }
 
-    /// The field an `invalid_params` refusal must name. Lengths count Unicode
-    /// scalar values; whitespace is a non-empty question, not a missing one.
+    /// The field an `invalid_params` refusal must name. The ask id counts
+    /// Unicode scalar values; framing counts UTF-8 bytes. Whitespace is a
+    /// non-empty question, not a missing one.
     pub fn check(&self) -> Result<(), &'static str> {
         if !(1..=256).contains(&self.ask_id.chars().count()) {
             return Err("ask_id");
         }
         if self.question.is_empty() {
             return Err("question");
+        }
+        if let Some(tools) = &self.allowed_tools {
+            let mut names = std::collections::BTreeSet::new();
+            if tools.len() > 32
+                || tools
+                    .iter()
+                    .any(|name| name.is_empty() || !names.insert(name))
+            {
+                return Err("allowed_tools");
+            }
+        }
+        if self
+            .framing
+            .as_ref()
+            .is_some_and(|text| text.is_empty() || text.len() > 4096)
+        {
+            return Err("framing");
         }
         Ok(())
     }
@@ -113,6 +175,67 @@ impl ForkAskRequest {
         }
         Ok(())
     }
+
+    /// Refuse new members as unknown before lookup when `fork_tools` is absent.
+    pub fn check_tools<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        if !declared
+            .iter()
+            .any(|group| group.as_ref() == capabilities::FORK_TOOLS)
+        {
+            if self.allowed_tools.is_some() {
+                return Err("allowed_tools");
+            }
+            if self.framing.is_some() {
+                return Err("framing");
+            }
+        }
+        Ok(())
+    }
+
+    /// Ask identity excludes the lookup ids but includes presence of each option.
+    pub fn same_question(&self, other: &Self) -> bool {
+        self.question == other.question
+            && self.effort == other.effort
+            && self.allowed_tools == other.allowed_tools
+            && self.framing == other.framing
+    }
+
+    /// The list never substitutes for the provider's frozen read-only promise.
+    pub fn permits_tool(&self, name: &str, read_only: bool) -> bool {
+        self.permits_tool_on_route(name, read_only, false)
+    }
+
+    /// A quick question only calls the item's own provider. A supplied routing
+    /// argument is refused even when the default provider marks the tool safe:
+    /// the runner does not know the target's read-only promise.
+    pub fn permits_tool_on_route(
+        &self,
+        name: &str,
+        read_only: bool,
+        routing_argument_present: bool,
+    ) -> bool {
+        !routing_argument_present
+            && read_only
+            && self
+                .allowed_tools
+                .as_ref()
+                .is_some_and(|names| names.iter().any(|n| n == name))
+    }
+
+    /// Append these messages after the frozen base. `System` also permits a
+    /// runner to use the provider's developer-message spelling.
+    pub fn question_messages(&self, placement: FramingPlacement) -> Vec<Value> {
+        match (&self.framing, placement) {
+            (Some(framing), FramingPlacement::System) => vec![
+                serde_json::json!({"role":"system", "content":framing}),
+                serde_json::json!({"role":"user", "content":self.question}),
+            ],
+            (Some(framing), FramingPlacement::Prefix) => vec![serde_json::json!({
+                "role":"user", "content":format!("{framing}\n\n{}", self.question)
+            })],
+            (None, _) => vec![serde_json::json!({"role":"user", "content":self.question})],
+        }
+    }
 }
 
 /// Open fork finish value, preserving later spellings verbatim.
@@ -124,6 +247,7 @@ pub enum ForkFinish {
     MaxTokens,
     ToolCallRefused,
     ModelError,
+    StepLimit,
     Unknown(String),
 }
 
@@ -134,6 +258,7 @@ impl ForkFinish {
             "max_tokens" => Self::MaxTokens,
             "tool_call_refused" => Self::ToolCallRefused,
             "model_error" => Self::ModelError,
+            "step_limit" => Self::StepLimit,
             value => Self::Unknown(value.to_owned()),
         }
     }
@@ -144,6 +269,7 @@ impl ForkFinish {
             Self::MaxTokens => "max_tokens",
             Self::ToolCallRefused => "tool_call_refused",
             Self::ModelError => "model_error",
+            Self::StepLimit => "step_limit",
             Self::Unknown(value) => value,
         }
     }

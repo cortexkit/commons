@@ -163,10 +163,11 @@ where
         }
     }
 
-    // Catalog declarations, not a subject flag, decide whether result checks
-    // apply. A catalog/setup error must fail the case rather than hide as a skip.
-    let has_tool_result_v1 = match &main {
-        Err(_) => true,
+    // The catalog's own declarations decide whether result and fork checks apply;
+    // adapter capabilities cannot opt out of a promise. Catalog/setup errors must
+    // fail the case rather than hide as a skip.
+    let (has_tool_result_v1, has_read_only) = match &main {
+        Err(_) => (true, true),
         Ok(handle) => {
             let case = Case {
                 subject,
@@ -176,13 +177,16 @@ where
                 capabilities: &capabilities,
             };
             match case.plain_route().await {
-                Err(_) => true,
+                Err(_) => (true, true),
                 Ok(route) => match case.catalog(&route).await {
-                    Err(_) => true,
-                    Ok(catalog) => catalog
-                        .tools
-                        .iter()
-                        .any(|tool| tool.result_format == Some(ResultFormat::ToolResultV1)),
+                    Err(_) => (true, true),
+                    Ok(catalog) => (
+                        catalog
+                            .tools
+                            .iter()
+                            .any(|tool| tool.result_format == Some(ResultFormat::ToolResultV1)),
+                        catalog.tools.iter().any(|tool| tool.read_only),
+                    ),
                 },
             }
         }
@@ -269,6 +273,10 @@ where
         {
             CaseOutcome::Inapplicable {
                 reason: "adapter supplies no call-yield fixture for this tool".into(),
+            }
+        } else if spec.name == "fork_calls_honour_marker" && !has_read_only {
+            CaseOutcome::Inapplicable {
+                reason: "provider does not mark any tool read_only".into(),
             }
         } else if spec.name == "session_notices_describe"
             && !capabilities.contains(&Capability::SessionNotices)
@@ -445,6 +453,33 @@ where
             .await;
         }
         match name {
+            "fork_calls_honour_marker" => {
+                let route = self.plain_route().await?;
+                let catalog = self.catalog(&route).await?;
+                let probes = self.subject.fork_calls();
+                for tool in catalog.tools.iter().filter(|tool| tool.read_only) {
+                    let matching: Vec<_> =
+                        probes.iter().filter(|probe| probe.0 == tool.name).collect();
+                    if matching.is_empty() {
+                        return Err(format!(
+                            "fork_calls_honour_marker: no probe for {}",
+                            tool.name
+                        ));
+                    }
+                    for spec in matching {
+                        let body = json!({"name":spec.0,"arguments":spec.1,"fork_id":mint.next(name),
+                            "call_key":mint.next(name),"schema_pin":SchemaPin::new(&tool.name, &tool.schema_digest, tool.semantics).encode().map_err(|e| e.to_string())?});
+                        crate::fork_calls::probe(&route, body, || async {
+                            self.subject
+                                .fork_observable_state(self.handle.inner())
+                                .await
+                                .map_err(|e| e.to_string())
+                        })
+                        .await?;
+                    }
+                }
+                Ok(())
+            }
             "session_notices_describe" => {
                 let route = self.plain_route().await?;
                 crate::session_notices::check(&route).await

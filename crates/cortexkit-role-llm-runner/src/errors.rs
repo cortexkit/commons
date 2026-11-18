@@ -575,6 +575,10 @@ pub const RETENTION_REQUIRED: &str = "retention_required";
 pub const RETENTION_CONFLICT: &str = "retention_conflict";
 /// Release is pending. Retryable after deletion, when a send starts a new incarnation.
 pub const SESSION_RELEASED: &str = "session_released";
+/// An agent-data move released the session here. Not retryable on this computer;
+/// the name cannot reincarnate until move-back activation clears the refusal.
+/// Optional detail: [`crate::session_retention::SessionHeldElsewhereDetail`].
+pub const SESSION_HELD_ELSEWHERE: &str = "session_held_elsewhere";
 /// Single-session backup is unavailable; detail carries `reason`.
 pub const BACKUP_UNSUPPORTED: &str = "backup_unsupported";
 
@@ -621,6 +625,7 @@ pub const CODES: &[&str] = &[
     RETENTION_REQUIRED,
     RETENTION_CONFLICT,
     SESSION_RELEASED,
+    SESSION_HELD_ELSEWHERE,
     BACKUP_UNSUPPORTED,
     UNKNOWN_REF,
     UNKNOWN_SESSION,

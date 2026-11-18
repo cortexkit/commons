@@ -1,0 +1,32 @@
+{
+  "_about": "Each refused patch replaces the same valid routes member; remove deletes a required member. All refusals name the whole indexed field and write nothing.",
+  "plan": {"tool_items": [{"provider": "aft", "params": {}, "routes": {"argument": "machine", "description": "Computer to read from", "values": [{"value": "laptop", "provider": "fed:0123456789abcdef0123456789abcdef:aft"}, {"value": "desktop", "provider": "fed:abcdef0123456789abcdef0123456789:aft"}]}}]},
+  "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+  "offered_schema": {"type": "object", "properties": {"path": {"type": "string"}, "machine": {"type": "string", "enum": ["laptop", "desktop"], "description": "Computer to read from"}}, "required": ["path"]},
+  "model_arguments": {"path": "notes.txt", "machine": "laptop"},
+  "dispatch": {"provider": "fed:0123456789abcdef0123456789abcdef:aft", "arguments": {"path": "notes.txt"}, "schema_pin": "tp1:read:923b083c9bcab2e3d3e07c7d9b4401688ad9f3d5e2c2f0c48fcd43052bdcb71b:1"},
+  "read": {"tool_call_id": "model-call-1", "call_key": "runner:1", "dispatched_to": "fed:0123456789abcdef0123456789abcdef:aft", "tool_route": {"argument": "machine", "value": "laptop"}, "indeterminate": false},
+  "undeclared": {"error": {"code": "invalid_params", "detail": {"field": "plan.tool_items[0].routes"}}},
+  "refused": [
+    {"rule": "argument grammar", "patch": {"argument": "Machine"}},
+    {"rule": "argument bound", "patch": {"argument": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+    {"rule": "argument empty", "patch": {"argument": ""}},
+    {"rule": "argument type", "patch": {"argument": 1}},
+    {"rule": "missing argument", "remove": "argument"},
+    {"rule": "description empty", "patch": {"description": ""}},
+    {"rule": "description bound", "patch": {"description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}},
+    {"rule": "description type", "patch": {"description": null}},
+    {"rule": "values minimum", "patch": {"values": []}},
+    {"rule": "values maximum", "patch": {"values": [{"value":"0","provider":"aft"},{"value":"1","provider":"aft"},{"value":"2","provider":"aft"},{"value":"3","provider":"aft"},{"value":"4","provider":"aft"},{"value":"5","provider":"aft"},{"value":"6","provider":"aft"},{"value":"7","provider":"aft"},{"value":"8","provider":"aft"},{"value":"9","provider":"aft"},{"value":"10","provider":"aft"},{"value":"11","provider":"aft"},{"value":"12","provider":"aft"},{"value":"13","provider":"aft"},{"value":"14","provider":"aft"},{"value":"15","provider":"aft"},{"value":"16","provider":"aft"},{"value":"17","provider":"aft"},{"value":"18","provider":"aft"},{"value":"19","provider":"aft"},{"value":"20","provider":"aft"},{"value":"21","provider":"aft"},{"value":"22","provider":"aft"},{"value":"23","provider":"aft"},{"value":"24","provider":"aft"},{"value":"25","provider":"aft"},{"value":"26","provider":"aft"},{"value":"27","provider":"aft"},{"value":"28","provider":"aft"},{"value":"29","provider":"aft"},{"value":"30","provider":"aft"},{"value":"31","provider":"aft"},{"value":"32","provider":"aft"}]}},
+    {"rule": "values type", "patch": {"values": "laptop"}},
+    {"rule": "duplicate value", "patch": {"values": [{"value":"same","provider":"aft"},{"value":"same","provider":"other"}]}},
+    {"rule": "empty value", "patch": {"values": [{"value":"","provider":"aft"}]}},
+    {"rule": "value bound", "patch": {"values": [{"value":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","provider":"aft"}]}},
+    {"rule": "value type", "patch": {"values": [{"value":1,"provider":"aft"}]}},
+    {"rule": "provider type", "patch": {"values": [{"value":"laptop","provider":1}]}},
+    {"rule": "provider empty", "patch": {"values": [{"value":"laptop","provider":""}]}}
+  ],
+  "shape_error": {"code": "invalid_params", "detail": {"field": "plan.tool_items[0].routes"}},
+  "clash": {"input_schema": {"type":"object", "properties":{"machine":{"type":"string"}}}, "error":{"code":"invalid_params", "detail":{"field":"plan.tool_items[0].routes"}}},
+  "invalid_call": {"arguments": {"path":"notes.txt", "machine":"unknown"}, "dispatch_count":0, "outcome":"error"}
+}

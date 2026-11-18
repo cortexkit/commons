@@ -25,6 +25,7 @@ use crate::{
 
 type Check<T = ()> = Result<T, String>;
 mod raw;
+pub(crate) mod tools;
 
 fn text(value: &str) -> ScriptedTurn {
     ScriptedTurn::new(vec![ScriptedPart::Text(value.into())])

@@ -156,6 +156,14 @@ pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.m
 
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
+    (
+        "fork-calls.json",
+        include_str!("../test-vectors/tool-provider-v1/fork-calls.json"),
+    ),
+    (
+        "withdraw-pending.json",
+        include_str!("../test-vectors/tool-provider-v1/withdraw-pending.json"),
+    ),
     ("stop-session.json", STOP_SESSION_JSON),
     ("call-yield.json", CALL_YIELD_JSON),
     (

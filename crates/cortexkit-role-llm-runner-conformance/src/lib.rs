@@ -102,7 +102,9 @@ mod system_text_default;
 mod system_text_facts;
 mod tool_calls;
 mod tool_result_limit;
+mod tool_routes;
 pub mod upfront;
+pub use fork_answer::tools::ForkToolCallObservation;
 mod user_commands;
 
 pub use cortexkit_role_harness as harness;

@@ -1659,6 +1659,51 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("raw_model_requests is not implemented"))
     }
 
+    /// Configure the head's frozen catalog: SCRIPTED_TOOL is read_only;
+    /// `conformance_fork_unmarked` is listed but unmarked, and
+    /// `conformance_fork_unlisted` is read_only but never allow-listed.
+    /// Return the model-provider id used by this fixture, matching the
+    /// runner's declared framing-placement map. None means no fixture.
+    /// When `routed` is true, also install `routes` on the read tool's item:
+    /// argument `machine`, value `remote`, target `conformance-route-target`.
+    async fn configure_fork_tools(
+        &self,
+        _session: &str,
+        _routed: bool,
+    ) -> Result<Option<String>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Independent default-catalog pin of SCRIPTED_TOOL, never obtained from
+    /// its dispatched body or from the augmented model schema.
+    fn fork_tools_schema_pin(&self) -> Option<String> {
+        None
+    }
+
+    /// Actual fork tool calls received at every tool-provider boundary,
+    /// including the routing target, with
+    /// attested route and transport declarations. Never synthesize from scripts.
+    async fn fork_tools_calls(
+        &self,
+        _session: &str,
+    ) -> Result<Vec<crate::ForkToolCallObservation>, HarnessError> {
+        Err(HarnessError::new(
+            "fork tool call observations are not implemented",
+        ))
+    }
+
+    /// Tool-result text read from the fork's native stored branch, including
+    /// the final refused call at the step cap (never sent to another model).
+    async fn fork_tools_results(
+        &self,
+        _session: &str,
+        _fork: &str,
+    ) -> Result<Vec<String>, HarnessError> {
+        Err(HarnessError::new(
+            "fork branch tool results are not implemented",
+        ))
+    }
+
     /// Optional raw-ingress fixture for the tool-set signed floor (§11.1.1).
     /// Return `Ok(None)` if unavailable; the case is not applicable, not failed.
     /// For the unique `session` label and requested `change`, perform these steps:
@@ -1863,6 +1908,54 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "upfront durable state observation is not implemented",
         ))
+    }
+
+    /// One tool item offering SCRIPTED_TOOL with input schema
+    /// `{type:"object", properties:{marker:{type:"string"}}, required:["marker"]}`.
+    /// When `clash` is true, also offer a `machine` property. Apply the supplied
+    /// routes verbatim. The routed target is a second scripted provider at
+    /// `conformance-route-target`, on the agent's own session route.
+    fn tool_routes_plan_fields(
+        &self,
+        _session: &str,
+        _routes: &Value,
+        _clash: bool,
+    ) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// Pin of the default provider's unaugmented fixture tool, taken from its
+    /// catalog fixture rather than from a dispatched call.
+    fn tool_routes_schema_pin(&self) -> Option<String> {
+        None
+    }
+
+    /// Actual augmented input schema received at the model boundary, not a
+    /// reconstruction from the plan. Required when the route fixture exists.
+    async fn tool_routes_offered_schema(&self, _session: &str) -> Result<Value, HarnessError> {
+        Err(HarnessError::new(
+            "tool routes model schema observation is not implemented",
+        ))
+    }
+
+    /// Target provider id and raw tool-call body, captured at each receiving
+    /// provider boundary. Never reconstruct these from transcript arguments.
+    async fn tool_routes_calls(
+        &self,
+        _session: &str,
+    ) -> Result<Vec<(String, Value)>, HarnessError> {
+        Err(HarnessError::new(
+            "tool routes dispatch observation is not implemented",
+        ))
+    }
+
+    /// Native admission state; the same no-write observation as upfront.
+    async fn tool_routes_durable_state(
+        &self,
+        handle: &Self::Handle,
+        session: &str,
+    ) -> Result<Vec<u8>, HarnessError> {
+        self.upfront_durable_state(handle, session).await
     }
 
     /// Like [`Self::send_fields`], but add `members` to the first send's plan

@@ -633,6 +633,15 @@ impl From<ToolLoad> for String {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct CatalogTool {
+    /// The provider honours `fork_id` without observable changes or approval.
+    /// Only true is sent; absence is not read-only. Older catalog readers are
+    /// lenient, so emitting the mark needs no request opt-in.
+    #[serde(
+        default,
+        skip_serializing_if = "std::ops::Not::not",
+        deserialize_with = "decode_read_only"
+    )]
+    pub read_only: bool,
     /// The provider's exact tool name, which is also how the user disables it.
     pub name: String,
     /// The digest of the argument schema's structure ([`schema_digest`]):
@@ -708,6 +717,10 @@ pub struct CatalogTool {
 }
 
 impl CatalogTool {
+    pub fn with_read_only(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
     /// Declare reference arguments. Validate with [`check_reference_slots`].
     pub fn with_reference_slots(mut self, slots: Vec<ReferenceSlot>) -> Self {
         self.reference_slots = slots;
@@ -792,6 +805,16 @@ impl CatalogTool {
             Some(ops) => ops.iter().map(String::as_str).collect(),
             None => RESULT_OPS_ALL.to_vec(),
         }
+    }
+}
+
+fn decode_read_only<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    if bool::deserialize(deserializer)? {
+        Ok(true)
+    } else {
+        Err(serde::de::Error::custom(
+            "read_only must be true or omitted",
+        ))
     }
 }
 

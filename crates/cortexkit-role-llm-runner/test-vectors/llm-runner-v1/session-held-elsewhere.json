@@ -1,0 +1,15 @@
+{
+  "_about": "A session released here after its agent moved to another computer cannot start a new local incarnation under the same name. It remains held elsewhere until move-back activation. Readers map this refusal before runners emit it.",
+  "samples": [
+    {
+      "request": {"method": "session.send", "params": {"prompt": "continue", "send_id": "send-1"}},
+      "error": {"code": "session_held_elsewhere", "message": "this session moved to another computer", "detail": {"holder": "0123456789abcdef0123456789abcdef"}},
+      "retryable_here": false
+    },
+    {
+      "request": {"method": "session.send", "params": {"prompt": "continue", "send_id": "send-2"}},
+      "error": {"code": "session_held_elsewhere", "message": "this session moved to another computer"},
+      "retryable_here": false
+    }
+  ]
+}

@@ -485,6 +485,8 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")
+            || spec.name.starts_with("tool_routes_")
+            || spec.name.starts_with("fork_tools_")
             || spec.name == "delivery_order_datetime_samples"
             || spec.name == "delivery_deadline_retry_keeps_original_expiry"
         {
@@ -618,5 +620,30 @@ mod fork_answer_gate_tests {
             checked += 1;
         }
         assert_eq!(checked, 19);
+    }
+}
+
+#[cfg(test)]
+mod optional_tool_gate_tests {
+    use super::*;
+
+    #[test]
+    fn optional_tool_cases_without_groups_are_inapplicable() {
+        let mut checked = 0;
+        for spec in CASES.iter().filter(|spec| {
+            (spec.name.starts_with("tool_routes_") || spec.name.starts_with("fork_tools_"))
+                && !spec.requires.is_empty()
+        }) {
+            assert!(
+                matches!(gate(spec, &BTreeSet::new()), Some(CaseOutcome::Inapplicable { reason })
+                if reason.starts_with("missing groups:")),
+                "{}",
+                spec.name
+            );
+            let declared = spec.requires.iter().copied().collect();
+            assert!(gate(spec, &declared).is_none(), "{}", spec.name);
+            checked += 1;
+        }
+        assert_eq!(checked, 10);
     }
 }

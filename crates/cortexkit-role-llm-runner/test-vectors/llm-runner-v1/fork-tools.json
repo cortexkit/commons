@@ -1,0 +1,28 @@
+{
+  "_about": "Fork tool results and framing are appended after the head's exact cached bytes, never written into the head. An absent allowed_tools member keeps the old tool_call_refused behavior.",
+  "ask": {"fork_id":"fork:1", "ask_id":"ask:1", "question":"What do my notes say?", "allowed_tools":["read","edit"], "framing":"Answer a quick question without changing anything."},
+  "describe_placements": {"fork_tools":{"anthropic-messages":"system","openai-responses":"prefix"}},
+  "placements": [
+    {"placement":"system", "suffix":[{"role":"system", "content":"Answer a quick question without changing anything."},{"role":"user", "content":"What do my notes say?"}]},
+    {"placement":"prefix", "suffix":[{"role":"user", "content":"Answer a quick question without changing anything.\n\nWhat do my notes say?"}]}
+  ],
+  "calls": [
+    {"name":"read", "read_only":true, "dispatch":{"name":"read", "arguments":{"path":"notes.txt"}, "fork_id":"fork:1", "call_key":"runner:fork:1", "schema_pin":"tp1:read:53582d9d7229826e75097ac478787ca403c94ce74e4611571be1b03c706952cc:1"}},
+    {"name":"edit", "read_only":false, "result":"This tool isn't available on a quick question.", "continues":true},
+    {"name":"search", "read_only":true, "result":"This tool isn't available on a quick question.", "continues":true},
+    {"name":"read", "read_only":true, "routing_argument":{"machine":"desktop"}, "result":"This tool isn't available on a quick question.", "continues":true}
+  ],
+  "cap": {"model_requests":8, "last_request_append":"Answer now from what you have; no more tools.", "tools_unchanged":true, "tool_choice_unchanged":true, "next_tool_result":"This tool isn't available on a quick question.", "dispatch_count_at_cap":0, "reply":{"answer":"Here is what I found.", "finish":"step_limit", "usage":{"steps":8,"unreported_steps":0,"input_tokens":80,"output_tokens":8,"by_model":[]}}},
+  "identity_changes": [
+    {"allowed_tools":[]},
+    {"allowed_tools":["read"]},
+    {"remove":"allowed_tools"},
+    {"framing":"A different frame"},
+    {"remove":"framing"}
+  ],
+  "identity_error":{"code":"ask_id_reuse"},
+  "undeclared": [
+    {"member":"allowed_tools", "error":{"code":"invalid_params", "detail":{"field":"allowed_tools"}}},
+    {"member":"framing", "error":{"code":"invalid_params", "detail":{"field":"framing"}}}
+  ]
+}

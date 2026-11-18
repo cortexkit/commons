@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.76
+
+- Treat undeclared optional tool-routing and fork-tool groups as inapplicable,
+  not skipped, so their absence does not change a subject's verdict.
+
+- Pin llm-runner `=0.8.63`. Check routed-plan admission refusals without writes,
+  the model's optional typed routing argument and stripped target dispatch.
+- Add quick-question tool checks for the frozen read-only gate, continued
+  refusals, fork call identity and route, the request cap, both framing
+  placements and ask identity. Use independent model and tool observations.
+- Exercise intentionally incorrect implementations under each new check name.
+
 ## 0.17.75
 
 - Pin llm-runner 0.8.62 and add a `template_datetime`-gated case checking

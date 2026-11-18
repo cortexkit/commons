@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.12
+
+- Add a per-tool `read_only: true` promise for calls carrying the role-owned
+  `fork_id` member. Such calls change no observable state and never ask the
+  person; unmarked tools or calls needing consent refuse `fork_call_refused`.
+  Catalog readers are lenient, so the mark needs no catalog request opt-in.
+- Add fork-marker readers and body builders using the existing call-key
+  validator, without changing subc-protocol or its dependency range.
+- Add retryable `withdraw_pending` for an accepted withdrawal whose stop is
+  not yet confirmed, with bounded delay hints and readers-first rollout.
+
 ## 0.15.11
 
 - Accepts cortexkit-bus-naming 0.5.

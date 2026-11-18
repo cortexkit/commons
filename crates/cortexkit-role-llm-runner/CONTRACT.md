@@ -318,6 +318,8 @@ alias until the next breaking release.
 | `restart_survival` | `session.head`, `session.read`, `session.subscribe`, `run.result`, `run.status`; requires `interrupt_reason` and `live_events` | §14.4 |
 | `fork_answer` | `session.fork_prepare`, `session.fork_ask`, `session.fork_end`; no group dependencies | §9.20 |
 | `fork_effort` | `session.fork_ask`; requires `fork_answer` | §9.20 |
+| `fork_tools` | `session.fork_ask`; requires `fork_answer`; `fork_tools` describes framing placement per model provider | §9.20 |
+| `tool_routes` | `session.send` with per-tool-item `routes`; no added op | §9.25 |
 | `output_refs` | `session.output_refs`, `session.output_ref_read` | §9.13 |
 | `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
 | `plan_facts` | `session.send`, `session.refresh` with plan items carrying `facts`; no added op or group dependencies | Plan-carried system-text facts |
@@ -2068,7 +2070,7 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   it may or may not have run.
 - [pinned] Each call's `call_key` (§11.3) is exposed with it.
 - [pinned] They ride as `tool_calls: [{tool_call_id, call_key?, call_carrier?,
-  dispatched_to?, indeterminate}]` (`ToolCallAttribution`) beside the
+  dispatched_to?, tool_route?, indeterminate}]` (`ToolCallAttribution`) beside the
   message, one entry per tool call the message carries. `dispatched_to` is
   absent for a call never dispatched (denied, say); `call_key` is absent
   until the call is prepared or dispatched. `call_carrier` is present only
@@ -2077,6 +2079,8 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   tool-call entry and live tool event of a call carries this same
   `call_key`, present exactly when it is present here.
 - [pinned] `tool_call_id` is the model's id: display only, not unique.
+- [pinned] `tool_route?: {argument, value}` is the routed-only fact in §9.25;
+  readers accept it before runners emit it. `dispatched_to` stays a string.
 
 ## 6. `run_ops`: `run.result` and run attribution
 
@@ -2587,7 +2591,7 @@ what a run called without decoding any message body.
 - [pinned] The answer is a page `{run_id, calls, next?}`
   (`tool_calls::ToolCallsPage`), decoded leniently. Each call is
   `{tool_call_id, call_key?, name, args, outcome, result_bytes?,
-  dispatched_to?, ordinal, position?, result_ordinal?}` (`tool_calls::RunToolCall`):
+  dispatched_to?, tool_route?, ordinal, position?, result_ordinal?}` (`tool_calls::RunToolCall`):
   - `tool_call_id` is the model's id, display only and not unique (§5);
     `call_key` is the call's key, present once the call was prepared or
     dispatched (§11.3), and the one a `call_identity` runner's display
@@ -6056,9 +6060,21 @@ its host's file storage, not a second copy of the host's media store.
   (retryable) with `detail.delete_after_ms`. Release answers `pending`, including
   on repeated calls while deletion is incomplete. After deletion, head and reads refuse
   `unknown_session`, and `session.media_read` refuses `unknown_media` for its
-  checksum. The next send starts a new incarnation under the same name.
+  checksum. For an ordinary release, the next send starts a new incarnation
+  under the same name.
   Release frees live runner data only: backups already taken follow the backup
   service's own retention.
+- [pinned] When an agent moved to another computer through an agent-data move
+  and its session was released here, `session.send` and other operations that
+  start or steer a run refuse `session_held_elsewhere {holder?}` instead.
+  `holder`, when known, is the receiving computer's 32-hex box id; otherwise
+  it is omitted (`session_retention::SessionHeldElsewhereDetail`). This refusal
+  is not retryable on this computer. Unlike `session_released`, it never lets
+  a later send create a new incarnation under the same name, even after local
+  deletion or restart: the name remains held elsewhere until the session is
+  moved back in, and activation here clears the refusal. Readers first: apps
+  and other consumers recognize this as the moved-away, non-retryable refusal
+  before runners emit it.
 - [pinned] For `keep: "none"`, if no release arrives, the runner deletes the
   session max(`max_unreleased_hold_ms`, floor in milliseconds) after its last
   run ends, subject to any declared reader wait.
@@ -6575,7 +6591,7 @@ froze for a run to every assistant reply the run writes.
   and `question` is a non-empty string, otherwise `invalid_params {field}`
   naming `ask_id` or `question`. `answer` is a string; `usage` is §6.4's
   `RunUsage` over this ask's model calls. `finish` is open: `end_turn`,
-  `max_tokens`, `tool_call_refused`, `model_error`; unknown strings decode
+  `max_tokens`, `tool_call_refused`, `model_error`, `step_limit`; unknown strings decode
   and re-encode verbatim. The first question is appended to the base, each
   later question after the fork's earlier questions and answers.
 - [pinned] `fork_answer.effort_values`: a runner declaring `fork_effort` accepts
@@ -6615,10 +6631,10 @@ froze for a run to every assistant reply the run writes.
 - [pinned] `fork_answer.replay`: the runner decides an ask in this order:
   (1) the caller is the fork's principal and the fork is unrevoked, otherwise
   `unknown_fork`; (2) a stored answer for `(fork_id, ask_id)` with the same
-  question and effort returns `answer`, `finish`, `usage` and any `effort_applied`
+  question, effort, allowed_tools and framing returns `answer`, `finish`, `usage` and any `effort_applied`
   unchanged, without a model
   call, even after end, expiry, loss of the base or restart; a different
-  question or effort is `ask_id_reuse`; (3) any ask in flight on the fork, the same
+  question, effort, allowed_tools or framing is `ask_id_reuse`; (3) any ask in flight on the fork, the same
   `ask_id` included, makes this call `fork_busy`; (4) an expired fork is
   `unknown_fork`, an ended one `fork_ended`; (5) check the exact base below.
   Stored answers are kept at least 3,600 s after the fork ends or expires.
@@ -6658,10 +6674,65 @@ froze for a run to every assistant reply the run writes.
   may remove the head's last breakpoint marker and add one on the fork's
   newest message. It never uses more breakpoints than the head's request did
   or the provider allows. No other byte of the base may differ.
-- [pinned] `fork_answer.no_tools`: the per-call gate refuses every tool
-  call. A reply holding one answers with the text before it,
+- [pinned] `fork_answer.no_tools`: without `allowed_tools`, the per-call gate refuses every tool
+  call, exactly as before `fork_tools`. A reply holding one answers with the text before it,
   `finish: "tool_call_refused"` and its usage. That text joins the branch,
   the answer is stored and the fork is ended; no tool runs.
+- [pinned] `fork_answer.tools_group`: `fork_tools` is opt-in and requires `fork_answer`. A caller sends
+  `allowed_tools` or `framing` on `session.fork_ask` only to a declaring runner.
+  Without the group, either member is unknown and refused as `invalid_params`
+  naming that member in `detail.field`, before lookup or model work.
+- [pinned] `fork_answer.tools_shape`: `allowed_tools` is an optional array of at most 32 distinct,
+  non-empty tool-name strings; the array may be empty. `framing` is an
+  optional non-empty string of at most 4,096 UTF-8 bytes. Null, a wrong type,
+  or a violating value is refused `invalid_params {field: "allowed_tools"}`
+  or `{field: "framing"}`, respectively. Presence of `allowed_tools`, even
+  empty, selects the new tool behavior; absence keeps `fork_answer.no_tools`.
+- [pinned] `fork_answer.tools_identity`: both members are part of the ask's identity, including present
+  versus absent. Reusing `(fork_id, ask_id)` with a changed value refuses
+  `ask_id_reuse`; an identical retry returns the stored answer unchanged.
+- [pinned] `fork_answer.tools_gate`: with `allowed_tools` present a call runs only when its name is
+  listed AND the provider's catalog frozen with the head's tools marks that
+  tool `read_only: true` (tool-provider §3–4). The runner checks the mark,
+  not merely the list. A listed but unmarked tool, or any unlisted tool,
+  receives the exact tool result text `This tool isn't available on a quick question.`
+  and the fork continues; neither case dispatches the call or ends the fork.
+- [pinned] `fork_answer.tools_routes`: fork tool calls only ever go to the
+  item's own provider, checked against that provider's frozen `read_only` mark.
+  A call supplying the item's routing argument (§9.25), naming any value,
+  gets the same fixed unavailable result and the fork continues without
+  dispatch. A target's read-only promise is not known to the runner, and an
+  older target would ignore `fork_id`.
+- [pinned] `fork_answer.tools_calls`: an allowed call uses the head's own session route, a unique
+  `call_key` under §11.3, the frozen `schema_pin`, and top-level `fork_id`
+  defined by tool-provider §4, not by subc-protocol. It uses no held-reply or
+  yield opt-ins. A provider's `fork_call_refused` is the call's error result,
+  like any tool refusal. Results join only the fork's branch. A call still
+  running when the ask ends is withdrawn. `fork_answer.head_isolation` and
+  `fork_answer.compaction_isolation` hold unchanged. A declaring runner mints
+  fork ids within tool-provider's `fork_id` alphabet and bound so its exact
+  id can travel on those calls.
+- [pinned] `fork_answer.tools_steps`: a tool-enabled ask makes at most eight model requests. On the
+  eighth request the runner appends exactly one message, `Answer now from what you have; no more tools.`
+  It keeps the base and its tool definitions byte for byte: it never withholds
+  tools or changes `tool_choice`, either of which changes cached bytes. If
+  the model still calls a tool, the runner supplies the same fixed refusal
+  result, dispatches nothing, and returns the text so far with
+  `finish: "step_limit"`; no ninth request is made. Readers accept the new
+  finish value before runners emit it. All model requests of the ask count
+  in its `usage`, as before.
+- [pinned] `fork_answer.tools_framing`: `role.describe.fork_tools` is present exactly when the group is
+  declared. It is a map from model-provider id to the closed strings
+  `"system"` or `"prefix"`; for example
+  `{"anthropic-messages": "system", "openai-responses": "prefix"}`.
+  It states placement for every provider the runner uses for these asks.
+  For `system`, where the provider and model accept a system or developer
+  message in the middle of a conversation, `framing` is such a message
+  immediately before the question. Otherwise placement is `prefix`: the
+  question text is `framing`, a blank line (`\n\n`), then the question.
+  Both placements follow the head's cached bytes; neither edits the base.
+- [informative] `test-vectors/llm-runner-v1/fork-tools.json` pins the new ask,
+  tool gates, both placements, identity and the step cap.
 - [pinned] `fork_answer.head_isolation`: a fork never writes the head's
   transcript, takes its lease or waits on its step; it runs while the head
   runs. It emits no event on the head's `session.subscribe`, including
@@ -6973,6 +7044,58 @@ started or joined a turn and must not be sent again. `not_promoted` with
 were lost. `not_queued` gives no new delivery confirmation; follow any known
 send receipt rather than sending its words again blindly.
 
+### 9.25 `tool_routes`: a routing argument on a tool item
+
+- [pinned] `tool_routes` is an opt-in `role.describe` group. A composer sends
+  a tool item's `routes` only to a declaring runner. A runner without it
+  refuses any plan carrying the member as `invalid_params` with
+  `detail.field: "plan.tool_items[<i>].routes"`, the zero-based item index,
+  writing nothing. Malformed shapes and schema clashes below use that same
+  indexed field and write nothing, including on an optional item.
+- [pinned] The member is `{argument, description, values: [{value, provider}]}`.
+  `argument` matches `^[a-z][a-z0-9_]{0,31}$`; `description` is non-empty and
+  at most 512 UTF-8 bytes. `values` has 1–32 entries with distinct, non-empty
+  `value` strings, each at most 64 UTF-8 bytes. Each `provider` is a module id
+  string, for example `fed:<fingerprint>:aft`. After fetching the item, if
+  any offered tool already has a property named `argument` in its input
+  schema, admission refuses the same indexed field. `tool_routes::check_plan`
+  checks the declaration and shape; `ToolRoutes::check_schema` checks a tool.
+- [pinned] Every offered tool of that item gains an optional input-schema
+  property named `argument`, exactly `{"type": "string", "enum": [<values>],
+  "description": <description>}`, preserving value order. `type` is always
+  written because some model providers refuse an enum without it. The runner
+  may freeze the augmented definitions at run admission or render them for
+  each request; either way every request offers the augmented definitions.
+  Neither `routes` nor the routing argument becomes provider catalog input.
+  `routes` participates in plan identity and the usual plan-change rules.
+- [pinned] An absent argument selects the item's own provider. A present
+  argument outside `values` (including a non-string) is the call's error
+  result before dispatch, with nothing sent. Otherwise the runner strips it
+  and dispatches to the selected value's `provider` on the agent's own route,
+  carrying the default provider's frozen `schema_pin`. A target unable to
+  honour that pin refuses as a schema change does. The transcript retains
+  the model's call as sent, including the routing argument. The durable
+  dispatch intent records the selected target and stripped arguments before
+  sending: a call lost after dispatch is `outcome_unknown`, never re-sent.
+- [pinned] Routed calls use the default provider's frozen transport
+  declarations: yield on restart, call yield and held replies. A target
+  unable to honour any of those declarations refuses before anything is
+  sent. An unreachable dispatch target likewise becomes the call's error
+  result with nothing sent.
+- [pinned] Late results come from the target's own late-results feed, keyed
+  by the target provider id. A held call on a sleeping computer stays held;
+  cancellation's withdrawal to that target stays owed until the target
+  answers. Neither sleep nor a lost route makes it a default-provider call.
+- [pinned] Readers first: readers accept optional `tool_route: {argument,
+  value}` before runners emit it on a routed call's tool-call reads, including
+  `session.read` display facts and `run.tool_calls`. Omit it for default
+  dispatch. The existing `dispatched_to` string is unchanged and names the
+  target provider; it is absent only when no dispatch happened, as before.
+  `run.tool_calls.args` stays exactly as dispatched (stripped); the model's
+  transcript remains exactly as sent. `tool_routes::ToolRoute` is the fact.
+- [pinned] `test-vectors/llm-runner-v1/tool-routes.json` pins the plan,
+  augmented definition, stripped dispatch, shape and clash refusals, and read.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -7048,7 +7171,8 @@ send receipt rather than sending its words again blindly.
   the composition, under one deadline, and admits the session only when every
   required item arrived, the staleness check passed and no tool names
   collide. The plan and composition are passed to providers verbatim except
-  for runner-only rendering hints such as per-item `upfront` (§9.18), which
+  for runner-only members such as per-item `upfront` (§9.18) and `routes`
+  (§9.25), which
   are never forwarded; provider params remain unchanged.
 - [pinned] Admission refuses as: `fetch_unavailable {provider}`, retryable;
   `plan_stale`, naming the differences; `tool_name_collision {name, providers}`,
@@ -7717,7 +7841,8 @@ treats it as a terminal refusal of that one request.
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `retention_required` | first send or adopt omitted a required policy (§9.14) | — | no |
 | `retention_conflict` | policy differs from the starter's frozen policy (§9.14) | `frozen` (policy) | no |
-| `session_released` | send while release deletion is pending (§9.14) | — | **yes** |
+| `session_released` | send while ordinary release deletion is pending (§9.14) | — | **yes** |
+| `session_held_elsewhere` | start or steer a run after an agent-data move released this session here; no new incarnation under the same name until move-back activation (§9.14) | `holder?` (receiving computer's 32-hex box id) | no |
 | `backup_unsupported` | runner cannot back up a single session (§9.14) | `reason` | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `request_id_reuse` | a `session.promote` `request_id` reused with another `send_id` (§9.24) | `field: "send_id"` | no |

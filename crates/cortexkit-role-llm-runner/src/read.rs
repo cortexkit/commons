@@ -1056,6 +1056,9 @@ pub struct ToolCallAttribution {
     /// dispatched (denied, say).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatched_to: Option<String>,
+    /// Routing argument and chosen value; omitted for default dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_route: Option<crate::tool_routes::ToolRoute>,
     /// The call has a durable dispatch intent and no result: it may or may
     /// not have run.
     #[serde(default)]
@@ -1075,6 +1078,7 @@ impl ToolCallAttribution {
             call_key: None,
             call_carrier: None,
             dispatched_to: None,
+            tool_route: None,
             indeterminate: false,
         }
     }
@@ -1086,6 +1090,11 @@ impl ToolCallAttribution {
 
     pub fn with_dispatched_to(mut self, module: impl Into<String>) -> Self {
         self.dispatched_to = Some(module.into());
+        self
+    }
+
+    pub fn with_tool_route(mut self, route: crate::tool_routes::ToolRoute) -> Self {
+        self.tool_route = Some(route);
         self
     }
 

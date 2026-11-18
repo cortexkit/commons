@@ -1,5 +1,16 @@
 # Tool-provider conformance
 
+Version **0.15.13** pins provider **0.15.12**. `fork_calls_honour_marker`
+checks every tool marked `read_only`. Supply safe `fork_calls` probes covering
+each marked tool and `fork_observable_state` captured from native application
+state and approval/consent activity, including the head and other sessions.
+Use the head's own session route for the plain fixture probe, supplied by
+`ToolProviderSubject::plain_stamp`. Only derived caches,
+logs and delivery ledgers are excluded. A missing probe or observation for a
+marked tool fails; a catalog with no marks reports the case as inapplicable,
+because there is no fork promise to probe. These
+probes cannot establish isolation for unexercised inputs or hidden state.
+
 Version **0.15.10** pins provider **0.15.9**. The `catalog_notice_templates`
 case checks opt-in template lists for `session-notices/v1` providers, omission
 when unasked, and refusal by non-declarers; it checks no slot rules, plan

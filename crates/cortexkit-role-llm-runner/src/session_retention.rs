@@ -260,6 +260,27 @@ impl SessionReleasedDetail {
     }
 }
 
+/// A moved-away session's receiving computer, when known. The outer refusal
+/// remains terminal here even when the receiving computer is unknown.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionHeldElsewhereDetail {
+    /// The receiving computer's 32-hex box id. Omit when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holder: Option<String>,
+}
+
+impl SessionHeldElsewhereDetail {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_holder(mut self, holder: impl Into<String>) -> Self {
+        self.holder = Some(holder.into());
+        self
+    }
+}
+
 /// Release always targets the session bound to the management route.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -11,6 +11,16 @@ use subc_protocol::ErrorBody;
 /// for example `call_key`.
 pub const INVALID_REQUEST: &str = "invalid_request";
 
+/// A fork call cannot run without observable changes or asking the person.
+/// Detail: `{tool, reason}`; `not_read_only` means the tool is unmarked.
+pub const FORK_CALL_REFUSED: &str = "fork_call_refused";
+
+/// Refuse a fork call without running it or raising an approval card.
+pub fn fork_call_refused(tool: &str, reason: &str) -> ErrorBody {
+    ErrorBody::new(FORK_CALL_REFUSED, "this tool call cannot run on a fork")
+        .with_detail(json!({"tool": tool, "reason": reason}))
+}
+
 /// A call to a tool that is disabled. `detail.tool` names it. A call to a
 /// tool disabled after the session froze its catalog gets this code, saying
 /// it was disabled since the session started.
@@ -64,6 +74,31 @@ pub const CALL_MODE_UNSUPPORTED: &str = "call_mode_unsupported";
 /// withdraw answer; terminal for the caller.
 pub const WITHDRAW_NOT_PERMITTED: &str = "withdraw_not_permitted";
 
+/// Withdrawal is accepted but the provider cannot yet confirm the call stopped.
+/// Callers learn this retryable code before providers emit it.
+pub const WITHDRAW_PENDING: &str = "withdraw_pending";
+
+/// A retryable withdrawal refusal. A known finished or absent call must use its
+/// existing definitive answer instead. The hint is a delay, not a deadline.
+pub fn withdraw_pending(retry_after_ms: Option<u64>) -> ErrorBody {
+    let error = ErrorBody::new(WITHDRAW_PENDING, "withdrawal is not yet confirmed");
+    match retry_after_ms {
+        Some(ms) => error.with_detail(json!({"retry_after_ms": ms})),
+        None => error,
+    }
+}
+
+/// Clamp a pending withdrawal's delay hint (or the caller's own backoff).
+pub fn withdraw_retry_delay_ms(error: &ErrorBody, backoff_ms: u64) -> u64 {
+    error
+        .detail
+        .as_ref()
+        .and_then(|detail| detail.get("retry_after_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(backoff_ms)
+        .clamp(1_000, 60_000)
+}
+
 /// The scope's owner withdrew without `arguments.carrier`, and it holds no
 /// call of its own under that key. A route error; terminal.
 pub const WITHDRAW_CARRIER_REQUIRED: &str = "withdraw_carrier_required";
@@ -105,11 +140,13 @@ pub const MODULE_RELOADING: &str = subc_protocol::error_codes::MODULE_RELOADING;
 pub const SCOPE_NOT_SYNCED: &str = "scope_not_synced";
 
 /// Whether a route error on a role request is transient, so the caller
-/// retries the same request: `scope_not_synced`, or any code subc itself
+/// retries the same request: `withdraw_pending`, `scope_not_synced`, or any code subc itself
 /// retries (`module_reloading`, `module_warming`, `target_unavailable`,
 /// `module_timeout`). Every other code is terminal for that request.
 pub fn is_transient(code: &str) -> bool {
-    code == SCOPE_NOT_SYNCED || subc_protocol::error_codes::is_retryable_route_open(code)
+    code == WITHDRAW_PENDING
+        || code == SCOPE_NOT_SYNCED
+        || subc_protocol::error_codes::is_retryable_route_open(code)
 }
 
 /// An `unknown_tool` refusal for `tool`.

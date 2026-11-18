@@ -1,5 +1,32 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.76** pins runner **0.8.63**. `tool_routes_*` cases use
+`tool_routes_plan_fields` for one scripted item and a second provider,
+`conformance-route-target`. Supply the default catalog's independent pin,
+the offered schema captured at the model boundary, target provider/body
+observations and native durable admission snapshots. The checks cover
+refusals of malformed routing members and existing-schema-property clashes
+without durable writes, the model's optional string-enum routing property,
+and one stripped dispatch with the default pin. Recovery, target sleep and
+late-result transport remain the runner's obligations, not these probes.
+Undeclared optional groups are inapplicable, including the routed-plan admission
+case, rather than missing test fixtures that change the subject's verdict.
+
+`fork_tools_*` cases use `configure_fork_tools` to freeze one marked tool,
+one listed but unmarked tool and one unlisted marked tool. Return the model
+provider id so framing can be checked against `role.describe.fork_tools`.
+Supply raw model requests, actual received tool bodies with attested head-route
+and transport facts, the independent default pin, and native fork result text.
+These cases check the two tool gates, continued fixed refusals, the eight-request
+cap, frozen bytes, framing placement and ask identity. Fixtures without these
+optional scenario hooks report inapplicable, never a pass. A live run checks
+the fixture's provider placement; internal faulty-runner tests exercise both
+placements. Head and compaction isolation remain unchanged; existing fork
+cases keep checking the head-isolation observations they already cover.
+The routed-fork case requires both groups and configures a routing argument
+on the marked tool. It must get the fixed unavailable result without reaching
+either provider; quick questions only call the item's own provider.
+
 Version **0.17.67** pins runner **0.8.56**. Adapters declaring `send_promote`
 also declare `steer` at the same level. The `send_promote_*` checks use held
 tool calls, captured model requests, ordinary send receipts, named plan senders,

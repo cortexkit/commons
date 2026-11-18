@@ -283,6 +283,15 @@ responsibilities, not behaviors checked by this provider kit.
 
 ## 3. `tool.catalog`
 
+- [pinned] A tool entry may carry `read_only: true`. Absence means not
+  read-only; `false` is never sent (omit it). Catalog tool readers decode
+  leniently, ignoring unknown members, so emitting the mark requires no
+  catalog-request opt-in. This is independent of `notice_templates`.
+  A provider marks a tool only in a build that honours `fork_id` on calls to
+  it under §4. The mark is the gate: older call readers ignore `fork_id`, so
+  merely adding the marker to a call proves nothing. The mark is frozen with
+  the tools and covered by the catalog's content digest.
+
 - [pinned] A tool may declare `reference_slots: [{name, kind}]`: at most
   eight distinct, non-empty literal top-level argument names. Names are not
   paths. `kind` is `token` or `source:<dialect>` with a non-empty dialect.
@@ -762,7 +771,30 @@ responsibilities, not behaviors checked by this provider kit.
 
 - A call is a route `REQUEST` whose body is subc-protocol's
   `ToolCallRequest`: `{name, arguments, tool_call_id?, progress_token?,
-  call_key?, schema_pin?}`.
+  call_key?, schema_pin?}`, plus the optional top-level `fork_id` defined by
+  this role, not by subc-protocol. Decode `call::fork_id` from the same body
+  alongside `ToolCallRequest`; the latter decodes leniently and older readers
+  ignore the member. `call::fork_body` builds the extended body without
+  changing subc-protocol's public type.
+- [pinned] `fork_id` has the same alphabet and bound as `call_key`: 1–256
+  bytes, printable ASCII 0x21–0x7E. A present malformed value, including null
+  or a non-string, is refused `invalid_request {field: "fork_id"}`.
+- [pinned] A call carrying `fork_id` changes no state the person, the head
+  or another session can observe, and raises no approval card. A provider's
+  derived caches, logs and its own delivery ledger may update. Counters that
+  feed ranking or another agent's views count as observable state. Anything
+  that would ask the person, including an approval card or consent prompt,
+  is refused instead as `fork_call_refused {tool, reason}`; no prompt is
+  raised. A call carrying `fork_id` to a tool the provider does not mark
+  read-only is refused with that code and `reason: "not_read_only"`.
+  The runner records either refusal as the call's error result, like any
+  tool refusal. The provider honours these rules only as promised by its
+  per-tool `read_only` mark; the caller cannot turn an editing tool into a
+  read-only one by naming it in an allow-list.
+- [pinned] A fork call reaches the provider on the head's own session route,
+  so the provider sees the head's session identity. No new session member
+  is needed. `test-vectors/tool-provider-v1/fork-calls.json` pins a marked
+  and unmarked catalog tool, a fork call and both refusal forms.
 - `call_key` (subc-protocol 0.26.0) is opaque, 1 to 256 bytes, each printable
   ASCII from 0x21 to 0x7E; space is not allowed. A present but malformed key
   is refused as `invalid_request` with `detail: {field: "call_key"}`. A call
@@ -1291,8 +1323,23 @@ This includes a call whose first reply carries `held` (§4.1,
   | `unknown_call` | no record exists now for that `(carrier, call_key)`; nothing about whether it was sent or ran | no |
   | any other `answer`, or a body that is not an answer | final, unclassified; recorded verbatim | no |
   | `withdraw_not_permitted` and the three errors above | terminal refusal | no |
+  | `withdraw_pending {retry_after_ms?}` | withdrawal accepted, stopping not yet confirmed; withdrawal stays owed | yes |
   | a transient route refusal: `scope_not_synced`, or any code subc itself retries (`module_reloading`, `module_warming`, `target_unavailable`, `module_timeout`; `errors::is_transient`) | nothing yet | yes |
   | any other route error | terminal refusal | no |
+
+- [pinned] `withdraw_pending` is a provider `ERROR` refusal for
+  `tool.withdraw`: the provider accepted the withdrawal but cannot yet
+  confirm the call stopped, because its task is still alive or it cannot
+  check yet. `errors::is_transient` returns true. The optional
+  `detail.retry_after_ms` is an unsigned millisecond delay hint. A caller
+  waits at least 1,000 ms and at most 60,000 ms: clamp the hint to that range,
+  or use its own backoff within the same bounds when no hint is present.
+  The withdrawal remains owed until a definitive answer. A provider must
+  not use this refusal for a call known to have finished or never existed;
+  those keep their existing answers. Readers first: callers recognize it as
+  retryable before providers send it. Older callers treat an unknown code
+  as final, as before. `test-vectors/tool-provider-v1/withdraw-pending.json`
+  pins the refusal and delay bounds.
 
 ## 5.1. Session-wide stop: `stop-session/v1`
 

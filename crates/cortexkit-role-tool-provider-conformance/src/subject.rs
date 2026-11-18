@@ -319,6 +319,23 @@ pub trait ToolProviderSubject: Harness {
     /// the catalog.
     fn quick_call(&self) -> CallSpec;
 
+    /// Safe prompt calls covering each tool marked `read_only`. The fixture's
+    /// [`Self::plain_stamp`] must bind the probe to the head's own session
+    /// route. Include arguments
+    /// that would normally require consent when that tool has such an input.
+    fn fork_calls(&self) -> Vec<CallSpec> {
+        vec![self.quick_call()]
+    }
+
+    /// Capture observable application state and approval/consent activity,
+    /// including the head and other sessions. Read native state independently
+    /// of replies; exclude only derived caches, logs and delivery ledgers.
+    async fn fork_observable_state(&self, _handle: &Self::Handle) -> Result<Value, HarnessError> {
+        Err(HarnessError::new(
+            "fork observable state is not implemented",
+        ))
+    }
+
     /// Prompt calls covering every tool that declares `tool-result/v1`. Multiple
     /// probes per tool may exercise success and tool-level error bodies.
     /// The default reuses `quick_call`; override when other tools opt in.

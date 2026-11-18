@@ -223,8 +223,21 @@ async fn fork_answer_rule_map_meta_test_rejects_faulty_fakes_by_name() {
         .filter_map(|(_, entry)| entry["case"].as_str())
         .collect();
     for name in names {
-        case_result(name, ForkDefect::None).await.unwrap();
-        let failure = case_result(name, defect(name)).await.expect_err(name);
+        let (good, bad) = if name.starts_with("fork_tools_") {
+            // Tool-enabled forks use their own boundary fixtures; the original
+            // fake deliberately exercises the unchanged no-tools behavior.
+            (
+                tools::tests::case_result(name, false).await,
+                tools::tests::case_result(name, true).await,
+            )
+        } else {
+            (
+                case_result(name, ForkDefect::None).await,
+                case_result(name, defect(name)).await,
+            )
+        };
+        good.unwrap();
+        let failure = bad.expect_err(name);
         assert!(failure.starts_with(&format!("{name}:")), "{failure}");
     }
     let bugs: BTreeSet<_> = map

@@ -1,0 +1,9 @@
+{
+  "_about": "Callers recognize withdraw_pending before providers emit it; stopping is not yet confirmed, so withdrawal remains owed. Delay hints and absent-hint backoffs are clamped to 1000..60000 milliseconds.",
+  "samples": [
+    {"error": {"code": "withdraw_pending", "message": "withdrawal is not yet confirmed"}, "backoff_ms": 2000, "wait_ms": 2000},
+    {"error": {"code": "withdraw_pending", "message": "withdrawal is not yet confirmed", "detail": {"retry_after_ms": 0}}, "backoff_ms": 2000, "wait_ms": 1000},
+    {"error": {"code": "withdraw_pending", "message": "withdrawal is not yet confirmed", "detail": {"retry_after_ms": 5000}}, "backoff_ms": 2000, "wait_ms": 5000},
+    {"error": {"code": "withdraw_pending", "message": "withdrawal is not yet confirmed", "detail": {"retry_after_ms": 100000}}, "backoff_ms": 2000, "wait_ms": 60000}
+  ]
+}

@@ -299,6 +299,10 @@
       "retryable": true
     },
     {
+      "code": "session_held_elsewhere",
+      "retryable": false
+    },
+    {
       "code": "backup_unsupported",
       "retryable": false
     }

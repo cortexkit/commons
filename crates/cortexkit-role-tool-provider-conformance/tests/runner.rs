@@ -56,6 +56,17 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
     run_suite(subject, dir.path()).await.unwrap()
 }
 
+#[tokio::test]
+async fn fork_calls_without_read_only_mark_are_inapplicable() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert!(
+        matches!(report.outcome("fork_calls_honour_marker"), Some(CaseOutcome::Inapplicable { reason })
+        if reason == "provider does not mark any tool read_only"),
+        "{}",
+        report.render()
+    );
+}
+
 fn failed(report: &SuiteReport, case: &str) -> String {
     match report.outcome(case) {
         Some(CaseOutcome::Failed { reason }) => reason.clone(),
@@ -64,6 +75,12 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case == "fork_calls_honour_marker"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "provider does not mark any tool read_only")
+    {
+        return;
+    }
     if case.starts_with("call_yield_") || case.starts_with("stop_session_") {
         if let Some(CaseOutcome::Inapplicable { reason }) = report.outcome(case) {
             assert!(reason.contains("adapter supplies no"), "{case}: {reason}");
@@ -107,7 +124,13 @@ async fn a_faithful_provider_passes_every_case_but_its_simulated_kills_fail_the_
             );
             continue;
         }
-        if ["system_text_default_served", "session_notices_describe"].contains(&spec.name) {
+        if [
+            "system_text_default_served",
+            "session_notices_describe",
+            "fork_calls_honour_marker",
+        ]
+        .contains(&spec.name)
+        {
             assert!(matches!(
                 report.outcome(spec.name),
                 Some(CaseOutcome::Inapplicable { .. })

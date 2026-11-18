@@ -1,5 +1,5 @@
 //! The body of a tool-call request: subc-protocol's `ToolCallRequest`, with
-//! its top-level `call_key` and `schema_pin`.
+//! its top-level `call_key` and `schema_pin`, plus this role's optional `fork_id`.
 //!
 //! The request type, both fields' wire names and bounds, and their shape
 //! validators come from `subc_protocol::tool_call` and are re-exported
@@ -15,6 +15,54 @@ pub use subc_protocol::tool_call::{
 };
 
 use crate::{catalog::is_schema_digest, errors};
+
+/// The role-owned top-level marker; it is not a `ToolCallRequest` field.
+pub const FORK_ID_FIELD: &str = "fork_id";
+
+/// Read the marker from the same JSON body decoded as [`ToolCallRequest`].
+/// Older request readers ignore it, so only a catalog's `read_only` mark
+/// promises that the provider enforces fork-call isolation.
+pub fn fork_id(body: &serde_json::Value) -> Result<Option<&str>, ErrorBody> {
+    let Some(value) = body.get(FORK_ID_FIELD) else {
+        return Ok(None);
+    };
+    let id = value.as_str().ok_or_else(|| {
+        errors::invalid_request(FORK_ID_FIELD, "expected a printable ASCII string")
+    })?;
+    validate_call_key(id)
+        .map_err(|error| errors::invalid_request(FORK_ID_FIELD, error.to_string()))?;
+    Ok(Some(id))
+}
+
+/// Encode a fork call without changing subc-protocol's public request type.
+/// The caller still supplies the frozen schema pin and unique call key.
+pub fn fork_body(request: &ToolCallRequest, id: &str) -> Result<serde_json::Value, ErrorBody> {
+    validate_call_key(id)
+        .map_err(|error| errors::invalid_request(FORK_ID_FIELD, error.to_string()))?;
+    let mut body = serde_json::to_value(request).expect("tool call serializes to an object");
+    body[FORK_ID_FIELD] = serde_json::Value::String(id.to_owned());
+    Ok(body)
+}
+
+/// Gate a marked fork call before executing it or asking the person. The
+/// provider must also enforce the no-observable-change rule while executing;
+/// this admission check cannot prove that implementation property.
+pub fn check_fork_call(
+    body: &serde_json::Value,
+    tool: &str,
+    read_only: bool,
+    would_prompt: bool,
+) -> Result<(), ErrorBody> {
+    if fork_id(body)?.is_some() {
+        if !read_only {
+            return Err(errors::fork_call_refused(tool, "not_read_only"));
+        }
+        if would_prompt {
+            return Err(errors::fork_call_refused(tool, "approval_required"));
+        }
+    }
+    Ok(())
+}
 
 /// Builder helpers for [`ToolCallRequest`], which subc-protocol defines with
 /// only a `new` (a call with only a name and arguments). A trait because the
@@ -262,6 +310,35 @@ pub fn check_call(request: &ToolCallRequest) -> Result<Option<SchemaPin>, ErrorB
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fork_marker_uses_call_key_bounds_and_lenient_request_reader() {
+        let request = super::ToolCallRequest::new("read", serde_json::json!({"path": "a"}));
+        let body = super::fork_body(&request, "fork:1").unwrap();
+        assert_eq!(super::fork_id(&body).unwrap(), Some("fork:1"));
+        assert_eq!(
+            serde_json::from_value::<super::ToolCallRequest>(body).unwrap(),
+            request
+        );
+        assert_eq!(super::fork_id(&serde_json::json!({})).unwrap(), None);
+        for id in [
+            serde_json::Value::Null,
+            serde_json::json!(1),
+            serde_json::json!(""),
+            serde_json::json!("has space"),
+            serde_json::json!("é"),
+            serde_json::json!("x".repeat(257)),
+        ] {
+            let error = super::fork_id(&serde_json::json!({"fork_id": id})).unwrap_err();
+            assert_eq!(
+                super::errors::invalid_request_field(&error),
+                Some("fork_id")
+            );
+        }
+        for id in ["!~".to_owned(), "x".repeat(256)] {
+            assert!(super::fork_body(&request, &id).is_ok());
+        }
+    }
+
     use serde_json::{json, Value};
 
     use super::*;

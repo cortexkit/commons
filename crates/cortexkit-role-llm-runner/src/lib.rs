@@ -75,6 +75,7 @@ pub mod system_text_facts;
 pub mod tag_read;
 pub mod tool_calls;
 pub mod tool_result_limit;
+pub mod tool_routes;
 pub mod upfront;
 pub mod usage;
 pub mod user_commands;
@@ -120,7 +121,7 @@ pub mod ops {
     /// Freeze the newest served head request, plus its finished no-tool-call
     /// answer when present, as a question-answering branch.
     pub const SESSION_FORK_PREPARE: &str = "session.fork_prepare";
-    /// Ask on a prepared branch without running tools or changing the head.
+    /// Ask on a prepared branch without changing the head.
     pub const SESSION_FORK_ASK: &str = "session.fork_ask";
     /// End a prepared branch, retaining completed answers for replay.
     pub const SESSION_FORK_END: &str = "session.fork_end";
@@ -221,6 +222,10 @@ pub mod capabilities {
     /// Cache-preserving, lowering-only effort hints on `session.fork_ask`.
     /// Requires [`FORK_ANSWER`].
     pub const FORK_EFFORT: &str = "fork_effort";
+    /// Read-only tools and per-provider framing placement on fork asks.
+    pub const FORK_TOOLS: &str = "fork_tools";
+    /// Optional per-argument provider routing on plan tool items.
+    pub const TOOL_ROUTES: &str = "tool_routes";
     /// Provider service levels, route support and truthful served-tier usage.
     pub const SERVICE_TIER: &str = "service_tier";
     /// Durable owner-selected model and default tier for subsequent runs.
@@ -492,6 +497,8 @@ pub mod capabilities {
             ],
         ),
         (FORK_EFFORT, &[ops::SESSION_FORK_ASK]),
+        (FORK_TOOLS, &[ops::SESSION_FORK_ASK]),
+        (TOOL_ROUTES, &[ops::SESSION_SEND]),
         (CALL_YIELD, &[ops::SESSION_SEND]),
         (NOTICE_YIELD, &[ops::SESSION_SEND]),
         (STOP_ALL, &[ops::SESSION_STOP_ALL]),

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.63
+
+- Add `session_held_elsewhere` for a session whose agent moved
+  to another computer and was released here. It is not retryable here and
+  prevents a later send from reincarnating that name until move-back activation.
+  Apps and other consumers recognize the code before runners emit it.
+
+- Add opt-in `tool_routes`: a typed optional tool argument selects a provider,
+  is stripped before dispatch, and leaves the model's transcript unchanged.
+  Dispatch freezes the default pin and transport policy; target late results
+  and withdrawals stay with the target, preserving at-most-once behavior.
+- Keep `dispatched_to` as the target's string id; add readers-first
+  `tool_route: {argument, value}` on routed tool-call reads.
+- Add opt-in `fork_tools`: quick questions may use only listed tools whose
+  frozen catalogs mark them read-only. Other calls get a fixed result and
+  continue. Pin an eight-request cap, `step_limit`, framing placement after
+  the cached prefix, and identity/replay rules for both new ask members.
+  Fork tools stay on the item's own provider; a routing argument gets the
+  same fixed unavailable result instead of reaching another computer.
+
 ## 0.8.62
 
 - Add the typed `datetime` plan-template slot with the closed `utc_minute`
