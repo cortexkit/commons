@@ -52,7 +52,24 @@ fn delivery_existing_six_stream_names_and_subjects_are_wire_compatible() {
     ];
     for (spec, (name, subject)) in streams.iter().zip(expected) {
         assert_eq!(spec.name, name);
-        assert_eq!(spec.subjects, [subject]);
+        assert_eq!(spec.subjects[0], subject);
+        if matches!(
+            spec.kind,
+            StreamKind::Room | StreamKind::Wake | StreamKind::Peer
+        ) {
+            let family = match spec.kind {
+                StreamKind::Room => "room",
+                StreamKind::Wake => "wake",
+                StreamKind::Peer => "peer",
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                spec.subjects,
+                [subject.to_owned(), format!("ck.box_local.{family}.fed.>")]
+            );
+        } else {
+            assert_eq!(spec.subjects, [subject]);
+        }
     }
 }
 
@@ -86,6 +103,10 @@ fn delivery_command_limits_and_pinned_body_retention_are_explicit() {
                 Err(LimitError::BodyMustBePinned { .. })
             ));
             validate_body_retention(&spec, BodyRetention::PinnedUntilTerminal).unwrap();
+        } else if matches!(spec.kind, StreamKind::Fedsend | StreamKind::FedsendDead) {
+            assert!(!spec.work_queue);
+            assert_eq!(spec.max_message_size, Some(1_048_576));
+            validate_store_retention(&spec, HOUR * 24 * 7).unwrap();
         } else {
             assert_eq!(spec.max_message_size, None);
         }
@@ -161,12 +182,20 @@ fn delivery_bootstrap_readers_are_disjoint_and_subset_checked() {
         )
     }) {
         let mut consumer = specs[0].consumer.clone();
+        consumer.durable = "m_other".into();
         consumer.stream = stream.name.clone();
         consumer.filter_subjects = stream.subjects.clone();
         assert!(matches!(
             validate_consumer(&consumer, &streams),
             Err(LimitError::InvalidDurableOwner { .. })
         ));
+        if stream.kind == StreamKind::Effect {
+            consumer.durable = "m_prefrontal".into();
+            assert!(matches!(
+                validate_consumer(&consumer, &streams),
+                Err(LimitError::InvalidDurableOwner { .. })
+            ));
+        }
     }
 }
 

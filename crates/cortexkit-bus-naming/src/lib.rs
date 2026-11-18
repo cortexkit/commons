@@ -1,4 +1,4 @@
-//! Canonical names, topology limits, and allow-only grants for the NATS plane.
+//! Canonical names, topology limits, and permission grants for the NATS plane.
 
 mod event_consumers;
 pub mod federation;
@@ -9,21 +9,21 @@ mod names;
 mod token;
 
 pub use event_consumers::{
-    delivery_consumer_specs, event_consumer_specs, flow_engine_consumer_spec,
-    live_hint_subscriptions, AckPolicy, DeliverPolicy, DeliveryConsumerSpec, EventConsumer,
-    EventConsumerError, LiveHintReader, ModuleEventConsumerSpec, EVENT_CONSUMERS,
-    LIVE_HINT_READERS,
+    delivery_consumer_specs, event_consumer_specs, federation_consumer_specs,
+    flow_engine_consumer_spec, live_hint_subscriptions, AckPolicy, DeliverPolicy,
+    DeliveryConsumerSpec, EventConsumer, EventConsumerError, LiveHintReader,
+    ModuleEventConsumerSpec, EVENT_CONSUMERS, LIVE_HINT_READERS,
 };
 pub use grants::{
-    bus_permissions, delivery_authority_permissions, flow_engine_permissions,
+    box_account_denies, bus_permissions, delivery_authority_permissions, flow_engine_permissions,
     generate_permission_golden, participant_permissions, system_permissions,
-    validate_permission_file, AllowEntry, GoldenFixture, GrantError, Operation, PermissionDocument,
-    Principal, RefusedEntry, PINNED_GOLDEN_FIXTURE,
+    validate_permission_file, AllowEntry, DenyEntry, GoldenFixture, GrantError, Operation,
+    PermissionDocument, Principal, RefusedEntry, PINNED_GOLDEN_FIXTURE,
 };
 pub use limits::{
     shipped_streams, validate_body_retention, validate_consumer, validate_consumers,
     validate_store_retention, validate_streams, BodyRetention, ConsumerSpec, DiscardPolicy,
-    LimitError, StreamKind, StreamSpec, DEAD_LETTER_DUPLICATE_WINDOW, GIB, HOUR, MIB,
+    LimitError, StorageType, StreamKind, StreamSpec, DEAD_LETTER_DUPLICATE_WINDOW, GIB, HOUR, MIB,
 };
 pub use module_buckets::{
     validate_module_bucket_name, validate_module_buckets, ModuleBucket, MODULE_BUCKETS,

@@ -3,7 +3,11 @@ use std::time::Duration;
 
 use cortexkit_bus_naming::federation::*;
 use cortexkit_bus_naming::{
-    shipped_streams, validate_streams, AccountNames, DiscardPolicy, StreamKind, GIB, HOUR, MIB,
+    box_account_denies, bus_permissions, delivery_authority_permissions, federation_consumer_specs,
+    flow_engine_permissions, participant_permissions, shipped_streams, system_permissions,
+    validate_consumer, validate_streams, AccountNames, ConsumerSpec, DiscardPolicy, Operation,
+    StorageType, StreamKind, StreamSpec, EVENT_CONSUMERS, GIB, HOUR, LIVE_HINT_READERS, MIB,
+    MODULE_BUCKETS,
 };
 use serde_json::{json, Value};
 
@@ -46,7 +50,7 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
     let local = shipped_streams(&AccountNames::derive("box_example").unwrap());
     for hub in [HubKind::SelfHosted, HubKind::Hosted] {
         let specs = hub_streams(&box_id, hub);
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 5);
         let streams: Vec<_> = specs.iter().map(|spec| spec.stream.clone()).collect();
         validate_streams(&streams).unwrap();
         for spec in &specs {
@@ -56,10 +60,15 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
             assert!(!spec.stream.work_queue);
         }
     }
-    assert_eq!(local.len(), 9);
+    assert_eq!(local.len(), 11);
     assert!(!local.iter().any(|row| matches!(
         row.kind,
-        StreamKind::HubInbox | StreamKind::HubIdlog | StreamKind::KvResidence | StreamKind::ObjCuts
+        StreamKind::HubInbox
+            | StreamKind::HubIdlog
+            | StreamKind::HubRooms
+            | StreamKind::KvResidence
+            | StreamKind::ObjCuts
+            | StreamKind::Fedout
     )));
 
     let inbox = hub_inbox_stream(&box_id).stream;
@@ -113,7 +122,7 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
     for box_text in [SAMPLE_BOX, "fedcba9876543210fedcba9876543210"] {
         let box_id = BoxId::parse(box_text).unwrap();
         let grant = leaf_user_grant(&box_id);
-        assert_eq!(grant.publish.len(), 41);
+        assert_eq!(grant.publish.len(), 50);
         assert_eq!(grant.subscribe.len(), 5);
         for entries in [&grant.publish, &grant.subscribe] {
             assert_eq!(entries.iter().collect::<BTreeSet<_>>().len(), entries.len());
@@ -164,7 +173,12 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
             assert!(!may_publish(&format!("ck.{target}.effect.intent")));
             assert!(may_publish(&format!("ck.{target}.room.post")));
         }
-        for stream in [HUB_IDLOG_STREAM, RESIDENCE_STREAM, CUTS_STREAM] {
+        for stream in [
+            HUB_IDLOG_STREAM,
+            HUB_ROOMS_STREAM,
+            RESIDENCE_STREAM,
+            CUTS_STREAM,
+        ] {
             assert!(may_publish(&format!(
                 "$JS.hub.API.CONSUMER.CREATE.{stream}"
             )));
@@ -181,21 +195,45 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
         assert!(!may_publish("$KV.residence.key"));
         assert!(!may_publish("$JS.hub.API.$KV.other.key"));
         assert!(!may_publish("$O.other.C.chunk"));
+        assert!(may_publish("ck.fleet.room.room_a"));
+        for subject in ["fedout.frame", "fedout.box.peer.agent.handoff"] {
+            assert!(!may_publish(subject));
+            assert!(!grant
+                .subscribe
+                .iter()
+                .any(|pattern| subject_matches(pattern, subject)));
+        }
+        for subject in [
+            format!("ck.{foreign}.peer.agent.handoff"),
+            format!("ckdel.{foreign}.prefrontal.reply"),
+        ] {
+            assert!(!grant
+                .subscribe
+                .iter()
+                .any(|pattern| subject_matches(pattern, &subject)));
+        }
     }
 }
 
-fn stream_json(spec: &HubStreamSpec) -> Value {
-    let stream = &spec.stream;
+fn base_stream_json(stream: &StreamSpec) -> Value {
     json!({
         "kind": match stream.kind {
+            StreamKind::Room => "room",
+            StreamKind::Wake => "wake",
+            StreamKind::Peer => "peer",
+            StreamKind::Fedsend => "fedsend",
+            StreamKind::FedsendDead => "fedsend_dead",
+            StreamKind::Fedout => "fedout",
             StreamKind::HubInbox => "hub_inbox",
             StreamKind::HubIdlog => "hub_idlog",
+            StreamKind::HubRooms => "hub_rooms",
             StreamKind::KvResidence => "kv_residence",
             StreamKind::ObjCuts => "obj_cuts",
             _ => panic!("not a hub stream"),
         },
         "name": stream.name,
         "subjects": stream.subjects,
+        "storage": match stream.storage { StorageType::File => "file", _ => panic!("unknown storage") },
         "max_age_seconds": stream.max_age.as_secs(),
         "max_bytes": stream.max_bytes,
         "discard": match stream.discard { DiscardPolicy::Old => "old", DiscardPolicy::New => "new" },
@@ -203,11 +241,17 @@ fn stream_json(spec: &HubStreamSpec) -> Value {
         "max_msgs_per_subject": stream.max_msgs_per_subject,
         "max_message_size": stream.max_message_size,
         "duplicate_window_seconds": stream.duplicate_window.map(|duration| duration.as_secs()),
-        "replicas": spec.replicas,
-        "allow_rollup_hdrs": spec.allow_rollup_hdrs,
-        "allow_direct": spec.allow_direct,
-        "deny_delete": spec.deny_delete,
     })
+}
+
+fn stream_json(spec: &HubStreamSpec) -> Value {
+    let mut document = base_stream_json(&spec.stream);
+    let object = document.as_object_mut().unwrap();
+    object.insert("replicas".into(), json!(spec.replicas));
+    object.insert("allow_rollup_hdrs".into(), json!(spec.allow_rollup_hdrs));
+    object.insert("allow_direct".into(), json!(spec.allow_direct));
+    object.insert("deny_delete".into(), json!(spec.deny_delete));
+    document
 }
 
 fn residence_json(hub: HubKind) -> Value {
@@ -233,19 +277,378 @@ fn federation_golden_matches_bytes() {
             "deliver_prefix": deliver_prefix(&box_id),
             "module_deliver_prefix": module_deliver_prefix(&box_id, "example-module").unwrap(),
             "cuts_bucket": CUTS_BUCKET,
+            "hub_room": hub_room_subject("room_a").unwrap(),
         },
         "grant": { "publish": grant.publish, "subscribe": grant.subscribe },
         "streams": {
             "hub_inbox": stream_json(&hub_inbox_stream(&box_id)),
             "hub_idlog": stream_json(&hub_idlog_stream()),
+            "hub_rooms": stream_json(&hub_rooms_stream()),
             "residence_self_hosted": residence_json(HubKind::SelfHosted),
             "residence_hosted": residence_json(HubKind::Hosted),
             "cuts": stream_json(&cuts_object_store()),
         },
     });
-    let actual = format!("{}\n", serde_json::to_string_pretty(&document).unwrap());
+    assert_golden(
+        "hub.json",
+        &document,
+        include_str!("../test-vectors/federation/hub.json"),
+    );
+}
+
+fn assert_golden(name: &str, document: &Value, expected: &str) {
+    let actual = format!("{}\n", serde_json::to_string_pretty(document).unwrap());
+    if std::env::var_os("UPDATE_FEDERATION_GOLDENS").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("test-vectors/federation")
+            .join(name);
+        std::fs::write(path, actual).unwrap();
+    } else {
+        assert_eq!(actual, expected, "{name}");
+    }
+}
+
+#[test]
+fn federation_handoff_names_validate_families_and_destination_tokens() {
+    let box_id = sample_box();
+    let account = AccountNames::from_roster_host_id(SAMPLE_BOX).unwrap();
+    for family in ["room", "wake", "peer", "sync"] {
+        assert_eq!(
+            account
+                .fedsend(&box_id, family, &["agent_a", "handoff"])
+                .unwrap(),
+            format!("ck.box_{SAMPLE_BOX}.fedsend.{SAMPLE_BOX}.{family}.agent_a.handoff")
+        );
+        assert_eq!(
+            account
+                .inbound_federated(&box_id, family, &["agent_a", "handoff"])
+                .unwrap(),
+            format!("ck.box_{SAMPLE_BOX}.{family}.fed.{SAMPLE_BOX}.agent_a.handoff")
+        );
+    }
     assert_eq!(
-        actual.as_bytes(),
-        include_bytes!("../test-vectors/federation/hub.json")
+        account
+            .inbound_federated(&box_id, "peer", &["custody"])
+            .unwrap(),
+        format!("ck.box_{SAMPLE_BOX}.peer.fed.{SAMPLE_BOX}.custody")
+    );
+    for family in ["", "effect", "Peer", "peer.*", ">"] {
+        assert!(account.fedsend(&box_id, family, &["custody"]).is_err());
+        assert!(account
+            .inbound_federated(&box_id, family, &["custody"])
+            .is_err());
+    }
+    for tokens in [
+        vec![],
+        vec![""],
+        vec!["*"],
+        vec![">"],
+        vec!["agent.a"],
+        vec!["agent a"],
+        vec!["Agent"],
+        vec!["agent_a", "handoff.>"],
+    ] {
+        assert!(
+            account.fedsend(&box_id, "peer", &tokens).is_err(),
+            "{tokens:?}"
+        );
+        assert!(
+            account.inbound_federated(&box_id, "peer", &tokens).is_err(),
+            "{tokens:?}"
+        );
+    }
+    assert_eq!(hub_room_subject("room_a").unwrap(), "ck.fleet.room.room_a");
+    assert!(BoxId::parse("fleet").is_err());
+    for room in ["", "room.a", "*", ">", "Room", "room "] {
+        assert!(hub_room_subject(room).is_err());
+    }
+}
+
+#[test]
+fn federation_reserved_address_token_cannot_be_a_local_room_or_agent() {
+    use cortexkit_bus_naming::{validate_token, TokenKind};
+    let account = AccountNames::derive("box_reserved").unwrap();
+    for kind in [TokenKind::RoomId, TokenKind::AgentId] {
+        let error = validate_token(kind, "fed").unwrap_err();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.token(), "fed");
+        assert!(error.reason().contains("reserved"));
+    }
+    assert!(account.room_post("fed").is_err());
+    assert!(account.room_subscription("fed").is_err());
+    assert!(account.wake_fire("fed").is_err());
+    assert!(account.peer_delivery("fed", "session_a").is_err());
+    assert!(account.peer_filter("fed").is_err());
+    assert!(account.peer_subscription("fed").is_err());
+    assert!(AccountNames::consumer_name("fed").is_err());
+    assert!(account.peer_delivery("agent_a", "fed").is_ok());
+    assert!(account
+        .fedsend(&sample_box(), "peer", &["fed", "handoff"])
+        .is_ok());
+    assert!(validate_token(TokenKind::ModuleId, "fed").is_ok());
+    assert!(validate_token(TokenKind::RoomId, "fed_room").is_ok());
+    assert!(validate_token(TokenKind::AgentId, "fed_agent").is_ok());
+}
+
+#[test]
+fn federation_handoff_limits_protect_stored_frames_and_bound_shared_rooms() {
+    let account = AccountNames::from_roster_host_id(SAMPLE_BOX).unwrap();
+    let streams = shipped_streams(&account);
+    validate_streams(&streams).unwrap();
+    for kind in [
+        StreamKind::Room,
+        StreamKind::Wake,
+        StreamKind::Peer,
+        StreamKind::Fedsend,
+        StreamKind::FedsendDead,
+    ] {
+        let stream = streams.iter().find(|stream| stream.kind == kind).unwrap();
+        assert_eq!(stream.max_age, Duration::from_secs(604_800));
+        assert_eq!(stream.discard, DiscardPolicy::New);
+        assert_eq!(stream.storage, StorageType::File);
+        assert!(!stream.work_queue);
+        if matches!(kind, StreamKind::Fedsend | StreamKind::FedsendDead) {
+            assert_eq!(stream.max_message_size, Some(1_048_576));
+            assert_eq!(stream.max_bytes, 0);
+        } else {
+            assert_eq!(stream.max_bytes, 1_073_741_824);
+            assert_eq!(stream.max_message_size, None);
+        }
+    }
+    let outbound = fedout_stream();
+    assert_eq!(outbound.name, "FEDOUT");
+    assert_eq!(outbound.subjects, ["fedout.>"]);
+    assert_eq!(outbound.max_age, Duration::from_secs(604_800));
+    assert_eq!(outbound.max_message_size, Some(1_048_576));
+    assert_eq!(outbound.discard, DiscardPolicy::New);
+    assert_eq!(outbound.storage, StorageType::File);
+    let rooms = hub_rooms_stream();
+    assert_eq!(rooms.stream.name, "HUB_ROOMS");
+    assert_eq!(rooms.stream.subjects, ["ck.fleet.room.>"]);
+    assert_eq!(rooms.stream.max_msgs_per_subject, Some(100_000));
+    assert_eq!(rooms.stream.max_message_size, Some(262_144));
+    assert_eq!(rooms.stream.max_age, Duration::ZERO);
+    assert_eq!(rooms.stream.max_bytes, 0);
+    assert_eq!(rooms.stream.discard, DiscardPolicy::Old);
+    assert!(rooms.allow_direct);
+}
+
+#[test]
+fn federation_module_readers_are_separate_and_can_defer_for_the_whole_retention() {
+    let account = AccountNames::from_roster_host_id(SAMPLE_BOX).unwrap();
+    let streams = shipped_streams(&account);
+    for module in ["prefrontal-core", "prefrontal"] {
+        let specs = federation_consumer_specs(&account, module).unwrap();
+        assert_eq!(specs.len(), 2);
+        let expected = [
+            (
+                account.streams().peer.clone(),
+                vec![
+                    format!("ck.box_{SAMPLE_BOX}.peer.fed.*.*.handoff"),
+                    format!("ck.box_{SAMPLE_BOX}.peer.fed.*.custody"),
+                ],
+            ),
+            (
+                account.streams().wake.clone(),
+                vec![format!("ck.box_{SAMPLE_BOX}.wake.fed.*.*.handoff")],
+            ),
+        ];
+        for (spec, (stream, filters)) in specs.iter().zip(expected) {
+            assert_eq!(spec.consumer.durable, format!("m_{module}"));
+            assert_eq!(spec.consumer.stream, stream);
+            assert_eq!(spec.consumer.filter_subjects, filters);
+            assert_eq!(spec.max_deliver, -1);
+            assert!(spec.pull);
+            assert_eq!(spec.ack_policy, cortexkit_bus_naming::AckPolicy::Explicit);
+            validate_consumer(&spec.consumer, &streams).unwrap();
+        }
+    }
+    assert!(federation_consumer_specs(&account, "example-module").is_err());
+    for stream in [
+        &account.streams().peer,
+        &account.streams().wake,
+        &account.streams().effect,
+    ] {
+        let consumer = ConsumerSpec {
+            durable: "m_other".into(),
+            stream: stream.clone(),
+            filter_subjects: vec![],
+        };
+        assert!(validate_consumer(&consumer, &streams).is_err());
+    }
+}
+
+#[test]
+fn federation_box_users_cannot_forge_origins_and_only_bus_publishes_dead_frames() {
+    let account = AccountNames::from_roster_host_id(SAMPLE_BOX).unwrap();
+    let denies = box_account_denies(&account);
+    assert_eq!(denies.len(), 1);
+    assert_eq!(denies[0].operation, Operation::Publish);
+    assert_eq!(denies[0].subject, format!("ck.box_{SAMPLE_BOX}.*.fed.>"));
+    let mut users = vec![
+        bus_permissions(&account, "UBUS").unwrap(),
+        system_permissions("USYSTEM").unwrap(),
+        flow_engine_permissions(&account, "UFLOW", "basal").unwrap(),
+    ];
+    let modules =
+        EVENT_CONSUMERS
+            .iter()
+            .map(|entry| entry.module_id)
+            .chain(LIVE_HINT_READERS.iter().map(|entry| entry.module_id))
+            .chain(MODULE_BUCKETS.iter().flat_map(|bucket| {
+                std::iter::once(bucket.owner).chain(bucket.readers.iter().copied())
+            }))
+            .chain(["prefrontal-core", "prefrontal", "example-module"])
+            .collect::<BTreeSet<_>>();
+    for module in modules {
+        let grants = participant_permissions(&account, "UMODULE", module, &[]).unwrap();
+        for family in ["peer", "wake", "room", "sync"] {
+            let subject = account
+                .fedsend(&sample_box(), family, &["agent_a", "handoff"])
+                .unwrap();
+            assert_eq!(
+                grants
+                    .iter()
+                    .any(|entry| entry.operation == Operation::Publish
+                        && subject_matches(&entry.subject, &subject)),
+                ["prefrontal-core", "prefrontal"].contains(&module)
+                    && ["peer", "wake"].contains(&family),
+                "{module} {family}"
+            );
+        }
+        users.push(grants);
+    }
+    for module in ["prefrontal-core", "prefrontal"] {
+        let grants = delivery_authority_permissions(&account, "UAUTHORITY", module, &[]).unwrap();
+        for family in ["peer", "wake"] {
+            let subject = account
+                .fedsend(&sample_box(), family, &["custody"])
+                .unwrap();
+            assert!(grants
+                .iter()
+                .any(|entry| entry.operation == Operation::Publish
+                    && subject_matches(&entry.subject, &subject)));
+        }
+        users.push(grants);
+    }
+    for (index, grants) in users.iter().enumerate() {
+        for family in ["room", "wake", "peer", "sync", "future_family"] {
+            let subject = format!("ck.box_{SAMPLE_BOX}.{family}.fed.{SAMPLE_BOX}.agent_a.handoff");
+            // NATS evaluates explicit denies first, even if a future grant is broader.
+            let may_publish = !denies.iter().any(|entry| {
+                entry.operation == Operation::Publish && subject_matches(&entry.subject, &subject)
+            }) && grants.iter().any(|entry| {
+                entry.operation == Operation::Publish && subject_matches(&entry.subject, &subject)
+            });
+            assert!(!may_publish, "user {index}: {subject}");
+        }
+        let dead = format!("ck.box_{SAMPLE_BOX}.fedsend_dead.unknown.peer.agent_a.handoff");
+        assert_eq!(
+            grants
+                .iter()
+                .any(|entry| entry.operation == Operation::Publish
+                    && subject_matches(&entry.subject, &dead)),
+            index == 0
+        );
+    }
+    assert!(!subject_matches(
+        &denies[0].subject,
+        &account.peer_delivery("agent_a", "session_a").unwrap()
+    ));
+    assert!(!subject_matches(
+        &denies[0].subject,
+        &account
+            .fedsend(&sample_box(), "peer", &["custody"])
+            .unwrap()
+    ));
+}
+
+#[test]
+fn federation_local_golden_matches_bytes() {
+    let box_id = sample_box();
+    let account = AccountNames::from_roster_host_id(SAMPLE_BOX).unwrap();
+    let specs = shipped_streams(&account);
+    let streams = specs
+        .iter()
+        .filter(|stream| {
+            matches!(
+                stream.kind,
+                StreamKind::Room
+                    | StreamKind::Wake
+                    | StreamKind::Peer
+                    | StreamKind::Fedsend
+                    | StreamKind::FedsendDead
+            )
+        })
+        .map(base_stream_json)
+        .collect::<Vec<_>>();
+    let mut readers = serde_json::Map::new();
+    let mut grants = serde_json::Map::new();
+    for module in ["prefrontal-core", "prefrontal"] {
+        let specs = federation_consumer_specs(&account, module).unwrap();
+        readers.insert(
+            module.into(),
+            json!(specs
+                .iter()
+                .map(|spec| json!({
+                    "durable": spec.consumer.durable,
+                    "stream": spec.consumer.stream,
+                    "filter_subjects": spec.consumer.filter_subjects,
+                    "pull": spec.pull,
+                    "ack_policy": "explicit",
+                    "deliver_policy": "all",
+                    "ack_wait_seconds": spec.ack_wait.as_secs(),
+                    "max_deliver": spec.max_deliver,
+                    "max_ack_pending": spec.max_ack_pending,
+                }))
+                .collect::<Vec<_>>()),
+        );
+        grants.insert(
+            module.into(),
+            json!(
+                delivery_authority_permissions(&account, "UAUTHORITY", module, &[])
+                    .unwrap()
+                    .iter()
+                    .filter(|entry| entry.subject.contains(".fedsend."))
+                    .map(|entry| entry.subject.clone())
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    let names = [
+        ("peer_handoff", "peer", vec!["agent_a", "handoff"]),
+        ("wake_handoff", "wake", vec!["agent_a", "handoff"]),
+        ("peer_custody", "peer", vec!["custody"]),
+        ("room", "room", vec!["room_a", "post"]),
+        ("sync", "sync", vec!["state"]),
+    ]
+    .into_iter()
+    .map(|(name, family, dest)| {
+        (
+            name.to_owned(),
+            json!({
+                "outbound": account.fedsend(&box_id, family, &dest).unwrap(),
+                "inbound": account.inbound_federated(&box_id, family, &dest).unwrap(),
+            }),
+        )
+    })
+    .collect::<serde_json::Map<_, _>>();
+    let document = json!({
+        "account": account.account(),
+        "box_id": box_id.as_str(),
+        "subjects": names,
+        "box_streams": streams,
+        "federation_account_stream": base_stream_json(&fedout_stream()),
+        "readers": readers,
+        "fedsend_publish": grants,
+        "bus_only_publish": account.fedsend_dead_binding(),
+        "all_box_users_deny": box_account_denies(&account).iter().map(|entry| json!({
+            "operation": entry.operation.as_str(), "subject": entry.subject,
+        })).collect::<Vec<_>>(),
+    });
+    assert_golden(
+        "local.json",
+        &document,
+        include_str!("../test-vectors/federation/local.json"),
     );
 }

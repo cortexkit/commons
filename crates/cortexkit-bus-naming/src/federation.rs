@@ -11,6 +11,10 @@ pub const HUB_DOMAIN: &str = "hub";
 pub const HUB_API_PREFIX: &str = "$JS.hub.API";
 pub const FEDERATED_FAMILIES: [&str; 4] = ["room", "wake", "peer", "sync"];
 pub const HUB_IDLOG_STREAM: &str = "HUB_IDLOG";
+pub const HUB_ROOMS_STREAM: &str = "HUB_ROOMS";
+pub const HUB_ROOMS_SUBJECT: &str = "ck.fleet.room.>";
+pub const FEDOUT_STREAM: &str = "FEDOUT";
+pub const FEDOUT_SUBJECT: &str = "fedout.>";
 pub const IDLOG_SUBJECT: &str = "ck.fleet.idlog";
 pub const RESIDENCE_BUCKET: &str = "residence";
 pub const RESIDENCE_STREAM: &str = "KV_residence";
@@ -71,6 +75,20 @@ pub fn hub_inbox_stream_name(box_id: &BoxId) -> String {
 
 pub fn inbox_stream_name(box_id: &BoxId) -> String {
     format!("INBOX_{box_id}")
+}
+
+pub fn hub_room_subject(room_id: &str) -> Result<String, NamingError> {
+    validate_token(TokenKind::RoomId, room_id)?;
+    Ok(format!("ck.fleet.room.{room_id}"))
+}
+
+/// Sealed outbound frames live in the federation account, never the box account.
+pub fn fedout_stream() -> StreamSpec {
+    crate::limits::handoff_stream(
+        StreamKind::Fedout,
+        FEDOUT_STREAM.to_owned(),
+        FEDOUT_SUBJECT.to_owned(),
+    )
 }
 
 pub fn deliver_prefix(box_id: &BoxId) -> String {
@@ -163,6 +181,19 @@ pub fn hub_idlog_stream() -> HubStreamSpec {
     spec
 }
 
+pub fn hub_rooms_stream() -> HubStreamSpec {
+    let mut stream = StreamSpec::new(
+        StreamKind::HubRooms,
+        HUB_ROOMS_STREAM.to_owned(),
+        vec![HUB_ROOMS_SUBJECT.to_owned()],
+    );
+    stream.max_msgs_per_subject = Some(100_000);
+    stream.max_message_size = Some(256 * 1024);
+    let mut spec = HubStreamSpec::new(stream);
+    spec.allow_direct = true;
+    spec
+}
+
 pub fn residence_bucket(hub: HubKind) -> KvBucketSpec {
     let mut stream = StreamSpec::new(
         StreamKind::KvResidence,
@@ -210,6 +241,7 @@ pub fn hub_streams(box_id: &BoxId, hub: HubKind) -> Vec<HubStreamSpec> {
     vec![
         hub_inbox_stream(box_id),
         hub_idlog_stream(),
+        hub_rooms_stream(),
         residence_bucket(hub).backing_stream,
         cuts_object_store(),
     ]
@@ -251,8 +283,14 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
         format!("{HUB_API_PREFIX}.$KV.{RESIDENCE_BUCKET}.>"),
         format!("$O.{CUTS_BUCKET}.>"),
         IDLOG_SUBJECT.to_owned(),
+        HUB_ROOMS_SUBJECT.to_owned(),
     ]);
-    for stream in [HUB_IDLOG_STREAM, RESIDENCE_STREAM, CUTS_STREAM] {
+    for stream in [
+        HUB_IDLOG_STREAM,
+        HUB_ROOMS_STREAM,
+        RESIDENCE_STREAM,
+        CUTS_STREAM,
+    ] {
         for suffix in [
             format!("STREAM.INFO.{stream}"),
             format!("STREAM.MSG.GET.{stream}"),

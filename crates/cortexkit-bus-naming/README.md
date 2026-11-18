@@ -71,3 +71,34 @@ bytes; the value is exactly what `tool.views` serves for that pin. Each bucket h
 128 maximum-sized schema pins per owner, allowing multiple tools and schema
 revisions without unbounded storage. The byte cap is a budget, not a key-count
 limit.
+
+## Cross-computer handoffs and shared rooms
+
+`federation` describes hub-only streams, the federation account's `FEDOUT`,
+canonical `BoxId`s and the per-computer leaf grant. Local streams use the account
+token (`box_{box}`); remote destinations and authenticated origins use bare box
+ids. `AccountNames::fedsend` and `AccountNames::inbound_federated` validate a
+family from `room`, `wake`, `peer`, `sync` and a nonempty list of destination
+tokens. Stream descriptors require file storage.
+
+Every box-account user must receive `box_account_denies(&account)` alongside its
+allow list, including bus and system users. These explicit denies protect the
+`ck.{acct}.*.fed.>` namespace from forged origins even if an allow list is broad.
+The older permission text fixture remains allow-only; the universal deny is
+pinned separately in the local federation fixture. FEDSEND_DEAD may be published
+only by the bus user.
+Room and agent ids cannot be `fed`, because their local address position is
+reserved for frames delivered from other computers. Session and destination
+tokens do not occupy that position and retain their existing lexicon.
+
+`federation_consumer_specs` supplies federation-only PEER and WAKE module readers
+for `prefrontal-core` and `prefrontal` while deployments move to the latter id,
+without changing agent durables. Use the reader for the deployed identity; these readers route handoffs
+and custody replies to agents. They have unlimited delivery attempts so delayed
+naks can defer a frame throughout the seven-day retention.
+
+`HUB_ROOMS` stores `ck.fleet.room.{room_id}` with a per-room history cap, not a
+box-scoped subject (`fleet` cannot be a canonical box id). Its leaf APIs match
+HUB_IDLOG's read and consumer APIs and permit neither stream purge nor delete.
+The bus module owns the box-account import/export rows; they are not described
+by this crate.

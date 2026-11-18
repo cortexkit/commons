@@ -26,6 +26,7 @@
       "$JS.hub.API.$KV.residence.>",
       "$O.cuts.>",
       "ck.fleet.idlog",
+      "ck.fleet.room.>",
       "$JS.hub.API.STREAM.INFO.HUB_IDLOG",
       "$JS.hub.API.STREAM.MSG.GET.HUB_IDLOG",
       "$JS.hub.API.DIRECT.GET.HUB_IDLOG",
@@ -34,6 +35,14 @@
       "$JS.hub.API.CONSUMER.CREATE.HUB_IDLOG.>",
       "$JS.hub.API.CONSUMER.INFO.HUB_IDLOG.>",
       "$JS.hub.API.CONSUMER.DELETE.HUB_IDLOG.>",
+      "$JS.hub.API.STREAM.INFO.HUB_ROOMS",
+      "$JS.hub.API.STREAM.MSG.GET.HUB_ROOMS",
+      "$JS.hub.API.DIRECT.GET.HUB_ROOMS",
+      "$JS.hub.API.DIRECT.GET.HUB_ROOMS.>",
+      "$JS.hub.API.CONSUMER.CREATE.HUB_ROOMS",
+      "$JS.hub.API.CONSUMER.CREATE.HUB_ROOMS.>",
+      "$JS.hub.API.CONSUMER.INFO.HUB_ROOMS.>",
+      "$JS.hub.API.CONSUMER.DELETE.HUB_ROOMS.>",
       "$JS.hub.API.STREAM.INFO.KV_residence",
       "$JS.hub.API.STREAM.MSG.GET.KV_residence",
       "$JS.hub.API.DIRECT.GET.KV_residence",
@@ -63,6 +72,7 @@
   "names": {
     "cuts_bucket": "cuts",
     "deliver_prefix": "ckdel.0123456789abcdef0123456789abcdef",
+    "hub_room": "ck.fleet.room.room_a",
     "inbox_stream": "INBOX_0123456789abcdef0123456789abcdef",
     "module_deliver_prefix": "ckdel.0123456789abcdef0123456789abcdef.example-module"
   },
@@ -80,6 +90,7 @@
       "max_msgs_per_subject": null,
       "name": "OBJ_cuts",
       "replicas": null,
+      "storage": "file",
       "subjects": [
         "$O.cuts.C.>",
         "$O.cuts.M.>"
@@ -99,6 +110,7 @@
       "max_msgs_per_subject": null,
       "name": "HUB_IDLOG",
       "replicas": null,
+      "storage": "file",
       "subjects": [
         "ck.fleet.idlog"
       ],
@@ -117,11 +129,31 @@
       "max_msgs_per_subject": null,
       "name": "HUB_INBOX_0123456789abcdef0123456789abcdef",
       "replicas": null,
+      "storage": "file",
       "subjects": [
         "ck.0123456789abcdef0123456789abcdef.room.>",
         "ck.0123456789abcdef0123456789abcdef.wake.>",
         "ck.0123456789abcdef0123456789abcdef.peer.>",
         "ck.0123456789abcdef0123456789abcdef.sync.>"
+      ],
+      "work_queue": false
+    },
+    "hub_rooms": {
+      "allow_direct": true,
+      "allow_rollup_hdrs": false,
+      "deny_delete": false,
+      "discard": "old",
+      "duplicate_window_seconds": null,
+      "kind": "hub_rooms",
+      "max_age_seconds": 0,
+      "max_bytes": 0,
+      "max_message_size": 262144,
+      "max_msgs_per_subject": 100000,
+      "name": "HUB_ROOMS",
+      "replicas": null,
+      "storage": "file",
+      "subjects": [
+        "ck.fleet.room.>"
       ],
       "work_queue": false
     },
@@ -139,6 +171,7 @@
         "max_msgs_per_subject": 1,
         "name": "KV_residence",
         "replicas": 3,
+        "storage": "file",
         "subjects": [
           "$KV.residence.>"
         ],
@@ -161,6 +194,7 @@
         "max_msgs_per_subject": 1,
         "name": "KV_residence",
         "replicas": 1,
+        "storage": "file",
         "subjects": [
           "$KV.residence.>"
         ],

@@ -49,12 +49,36 @@ impl Operation {
     }
 }
 
-/// One permission entry. The model intentionally has no deny variant.
+/// One allow-list permission entry. Universal box-account denies are separate.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AllowEntry {
     pub principal: Principal,
     pub operation: Operation,
     pub subject: String,
+}
+
+/// An explicit deny that must be attached to every user of a box account,
+/// including the bus and system users. NATS denies take precedence over allows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DenyEntry {
+    pub operation: Operation,
+    pub subject: String,
+}
+
+impl DenyEntry {
+    pub fn new(operation: Operation, subject: String) -> Self {
+        Self { operation, subject }
+    }
+}
+
+/// Local credentials cannot forge the origin of a frame opened by federation.
+/// These denies do not apply to the federation account's import.
+pub fn box_account_denies(account: &AccountNames) -> Vec<DenyEntry> {
+    vec![DenyEntry::new(
+        Operation::Publish,
+        format!("ck.{}.*.fed.>", account.account()),
+    )]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -344,10 +368,21 @@ fn add_consumer_permissions(
         account.event_publish_grant(module_id)?,
     );
 
+    if ["prefrontal-core", "prefrontal"].contains(&module_id) {
+        for family in ["peer", "wake"] {
+            add(
+                entries,
+                principal,
+                Operation::Publish,
+                format!("ck.{}.fedsend.*.{family}.>", account.account()),
+            );
+        }
+    }
+
     // A whole-token `*` in the consumer position: NATS wildcards cannot match the
     // `c_` prefix, so this admits every consumer on the stream. That is safe only
-    // because no non-agent durable exists on the agent streams (see
-    // `StreamNames::agent_streams`).
+    // because federation handoffs have the same participant visibility as local
+    // deliveries (see `StreamNames::agent_streams`).
     for stream in account.streams().agent_streams() {
         for subject in [
             format!("$JS.ACK.{stream}.*.>"),
@@ -418,6 +453,12 @@ pub fn bus_permissions(
         );
     }
     add_census_read_permissions(&mut entries, Principal::Bus, account);
+    add(
+        &mut entries,
+        Principal::Bus,
+        Operation::Publish,
+        account.fedsend_dead_binding(),
+    );
 
     add(
         &mut entries,

@@ -79,10 +79,10 @@ fn store_retention_cannot_be_shorter_than_stream_max_age() {
         .find(|stream| stream.name == names.streams().peer)
         .unwrap();
 
-    let error = validate_store_retention(peer, HOUR * 23)
-        .expect_err("23h store retention cannot cover a 24h stream");
+    let error = validate_store_retention(peer, HOUR * 24 * 6)
+        .expect_err("a 6-day store cannot cover a 7-day stream");
     assert!(matches!(error, LimitError::StoreRetentionTooShort { .. }));
-    validate_store_retention(peer, HOUR * 48).expect("the shipped 48h peer retention is valid");
+    validate_store_retention(peer, HOUR * 24 * 7).expect("a 7-day store covers the stream");
 }
 
 #[test]
@@ -101,6 +101,8 @@ fn shipped_bindings_validate_and_include_the_event_and_delivery_streams() {
             StreamKind::Inbox,
             StreamKind::CoreWork,
             StreamKind::DeliveryDead,
+            StreamKind::Fedsend,
+            StreamKind::FedsendDead,
         ]
     );
     validate_streams(&streams).unwrap();
@@ -124,34 +126,33 @@ fn only_the_event_stream_caps_messages_per_subject() {
         }
         spec
     };
-    // Only EFFECT changes among the older delivery streams: pending commands
-    // no longer age out, and their small envelopes have a message-size cap.
+    // Delivery streams refuse new messages rather than evict stored handoffs.
     let mut expected = vec![
         spec(
             StreamKind::Room,
             &streams.room,
             names.room_binding(),
-            24,
+            24 * 7,
             GIB,
-            DiscardPolicy::Old,
+            DiscardPolicy::New,
             false,
         ),
         spec(
             StreamKind::Wake,
             &streams.wake,
             names.wake_binding(),
-            24,
+            24 * 7,
             GIB,
-            DiscardPolicy::Old,
+            DiscardPolicy::New,
             false,
         ),
         spec(
             StreamKind::Peer,
             &streams.peer,
             names.peer_binding(),
-            24,
+            24 * 7,
             GIB,
-            DiscardPolicy::Old,
+            DiscardPolicy::New,
             false,
         ),
         spec(
@@ -187,6 +188,9 @@ fn only_the_event_stream_caps_messages_per_subject() {
     event.max_msgs_per_subject = Some(100_000);
     expected.push(event);
 
+    expected[0].subjects = names.room_bindings();
+    expected[1].subjects = names.wake_bindings();
+    expected[2].subjects = names.peer_bindings();
     assert_eq!(&shipped_streams(&names)[..6], expected);
 }
 
@@ -194,7 +198,10 @@ fn only_the_event_stream_caps_messages_per_subject() {
 fn an_event_binding_overlapping_the_effect_binding_is_refused() {
     let names = AccountNames::derive("box_limits").unwrap();
     let mut streams = shipped_streams(&names);
-    let overlapping = format!("ck.{}.*.*.*.intent", names.account());
+    validate_streams(&streams).expect("shipped bindings, including federation, must be disjoint");
+    // A family wildcard also overlaps valid inbound federation bindings. Keep
+    // the injected conflict in EFFECT to exercise its work-queue protection.
+    let overlapping = format!("ck.{}.effect.*.*.intent", names.account());
     streams
         .iter_mut()
         .find(|stream| stream.kind == StreamKind::Event)

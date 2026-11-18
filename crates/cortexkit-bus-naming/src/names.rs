@@ -30,6 +30,8 @@ pub struct StreamNames {
     pub inbox: String,
     pub core_work: String,
     pub delivery_dead: String,
+    pub fedsend: String,
+    pub fedsend_dead: String,
 }
 
 impl StreamNames {
@@ -48,6 +50,8 @@ impl StreamNames {
             &self.inbox,
             &self.core_work,
             &self.delivery_dead,
+            &self.fedsend,
+            &self.fedsend_dead,
         ]
     }
 
@@ -55,9 +59,10 @@ impl StreamNames {
     ///
     /// Grants that let a credential read any agent's durable use a whole-token `*`
     /// in the consumer position on exactly these streams (NATS wildcards cannot
-    /// match a `c_` prefix), which admits every consumer on them. So no non-agent
-    /// durable may ever be created on these streams; ck-bus asserts that against
-    /// this list. ROOM, EFFECT_DEAD and EVENT are not agent streams: EVENT and
+    /// match a `c_` prefix), which admits every consumer on them, including the
+    /// delivery authority's federation readers on PEER and WAKE. Those messages
+    /// have the same participant visibility as local deliveries. ROOM, EFFECT_DEAD
+    /// and EVENT are not agent streams: EVENT and
     /// ROOM hold module durables (`m_{module_id}`), never a `c_` durable.
     pub fn agent_streams(&self) -> [&str; 3] {
         [&self.wake, &self.peer, &self.effect]
@@ -102,6 +107,8 @@ impl AccountNames {
                 inbox: format!("CK_{account_upper}_INBOX"),
                 core_work: format!("CK_{account_upper}_CORE_WORK"),
                 delivery_dead: format!("CK_{account_upper}_DELIVERY_DEAD"),
+                fedsend: format!("CK_{account_upper}_FEDSEND"),
+                fedsend_dead: format!("CK_{account_upper}_FEDSEND_DEAD"),
             },
             buckets: BucketNames {
                 census: format!("CK_{account_upper}_CENSUS"),
@@ -146,6 +153,10 @@ impl AccountNames {
         format!("ck.{}.room.*.post", self.account)
     }
 
+    pub fn room_bindings(&self) -> Vec<String> {
+        vec![self.room_binding(), self.federated_binding("room")]
+    }
+
     pub fn wake_fire(&self, agent_id: &str) -> Result<String, NamingError> {
         validate_token(TokenKind::AgentId, agent_id)?;
         Ok(format!("ck.{}.wake.{agent_id}.fire", self.account))
@@ -153,6 +164,10 @@ impl AccountNames {
 
     pub fn wake_binding(&self) -> String {
         format!("ck.{}.wake.*.fire", self.account)
+    }
+
+    pub fn wake_bindings(&self) -> Vec<String> {
+        vec![self.wake_binding(), self.federated_binding("wake")]
     }
 
     pub fn peer_delivery(&self, agent_id: &str, session_id: &str) -> Result<String, NamingError> {
@@ -176,6 +191,47 @@ impl AccountNames {
 
     pub fn peer_binding(&self) -> String {
         format!("ck.{}.peer.*.*.deliver", self.account)
+    }
+
+    pub fn peer_bindings(&self) -> Vec<String> {
+        vec![self.peer_binding(), self.federated_binding("peer")]
+    }
+
+    fn federated_binding(&self, family: &str) -> String {
+        format!("ck.{}.{family}.fed.>", self.account)
+    }
+
+    pub fn fedsend_binding(&self) -> String {
+        format!("ck.{}.fedsend.>", self.account)
+    }
+
+    pub fn fedsend_dead_binding(&self) -> String {
+        format!("ck.{}.fedsend_dead.>", self.account)
+    }
+
+    /// Address a remote box using its bare canonical id, not its account token.
+    pub fn fedsend(
+        &self,
+        destination: &crate::federation::BoxId,
+        family: &str,
+        dest_tokens: &[&str],
+    ) -> Result<String, NamingError> {
+        let dest = federation_destination(family, dest_tokens)?;
+        Ok(format!(
+            "ck.{}.fedsend.{destination}.{family}.{dest}",
+            self.account
+        ))
+    }
+
+    /// Only the federation import may write an authenticated origin into this namespace.
+    pub fn inbound_federated(
+        &self,
+        origin: &crate::federation::BoxId,
+        family: &str,
+        dest_tokens: &[&str],
+    ) -> Result<String, NamingError> {
+        let dest = federation_destination(family, dest_tokens)?;
+        Ok(format!("ck.{}.{family}.fed.{origin}.{dest}", self.account))
     }
 
     pub fn effect_intent(&self, agent_id: &str, session_id: &str) -> Result<String, NamingError> {
@@ -444,6 +500,21 @@ impl AccountNames {
 
 /// Families of root keys the operator creates once in the vault by ceremony
 /// (`ck auth mint-signing-key --id signing:<provider>[:<generation>]`).
+fn federation_destination(family: &str, dest_tokens: &[&str]) -> Result<String, NamingError> {
+    validate_token(TokenKind::FederationFamily, family)?;
+    if dest_tokens.is_empty() {
+        return Err(NamingError::new(
+            TokenKind::FederationDestination,
+            "",
+            "federation destination must contain at least one token",
+        ));
+    }
+    for token in dest_tokens {
+        validate_token(TokenKind::FederationDestination, token)?;
+    }
+    Ok(dest_tokens.join("."))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootCredentialKind {
     /// Ed25519 signing keys: account, operator and message-signing roots.

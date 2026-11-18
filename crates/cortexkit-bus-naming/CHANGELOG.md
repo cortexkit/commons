@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.1
+
+- Add box-account FEDSEND and bus-only FEDSEND_DEAD, federation-account FEDOUT,
+  validated outbound/inbound handoff subjects, and explicit file-storage stream
+  descriptors. Frames are capped at 1 MiB and retained for seven days, with new
+  writes refused when full. Both `prefrontal-core` and `prefrontal` may publish
+  outbound PEER and WAKE handoffs.
+- Add universal box-account publish denies for `ck.{acct}.*.fed.>`: every local
+  user, including bus and system users, must receive these denies alongside its
+  allow list. Only the federation import writes authenticated origins.
+- Reserve the room/agent id `fed` for inbound frames, so locally addressed
+  messages cannot collide with the authenticated-origin namespace.
+- ROOM, WAKE and PEER now discard new and retain seven days instead of discarding
+  old with a one-day age. The bus module applies these settings in place on its
+  next start; a full stream now refuses publishes instead of dropping the oldest.
+  Their bindings also accept inbound federation subjects.
+- Add separate federation-only PEER and WAKE module readers for both delivery
+  authority ids, with unlimited delivery attempts so delayed naks remain possible
+  throughout retention. Existing participant grants remain unchanged: handoffs on
+  a computer have the same participant visibility as its local PEER/WAKE messages.
+- Add account-wide HUB_ROOMS, with 100,000 messages per room, oldest-of-subject
+  eviction, no age limit and a 256 KiB message cap. Extend the leaf grant with room
+  publishes and the same read/consumer APIs as HUB_IDLOG, never purge or delete.
+  Box-account import/export rows belong to the bus module, not this crate.
+- Refresh the checksummed hub and permission fixtures, and pin the new local
+  federation names, limits, reader policies and denies in a checksummed fixture.
+
 ## 0.5.0
 
 - **Breaking:** rename the module's bus names from `prefrontal-core` to

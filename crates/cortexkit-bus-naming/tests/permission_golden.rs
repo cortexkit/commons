@@ -51,8 +51,10 @@ fn permission_model_is_allow_only_and_expands_all_streams() {
     {
         if entry.subject.starts_with(&account_subject_prefix) {
             assert!(
-                entry.subject == account.sentinel_ping() || entry.subject == activity_subject,
-                "the bus management identity must not carry workload rights"
+                entry.subject == account.sentinel_ping()
+                    || entry.subject == activity_subject
+                    || entry.subject == account.fedsend_dead_binding(),
+                "the bus management identity may publish diagnostics but not workloads"
             );
         }
     }
@@ -756,7 +758,7 @@ fn non_table_modules_keep_the_exact_participant_grant() {
 }
 
 #[test]
-fn event_consumer_grant_is_participant_plus_three_permissions_per_owned_durable() {
+fn event_consumer_grants_and_federation_publishes_are_exact() {
     use cortexkit_bus_naming::{participant_permissions, AllowEntry, Operation, EVENT_CONSUMERS};
     use std::collections::BTreeSet;
     let account = AccountNames::derive("box_readers").unwrap();
@@ -810,6 +812,12 @@ fn event_consumer_grant_is_participant_plus_three_permissions_per_owned_durable(
                     ),
                 ]
             })
+            .chain(
+                ["peer", "wake"]
+                    .into_iter()
+                    .filter(|_| ["prefrontal-core", "prefrontal"].contains(&module_id))
+                    .map(|family| format!("ck.box_readers.fedsend.*.{family}.>")),
+            )
             .map(|subject| AllowEntry {
                 principal: Principal::Participant,
                 operation: Operation::Publish,

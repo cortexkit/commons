@@ -35,8 +35,12 @@ pub enum StreamKind {
     Inbox,
     CoreWork,
     DeliveryDead,
+    Fedsend,
+    FedsendDead,
+    Fedout,
     HubInbox,
     HubIdlog,
+    HubRooms,
     KvResidence,
     ObjCuts,
 }
@@ -47,20 +51,28 @@ pub enum DiscardPolicy {
     New,
 }
 
+/// Normative storage for the durable message plane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StorageType {
+    File,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct StreamSpec {
     pub kind: StreamKind,
     pub name: String,
     pub subjects: Vec<String>,
+    pub storage: StorageType,
     /// Zero disables broker age eviction; it is not a zero-length retention.
     pub max_age: Duration,
     pub max_bytes: u64,
     pub discard: DiscardPolicy,
     pub work_queue: bool,
     /// The per-subject message cap (`max_msgs_per_subject`), or `None` to set
-    /// none. Only the event stream has one, so one noisy module or event cannot
-    /// evict every other subject's history. Other streams leave it unset.
+    /// none. With discard-old, the oldest message of a full subject is evicted
+    /// first; a busy subject cannot evict another subject's history via this cap.
     pub max_msgs_per_subject: Option<i64>,
     /// Maximum serialized message size in bytes, or no stream-specific cap.
     pub max_message_size: Option<i32>,
@@ -77,6 +89,7 @@ impl StreamSpec {
             kind,
             name,
             subjects,
+            storage: StorageType::File,
             max_age: Duration::ZERO,
             max_bytes: 0,
             discard: DiscardPolicy::Old,
@@ -212,10 +225,11 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
         StreamSpec {
             kind: StreamKind::Room,
             name: names.room.clone(),
-            subjects: vec![account.room_binding()],
-            max_age: HOUR * 24,
+            subjects: account.room_bindings(),
+            storage: StorageType::File,
+            max_age: HOUR * 24 * 7,
             max_bytes: GIB,
-            discard: DiscardPolicy::Old,
+            discard: DiscardPolicy::New,
             work_queue: false,
             max_msgs_per_subject: None,
             max_message_size: None,
@@ -224,10 +238,11 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
         StreamSpec {
             kind: StreamKind::Wake,
             name: names.wake.clone(),
-            subjects: vec![account.wake_binding()],
-            max_age: HOUR * 24,
+            subjects: account.wake_bindings(),
+            storage: StorageType::File,
+            max_age: HOUR * 24 * 7,
             max_bytes: GIB,
-            discard: DiscardPolicy::Old,
+            discard: DiscardPolicy::New,
             work_queue: false,
             max_msgs_per_subject: None,
             max_message_size: None,
@@ -236,10 +251,11 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
         StreamSpec {
             kind: StreamKind::Peer,
             name: names.peer.clone(),
-            subjects: vec![account.peer_binding()],
-            max_age: HOUR * 24,
+            subjects: account.peer_bindings(),
+            storage: StorageType::File,
+            max_age: HOUR * 24 * 7,
             max_bytes: GIB,
-            discard: DiscardPolicy::Old,
+            discard: DiscardPolicy::New,
             work_queue: false,
             max_msgs_per_subject: None,
             max_message_size: None,
@@ -249,6 +265,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             kind: StreamKind::Effect,
             name: names.effect.clone(),
             subjects: vec![account.effect_binding()],
+            storage: StorageType::File,
             max_age: Duration::ZERO,
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
@@ -261,6 +278,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             kind: StreamKind::EffectDead,
             name: names.effect_dead.clone(),
             subjects: vec![account.effect_dead()],
+            storage: StorageType::File,
             max_age: HOUR * 24 * 7,
             max_bytes: 64 * MIB,
             discard: DiscardPolicy::Old,
@@ -273,6 +291,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             kind: StreamKind::Event,
             name: names.event.clone(),
             subjects: vec![account.event_binding()],
+            storage: StorageType::File,
             max_age: HOUR * 24 * 7,
             max_bytes: GIB,
             discard: DiscardPolicy::Old,
@@ -285,6 +304,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             kind: StreamKind::Inbox,
             name: names.inbox.clone(),
             subjects: account.inbox_bindings(),
+            storage: StorageType::File,
             max_age: Duration::ZERO,
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
@@ -297,6 +317,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             kind: StreamKind::CoreWork,
             name: names.core_work.clone(),
             subjects: account.core_work_bindings(),
+            storage: StorageType::File,
             max_age: Duration::ZERO,
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
@@ -309,6 +330,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             kind: StreamKind::DeliveryDead,
             name: names.delivery_dead.clone(),
             subjects: vec![account.delivery_dead()],
+            storage: StorageType::File,
             max_age: HOUR * 24 * 7,
             max_bytes: 64 * MIB,
             discard: DiscardPolicy::Old,
@@ -317,7 +339,25 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_message_size: None,
             duplicate_window: Some(DEAD_LETTER_DUPLICATE_WINDOW),
         },
+        handoff_stream(
+            StreamKind::Fedsend,
+            names.fedsend.clone(),
+            account.fedsend_binding(),
+        ),
+        handoff_stream(
+            StreamKind::FedsendDead,
+            names.fedsend_dead.clone(),
+            account.fedsend_dead_binding(),
+        ),
     ]
+}
+
+pub(crate) fn handoff_stream(kind: StreamKind, name: String, subject: String) -> StreamSpec {
+    let mut stream = StreamSpec::new(kind, name, vec![subject]);
+    stream.max_age = HOUR * 24 * 7;
+    stream.discard = DiscardPolicy::New;
+    stream.max_message_size = Some(MIB as i32);
+    stream
 }
 
 /// Rejects duplicate streams, malformed filters, and every pair of overlapping filters.
@@ -374,6 +414,14 @@ pub fn validate_consumer(
         })?;
 
     let valid_owner = match stream.kind {
+        StreamKind::Wake | StreamKind::Peer
+            if matches!(
+                consumer.durable.as_str(),
+                "m_prefrontal" | "m_prefrontal-core"
+            ) =>
+        {
+            true
+        }
         StreamKind::Wake | StreamKind::Peer | StreamKind::Effect => consumer
             .durable
             .strip_prefix("c_")

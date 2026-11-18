@@ -22,6 +22,8 @@ pub enum TokenKind {
     CoreWorkFamily,
     /// A declared KV bucket's local or fully derived name.
     BucketName,
+    FederationFamily,
+    FederationDestination,
 }
 
 impl TokenKind {
@@ -41,6 +43,8 @@ impl TokenKind {
             Self::InboxKind => "inbox_kind",
             Self::CoreWorkFamily => "core_work_family",
             Self::BucketName => "bucket_name",
+            Self::FederationFamily => "federation_family",
+            Self::FederationDestination => "federation_destination",
         }
     }
 }
@@ -178,8 +182,17 @@ fn validate_no_hyphen_token(
 /// it accepts ASCII letters because real NATS public nkeys are uppercase.
 /// `Account` and `EventName` use the narrower lexicon without the hyphen, and
 /// `EventVersion` accepts only `v{n}` (see [`validate_event_version`]).
+/// Room and agent ids cannot be `fed`: that address token is reserved for
+/// frames the bus module delivers from other computers.
 pub fn validate_token(kind: TokenKind, token: &str) -> Result<(), NamingError> {
     match kind {
+        TokenKind::RoomId | TokenKind::AgentId if token == "fed" => {
+            return Err(NamingError::new(
+                kind,
+                token,
+                "fed is reserved for frames delivered from other computers",
+            ));
+        }
         TokenKind::Account => return validate_account_token(token),
         TokenKind::CredentialPublic => return validate_credential_public(token),
         TokenKind::EventName => return validate_event_name(token),
@@ -191,6 +204,9 @@ pub fn validate_token(kind: TokenKind, token: &str) -> Result<(), NamingError> {
             if !["effect", "consult", "work", "campaign", "hire", "spec"].contains(&token) =>
         {
             return Err(NamingError::new(kind, token, "unknown core work family"));
+        }
+        TokenKind::FederationFamily if !crate::federation::FEDERATED_FAMILIES.contains(&token) => {
+            return Err(NamingError::new(kind, token, "unknown federation family"));
         }
         _ => {}
     }

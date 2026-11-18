@@ -414,6 +414,61 @@ pub struct DeliveryConsumerSpec {
     pub max_ack_pending: i64,
 }
 
+/// Federation-only module readers route handoffs and custody replies to agents.
+/// Unlimited delivery lets a reader nak with a delay throughout stream retention.
+pub fn federation_consumer_specs(
+    account: &AccountNames,
+    module_id: &str,
+) -> Result<Vec<DeliveryConsumerSpec>, EventConsumerError> {
+    if !["prefrontal-core", "prefrontal"].contains(&module_id) {
+        return Err(EventConsumerError::Naming(NamingError::new(
+            TokenKind::ModuleId,
+            module_id,
+            "federation readers belong to the delivery authority",
+        )));
+    }
+    let durable =
+        AccountNames::module_consumer_name(module_id).map_err(EventConsumerError::Naming)?;
+    let acct = account.account();
+    let specs = [
+        (
+            account.streams().peer.clone(),
+            vec![
+                format!("ck.{acct}.peer.fed.*.*.handoff"),
+                format!("ck.{acct}.peer.fed.*.custody"),
+            ],
+        ),
+        (
+            account.streams().wake.clone(),
+            vec![format!("ck.{acct}.wake.fed.*.*.handoff")],
+        ),
+    ]
+    .into_iter()
+    .map(|(stream, filter_subjects)| DeliveryConsumerSpec {
+        consumer: ConsumerSpec {
+            durable: durable.clone(),
+            stream,
+            filter_subjects,
+        },
+        pull: true,
+        ack_policy: AckPolicy::Explicit,
+        deliver_policy: DeliverPolicy::All,
+        ack_wait: Duration::from_secs(30),
+        max_deliver: -1,
+        max_ack_pending: 1_000,
+    })
+    .collect::<Vec<_>>();
+    crate::validate_consumers(
+        &specs
+            .iter()
+            .map(|spec| spec.consumer.clone())
+            .collect::<Vec<_>>(),
+        &crate::shipped_streams(account),
+    )
+    .map_err(EventConsumerError::Limits)?;
+    Ok(specs)
+}
+
 /// Core owns distinct module durables on INBOX and CORE_WORK. Diagnostics use
 /// `c_ckbus_dead` on each dead-letter stream, never an agent stream.
 pub fn delivery_consumer_specs(

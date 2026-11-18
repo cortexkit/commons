@@ -1,0 +1,198 @@
+{
+  "account": "box_0123456789abcdef0123456789abcdef",
+  "all_box_users_deny": [
+    {
+      "operation": "publish",
+      "subject": "ck.box_0123456789abcdef0123456789abcdef.*.fed.>"
+    }
+  ],
+  "box_id": "0123456789abcdef0123456789abcdef",
+  "box_streams": [
+    {
+      "discard": "new",
+      "duplicate_window_seconds": null,
+      "kind": "room",
+      "max_age_seconds": 604800,
+      "max_bytes": 1073741824,
+      "max_message_size": null,
+      "max_msgs_per_subject": null,
+      "name": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_ROOM",
+      "storage": "file",
+      "subjects": [
+        "ck.box_0123456789abcdef0123456789abcdef.room.*.post",
+        "ck.box_0123456789abcdef0123456789abcdef.room.fed.>"
+      ],
+      "work_queue": false
+    },
+    {
+      "discard": "new",
+      "duplicate_window_seconds": null,
+      "kind": "wake",
+      "max_age_seconds": 604800,
+      "max_bytes": 1073741824,
+      "max_message_size": null,
+      "max_msgs_per_subject": null,
+      "name": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_WAKE",
+      "storage": "file",
+      "subjects": [
+        "ck.box_0123456789abcdef0123456789abcdef.wake.*.fire",
+        "ck.box_0123456789abcdef0123456789abcdef.wake.fed.>"
+      ],
+      "work_queue": false
+    },
+    {
+      "discard": "new",
+      "duplicate_window_seconds": null,
+      "kind": "peer",
+      "max_age_seconds": 604800,
+      "max_bytes": 1073741824,
+      "max_message_size": null,
+      "max_msgs_per_subject": null,
+      "name": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_PEER",
+      "storage": "file",
+      "subjects": [
+        "ck.box_0123456789abcdef0123456789abcdef.peer.*.*.deliver",
+        "ck.box_0123456789abcdef0123456789abcdef.peer.fed.>"
+      ],
+      "work_queue": false
+    },
+    {
+      "discard": "new",
+      "duplicate_window_seconds": null,
+      "kind": "fedsend",
+      "max_age_seconds": 604800,
+      "max_bytes": 0,
+      "max_message_size": 1048576,
+      "max_msgs_per_subject": null,
+      "name": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_FEDSEND",
+      "storage": "file",
+      "subjects": [
+        "ck.box_0123456789abcdef0123456789abcdef.fedsend.>"
+      ],
+      "work_queue": false
+    },
+    {
+      "discard": "new",
+      "duplicate_window_seconds": null,
+      "kind": "fedsend_dead",
+      "max_age_seconds": 604800,
+      "max_bytes": 0,
+      "max_message_size": 1048576,
+      "max_msgs_per_subject": null,
+      "name": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_FEDSEND_DEAD",
+      "storage": "file",
+      "subjects": [
+        "ck.box_0123456789abcdef0123456789abcdef.fedsend_dead.>"
+      ],
+      "work_queue": false
+    }
+  ],
+  "bus_only_publish": "ck.box_0123456789abcdef0123456789abcdef.fedsend_dead.>",
+  "federation_account_stream": {
+    "discard": "new",
+    "duplicate_window_seconds": null,
+    "kind": "fedout",
+    "max_age_seconds": 604800,
+    "max_bytes": 0,
+    "max_message_size": 1048576,
+    "max_msgs_per_subject": null,
+    "name": "FEDOUT",
+    "storage": "file",
+    "subjects": [
+      "fedout.>"
+    ],
+    "work_queue": false
+  },
+  "fedsend_publish": {
+    "prefrontal": [
+      "ck.box_0123456789abcdef0123456789abcdef.fedsend.*.peer.>",
+      "ck.box_0123456789abcdef0123456789abcdef.fedsend.*.wake.>"
+    ],
+    "prefrontal-core": [
+      "ck.box_0123456789abcdef0123456789abcdef.fedsend.*.peer.>",
+      "ck.box_0123456789abcdef0123456789abcdef.fedsend.*.wake.>"
+    ]
+  },
+  "readers": {
+    "prefrontal": [
+      {
+        "ack_policy": "explicit",
+        "ack_wait_seconds": 30,
+        "deliver_policy": "all",
+        "durable": "m_prefrontal",
+        "filter_subjects": [
+          "ck.box_0123456789abcdef0123456789abcdef.peer.fed.*.*.handoff",
+          "ck.box_0123456789abcdef0123456789abcdef.peer.fed.*.custody"
+        ],
+        "max_ack_pending": 1000,
+        "max_deliver": -1,
+        "pull": true,
+        "stream": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_PEER"
+      },
+      {
+        "ack_policy": "explicit",
+        "ack_wait_seconds": 30,
+        "deliver_policy": "all",
+        "durable": "m_prefrontal",
+        "filter_subjects": [
+          "ck.box_0123456789abcdef0123456789abcdef.wake.fed.*.*.handoff"
+        ],
+        "max_ack_pending": 1000,
+        "max_deliver": -1,
+        "pull": true,
+        "stream": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_WAKE"
+      }
+    ],
+    "prefrontal-core": [
+      {
+        "ack_policy": "explicit",
+        "ack_wait_seconds": 30,
+        "deliver_policy": "all",
+        "durable": "m_prefrontal-core",
+        "filter_subjects": [
+          "ck.box_0123456789abcdef0123456789abcdef.peer.fed.*.*.handoff",
+          "ck.box_0123456789abcdef0123456789abcdef.peer.fed.*.custody"
+        ],
+        "max_ack_pending": 1000,
+        "max_deliver": -1,
+        "pull": true,
+        "stream": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_PEER"
+      },
+      {
+        "ack_policy": "explicit",
+        "ack_wait_seconds": 30,
+        "deliver_policy": "all",
+        "durable": "m_prefrontal-core",
+        "filter_subjects": [
+          "ck.box_0123456789abcdef0123456789abcdef.wake.fed.*.*.handoff"
+        ],
+        "max_ack_pending": 1000,
+        "max_deliver": -1,
+        "pull": true,
+        "stream": "CK_BOX_0123456789ABCDEF0123456789ABCDEF_WAKE"
+      }
+    ]
+  },
+  "subjects": {
+    "peer_custody": {
+      "inbound": "ck.box_0123456789abcdef0123456789abcdef.peer.fed.0123456789abcdef0123456789abcdef.custody",
+      "outbound": "ck.box_0123456789abcdef0123456789abcdef.fedsend.0123456789abcdef0123456789abcdef.peer.custody"
+    },
+    "peer_handoff": {
+      "inbound": "ck.box_0123456789abcdef0123456789abcdef.peer.fed.0123456789abcdef0123456789abcdef.agent_a.handoff",
+      "outbound": "ck.box_0123456789abcdef0123456789abcdef.fedsend.0123456789abcdef0123456789abcdef.peer.agent_a.handoff"
+    },
+    "room": {
+      "inbound": "ck.box_0123456789abcdef0123456789abcdef.room.fed.0123456789abcdef0123456789abcdef.room_a.post",
+      "outbound": "ck.box_0123456789abcdef0123456789abcdef.fedsend.0123456789abcdef0123456789abcdef.room.room_a.post"
+    },
+    "sync": {
+      "inbound": "ck.box_0123456789abcdef0123456789abcdef.sync.fed.0123456789abcdef0123456789abcdef.state",
+      "outbound": "ck.box_0123456789abcdef0123456789abcdef.fedsend.0123456789abcdef0123456789abcdef.sync.state"
+    },
+    "wake_handoff": {
+      "inbound": "ck.box_0123456789abcdef0123456789abcdef.wake.fed.0123456789abcdef0123456789abcdef.agent_a.handoff",
+      "outbound": "ck.box_0123456789abcdef0123456789abcdef.fedsend.0123456789abcdef0123456789abcdef.wake.agent_a.handoff"
+    }
+  }
+}
