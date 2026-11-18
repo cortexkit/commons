@@ -14,6 +14,11 @@ per room, evicting that room's oldest message first, with no age limit and a
 256 KiB message-size cap. Its leaf read/consumer API permissions match HUB_IDLOG,
 with no purge or delete authority. `fleet` is not a canonical box id.
 
+`HUB_MEMORY` is also account-wide. Its binding and leaf publish grant both use
+`ck.fleet.memory.*.*`, with positions for the memory kind and owner. It has no
+age or per-subject message limit, caps messages at 64 KiB, and refuses new
+publishes when it reaches 1 GiB. Its leaf read and consumer APIs match HUB_ROOMS.
+
 `local.json` pins the box-account handoff streams, inbound/outbound subjects,
 universal publish deny, both delivery authority ids' outbound grants and module
 readers, and the federation account's separate `FEDOUT` stream. Box-account names

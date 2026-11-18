@@ -429,18 +429,14 @@ pub fn federation_consumer_specs(
     }
     let durable =
         AccountNames::module_consumer_name(module_id).map_err(EventConsumerError::Naming)?;
-    let acct = account.account();
     let specs = [
         (
             account.streams().peer.clone(),
-            vec![
-                format!("ck.{acct}.peer.fed.*.*.handoff"),
-                format!("ck.{acct}.peer.fed.*.custody"),
-            ],
+            account.peer_federated_bindings().into(),
         ),
         (
             account.streams().wake.clone(),
-            vec![format!("ck.{acct}.wake.fed.*.*.handoff")],
+            vec![account.wake_federated_binding()],
         ),
     ]
     .into_iter()

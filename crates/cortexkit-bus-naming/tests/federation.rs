@@ -6,8 +6,8 @@ use cortexkit_bus_naming::{
     box_account_denies, bus_permissions, delivery_authority_permissions, federation_consumer_specs,
     flow_engine_permissions, participant_permissions, shipped_streams, system_permissions,
     validate_consumer, validate_streams, AccountNames, ConsumerSpec, DiscardPolicy, Operation,
-    StorageType, StreamKind, StreamSpec, EVENT_CONSUMERS, GIB, HOUR, LIVE_HINT_READERS, MIB,
-    MODULE_BUCKETS,
+    StorageType, StreamKind, StreamSpec, TokenKind, EVENT_CONSUMERS, GIB, HOUR, LIVE_HINT_READERS,
+    MIB, MODULE_BUCKETS,
 };
 use serde_json::{json, Value};
 
@@ -50,7 +50,8 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
     let local = shipped_streams(&AccountNames::derive("box_example").unwrap());
     for hub in [HubKind::SelfHosted, HubKind::Hosted] {
         let specs = hub_streams(&box_id, hub);
-        assert_eq!(specs.len(), 5);
+        assert_eq!(specs.len(), 6);
+        assert!(specs.contains(&hub_memory_stream()));
         let streams: Vec<_> = specs.iter().map(|spec| spec.stream.clone()).collect();
         validate_streams(&streams).unwrap();
         for spec in &specs {
@@ -66,6 +67,7 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
         StreamKind::HubInbox
             | StreamKind::HubIdlog
             | StreamKind::HubRooms
+            | StreamKind::HubMemory
             | StreamKind::KvResidence
             | StreamKind::ObjCuts
             | StreamKind::Fedout
@@ -118,11 +120,54 @@ fn subject_matches(pattern: &str, subject: &str) -> bool {
 }
 
 #[test]
+fn federation_streams_route_local_and_inbound_publishes_to_distinct_bindings() {
+    let account = AccountNames::from_roster_host_id(SAMPLE_BOX).unwrap();
+    let origin = BoxId::parse("fedcba9876543210fedcba9876543210").unwrap();
+    let streams = shipped_streams(&account);
+    let routes = [
+        (
+            StreamKind::Room,
+            "room",
+            account.room_post("room_a").unwrap(),
+            &[&["room_a", "post"][..]][..],
+        ),
+        (
+            StreamKind::Wake,
+            "wake",
+            account.wake_fire("agent_a").unwrap(),
+            &[&["agent_a", "handoff"][..]][..],
+        ),
+        (
+            StreamKind::Peer,
+            "peer",
+            account.peer_delivery("agent_a", "session_a").unwrap(),
+            &[&["agent_a", "handoff"][..], &["custody"][..]][..],
+        ),
+    ];
+    for (kind, family, local, destinations) in routes {
+        let stream = streams.iter().find(|stream| stream.kind == kind).unwrap();
+        let matching_bindings = |subject: &str| {
+            stream
+                .subjects
+                .iter()
+                .enumerate()
+                .filter_map(|(index, binding)| subject_matches(binding, subject).then_some(index))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(matching_bindings(&local), [0], "{local}");
+        for (index, dest) in destinations.iter().enumerate() {
+            let inbound = account.inbound_federated(&origin, family, dest).unwrap();
+            assert_eq!(matching_bindings(&inbound), [index + 1], "{inbound}");
+        }
+    }
+}
+
+#[test]
 fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
     for box_text in [SAMPLE_BOX, "fedcba9876543210fedcba9876543210"] {
         let box_id = BoxId::parse(box_text).unwrap();
         let grant = leaf_user_grant(&box_id);
-        assert_eq!(grant.publish.len(), 50);
+        assert_eq!(grant.publish.len(), 59);
         assert_eq!(grant.subscribe.len(), 5);
         for entries in [&grant.publish, &grant.subscribe] {
             assert_eq!(entries.iter().collect::<BTreeSet<_>>().len(), entries.len());
@@ -176,6 +221,7 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
         for stream in [
             HUB_IDLOG_STREAM,
             HUB_ROOMS_STREAM,
+            HUB_MEMORY_STREAM,
             RESIDENCE_STREAM,
             CUTS_STREAM,
         ] {
@@ -196,6 +242,20 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
         assert!(!may_publish("$JS.hub.API.$KV.other.key"));
         assert!(!may_publish("$O.other.C.chunk"));
         assert!(may_publish("ck.fleet.room.room_a"));
+        assert!(may_publish("ck.fleet.memory.project.pj-example"));
+        assert!(!may_publish("ck.fleet.memory.project"));
+        assert!(!may_publish("ck.fleet.memory.project.pj-example.extra"));
+        for suffix in [
+            "STREAM.INFO.HUB_MEMORY",
+            "STREAM.MSG.GET.HUB_MEMORY",
+            "DIRECT.GET.HUB_MEMORY",
+            "DIRECT.GET.HUB_MEMORY.ck.fleet.memory.project.pj-example",
+            "CONSUMER.CREATE.HUB_MEMORY.example",
+            "CONSUMER.INFO.HUB_MEMORY.example",
+        ] {
+            assert!(may_publish(&format!("$JS.hub.API.{suffix}")), "{suffix}");
+        }
+        assert!(!may_publish("$JS.hub.API.STREAM.MSG.DELETE.HUB_MEMORY"));
         for subject in ["fedout.frame", "fedout.box.peer.agent.handoff"] {
             assert!(!may_publish(subject));
             assert!(!grant
@@ -227,6 +287,7 @@ fn base_stream_json(stream: &StreamSpec) -> Value {
             StreamKind::HubInbox => "hub_inbox",
             StreamKind::HubIdlog => "hub_idlog",
             StreamKind::HubRooms => "hub_rooms",
+            StreamKind::HubMemory => "hub_memory",
             StreamKind::KvResidence => "kv_residence",
             StreamKind::ObjCuts => "obj_cuts",
             _ => panic!("not a hub stream"),
@@ -278,12 +339,14 @@ fn federation_golden_matches_bytes() {
             "module_deliver_prefix": module_deliver_prefix(&box_id, "example-module").unwrap(),
             "cuts_bucket": CUTS_BUCKET,
             "hub_room": hub_room_subject("room_a").unwrap(),
+            "hub_memory": hub_memory_subject(MEMORY_KIND_PROJECT, "pj-example").unwrap(),
         },
         "grant": { "publish": grant.publish, "subscribe": grant.subscribe },
         "streams": {
             "hub_inbox": stream_json(&hub_inbox_stream(&box_id)),
             "hub_idlog": stream_json(&hub_idlog_stream()),
             "hub_rooms": stream_json(&hub_rooms_stream()),
+            "hub_memory": stream_json(&hub_memory_stream()),
             "residence_self_hosted": residence_json(HubKind::SelfHosted),
             "residence_hosted": residence_json(HubKind::Hosted),
             "cuts": stream_json(&cuts_object_store()),
@@ -362,6 +425,81 @@ fn federation_handoff_names_validate_families_and_destination_tokens() {
     for room in ["", "room.a", "*", ">", "Room", "room "] {
         assert!(hub_room_subject(room).is_err());
     }
+}
+
+#[test]
+fn federation_memory_subject_validates_kind_and_owner() {
+    for (kind, owner, expected) in [
+        (
+            MEMORY_KIND_PROJECT,
+            "pj-example",
+            "ck.fleet.memory.project.pj-example",
+        ),
+        (
+            MEMORY_KIND_WORKSPACE,
+            "ws_example",
+            "ck.fleet.memory.workspace.ws_example",
+        ),
+        (MEMORY_KIND_GLOBAL, "all", "ck.fleet.memory.global.all"),
+        (
+            MEMORY_KIND_OBSERVATION,
+            "all",
+            "ck.fleet.memory.observation.all",
+        ),
+        (
+            MEMORY_KIND_PRIMER,
+            "pj-example",
+            "ck.fleet.memory.primer.pj-example",
+        ),
+    ] {
+        assert_eq!(hub_memory_subject(kind, owner).unwrap(), expected);
+    }
+    for kind in ["", "fed", "Project", "projects", "project.extra", "*", ">"] {
+        let error = hub_memory_subject(kind, "pj-example").unwrap_err();
+        assert_eq!(error.kind(), TokenKind::MemoryKind);
+        assert_eq!(error.token(), kind);
+    }
+    for kind in [
+        MEMORY_KIND_PROJECT,
+        MEMORY_KIND_WORKSPACE,
+        MEMORY_KIND_PRIMER,
+    ] {
+        for owner in ["", "fed", "owner.extra", "WithCaps", "owner ", "*", ">"] {
+            let error = hub_memory_subject(kind, owner).unwrap_err();
+            assert_eq!(error.kind(), TokenKind::MemoryOwner);
+            assert_eq!(error.token(), owner);
+        }
+    }
+    for kind in [MEMORY_KIND_GLOBAL, MEMORY_KIND_OBSERVATION] {
+        let error = hub_memory_subject(kind, "pj-example").unwrap_err();
+        assert_eq!(error.kind(), TokenKind::MemoryOwner);
+        assert_eq!(error.token(), "pj-example");
+    }
+}
+
+#[test]
+fn federation_memory_stream_preserves_history_and_matches_hub_placement() {
+    let memory = hub_memory_stream();
+    assert_eq!(memory.stream.kind, StreamKind::HubMemory);
+    assert_eq!(memory.stream.name, "HUB_MEMORY");
+    assert_eq!(memory.stream.subjects, ["ck.fleet.memory.*.*"]);
+    assert_eq!(memory.stream.max_age, Duration::ZERO);
+    assert_eq!(memory.stream.max_bytes, 1_073_741_824);
+    assert_eq!(memory.stream.discard, DiscardPolicy::New);
+    assert_eq!(memory.stream.max_message_size, Some(65_536));
+    assert_eq!(memory.stream.max_msgs_per_subject, None);
+
+    let rooms = hub_rooms_stream();
+    assert_eq!(memory.stream.storage, rooms.stream.storage);
+    assert_eq!(memory.stream.work_queue, rooms.stream.work_queue);
+    assert_eq!(
+        memory.stream.duplicate_window,
+        rooms.stream.duplicate_window
+    );
+    assert_eq!(memory.replicas, rooms.replicas);
+    assert_eq!(memory.allow_direct, rooms.allow_direct);
+    assert_eq!(memory.allow_rollup_hdrs, rooms.allow_rollup_hdrs);
+    assert_eq!(memory.deny_delete, rooms.deny_delete);
 }
 
 #[test]

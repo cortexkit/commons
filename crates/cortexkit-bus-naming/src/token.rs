@@ -24,6 +24,8 @@ pub enum TokenKind {
     BucketName,
     FederationFamily,
     FederationDestination,
+    MemoryKind,
+    MemoryOwner,
 }
 
 impl TokenKind {
@@ -45,6 +47,8 @@ impl TokenKind {
             Self::BucketName => "bucket_name",
             Self::FederationFamily => "federation_family",
             Self::FederationDestination => "federation_destination",
+            Self::MemoryKind => "memory_kind",
+            Self::MemoryOwner => "memory_owner",
         }
     }
 }
@@ -182,11 +186,11 @@ fn validate_no_hyphen_token(
 /// it accepts ASCII letters because real NATS public nkeys are uppercase.
 /// `Account` and `EventName` use the narrower lexicon without the hyphen, and
 /// `EventVersion` accepts only `v{n}` (see [`validate_event_version`]).
-/// Room and agent ids cannot be `fed`: that address token is reserved for
-/// frames the bus module delivers from other computers.
+/// Room ids, agent ids, and memory owners cannot be `fed`: that address token
+/// is reserved for frames the bus module delivers from other computers.
 pub fn validate_token(kind: TokenKind, token: &str) -> Result<(), NamingError> {
     match kind {
-        TokenKind::RoomId | TokenKind::AgentId if token == "fed" => {
+        TokenKind::RoomId | TokenKind::AgentId | TokenKind::MemoryOwner if token == "fed" => {
             return Err(NamingError::new(
                 kind,
                 token,
@@ -207,6 +211,9 @@ pub fn validate_token(kind: TokenKind, token: &str) -> Result<(), NamingError> {
         }
         TokenKind::FederationFamily if !crate::federation::FEDERATED_FAMILIES.contains(&token) => {
             return Err(NamingError::new(kind, token, "unknown federation family"));
+        }
+        TokenKind::MemoryKind if !crate::federation::MEMORY_KINDS.contains(&token) => {
+            return Err(NamingError::new(kind, token, "unknown memory kind"));
         }
         _ => {}
     }

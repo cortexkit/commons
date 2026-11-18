@@ -42,34 +42,33 @@ fn delivery_builders_validate_closed_families_and_preserve_identity() {
 fn delivery_existing_six_stream_names_and_subjects_are_wire_compatible() {
     let names = AccountNames::derive("box_local").unwrap();
     let streams = shipped_streams(&names);
-    let expected = [
-        ("CK_BOX_LOCAL_ROOM", "ck.box_local.room.*.post"),
-        ("CK_BOX_LOCAL_WAKE", "ck.box_local.wake.*.fire"),
-        ("CK_BOX_LOCAL_PEER", "ck.box_local.peer.*.*.deliver"),
-        ("CK_BOX_LOCAL_EFFECT", "ck.box_local.effect.*.*.intent"),
-        ("CK_BOX_LOCAL_EFFECT_DEAD", "ck.box_local.effect.dead"),
-        ("CK_BOX_LOCAL_EVENT", "ck.box_local.event.>"),
+    let expected: [(&str, &[&str]); 6] = [
+        (
+            "CK_BOX_LOCAL_ROOM",
+            &["ck.box_local.room.*.post", "ck.box_local.room.fed.*.*.post"],
+        ),
+        (
+            "CK_BOX_LOCAL_WAKE",
+            &[
+                "ck.box_local.wake.*.fire",
+                "ck.box_local.wake.fed.*.*.handoff",
+            ],
+        ),
+        (
+            "CK_BOX_LOCAL_PEER",
+            &[
+                "ck.box_local.peer.*.*.deliver",
+                "ck.box_local.peer.fed.*.*.handoff",
+                "ck.box_local.peer.fed.*.custody",
+            ],
+        ),
+        ("CK_BOX_LOCAL_EFFECT", &["ck.box_local.effect.*.*.intent"]),
+        ("CK_BOX_LOCAL_EFFECT_DEAD", &["ck.box_local.effect.dead"]),
+        ("CK_BOX_LOCAL_EVENT", &["ck.box_local.event.>"]),
     ];
-    for (spec, (name, subject)) in streams.iter().zip(expected) {
+    for (spec, (name, subjects)) in streams.iter().zip(expected) {
         assert_eq!(spec.name, name);
-        assert_eq!(spec.subjects[0], subject);
-        if matches!(
-            spec.kind,
-            StreamKind::Room | StreamKind::Wake | StreamKind::Peer
-        ) {
-            let family = match spec.kind {
-                StreamKind::Room => "room",
-                StreamKind::Wake => "wake",
-                StreamKind::Peer => "peer",
-                _ => unreachable!(),
-            };
-            assert_eq!(
-                spec.subjects,
-                [subject.to_owned(), format!("ck.box_local.{family}.fed.>")]
-            );
-        } else {
-            assert_eq!(spec.subjects, [subject]);
-        }
+        assert_eq!(spec.subjects, subjects);
     }
 }
 

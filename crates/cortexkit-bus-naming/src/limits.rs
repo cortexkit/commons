@@ -41,6 +41,7 @@ pub enum StreamKind {
     HubInbox,
     HubIdlog,
     HubRooms,
+    HubMemory,
     KvResidence,
     ObjCuts,
 }
@@ -623,5 +624,71 @@ fn pattern_subset(candidate: &[&str], binding: &[&str]) -> bool {
             let head_is_subset = binding_head == candidate_head || *binding_head == "*";
             head_is_subset && pattern_subset(&candidate[1..], &binding[1..])
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::federation::{fedout_stream, hub_streams, BoxId, HubKind};
+    use crate::{
+        delivery_consumer_specs, event_consumer_specs, federation_consumer_specs,
+        flow_engine_consumer_spec,
+    };
+
+    fn record_overlaps(name: &str, subjects: &[String], overlaps: &mut Vec<String>) {
+        for (index, left) in subjects.iter().enumerate() {
+            for right in &subjects[index + 1..] {
+                if subject_filters_overlap(left, right).unwrap() {
+                    overlaps.push(format!("{name}: {left} overlaps {right}"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shipped_stream_and_consumer_subjects_do_not_overlap_within_specs() {
+        let box_id = BoxId::parse("0123456789abcdef0123456789abcdef").unwrap();
+        let account = AccountNames::from_roster_host_id(box_id.as_str()).unwrap();
+        let mut overlaps = Vec::new();
+        let streams = shipped_streams(&account).into_iter().chain(
+            [HubKind::SelfHosted, HubKind::Hosted]
+                .into_iter()
+                .flat_map(|hub| hub_streams(&box_id, hub))
+                .map(|spec| spec.stream)
+                .chain(std::iter::once(fedout_stream())),
+        );
+        for stream in streams {
+            record_overlaps(&stream.name, &stream.subjects, &mut overlaps);
+        }
+
+        let consumers = event_consumer_specs(&account)
+            .unwrap()
+            .into_iter()
+            .chain(std::iter::once(
+                flow_engine_consumer_spec(&account, "basal").unwrap(),
+            ))
+            .map(|spec| spec.consumer)
+            .chain(
+                delivery_consumer_specs(&account)
+                    .unwrap()
+                    .into_iter()
+                    .chain(
+                        ["prefrontal-core", "prefrontal"]
+                            .into_iter()
+                            .flat_map(|module| {
+                                federation_consumer_specs(&account, module).unwrap()
+                            }),
+                    )
+                    .map(|spec| spec.consumer),
+            );
+        for consumer in consumers {
+            record_overlaps(
+                &format!("{}/{}", consumer.stream, consumer.durable),
+                &consumer.filter_subjects,
+                &mut overlaps,
+            );
+        }
+        assert!(overlaps.is_empty(), "{}", overlaps.join("\n"));
     }
 }

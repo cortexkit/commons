@@ -20,7 +20,7 @@
       "storage": "file",
       "subjects": [
         "ck.box_0123456789abcdef0123456789abcdef.room.*.post",
-        "ck.box_0123456789abcdef0123456789abcdef.room.fed.>"
+        "ck.box_0123456789abcdef0123456789abcdef.room.fed.*.*.post"
       ],
       "work_queue": false
     },
@@ -36,7 +36,7 @@
       "storage": "file",
       "subjects": [
         "ck.box_0123456789abcdef0123456789abcdef.wake.*.fire",
-        "ck.box_0123456789abcdef0123456789abcdef.wake.fed.>"
+        "ck.box_0123456789abcdef0123456789abcdef.wake.fed.*.*.handoff"
       ],
       "work_queue": false
     },
@@ -52,7 +52,8 @@
       "storage": "file",
       "subjects": [
         "ck.box_0123456789abcdef0123456789abcdef.peer.*.*.deliver",
-        "ck.box_0123456789abcdef0123456789abcdef.peer.fed.>"
+        "ck.box_0123456789abcdef0123456789abcdef.peer.fed.*.*.handoff",
+        "ck.box_0123456789abcdef0123456789abcdef.peer.fed.*.custody"
       ],
       "work_queue": false
     },

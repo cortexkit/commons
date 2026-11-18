@@ -72,7 +72,7 @@ bytes; the value is exactly what `tool.views` serves for that pin. Each bucket h
 revisions without unbounded storage. The byte cap is a budget, not a key-count
 limit.
 
-## Cross-computer handoffs and shared rooms
+## Cross-computer handoffs, rooms, and memories
 
 `federation` describes hub-only streams, the federation account's `FEDOUT`,
 canonical `BoxId`s and the per-computer leaf grant. Local streams use the account
@@ -100,5 +100,19 @@ naks can defer a frame throughout the seven-day retention.
 `HUB_ROOMS` stores `ck.fleet.room.{room_id}` with a per-room history cap, not a
 box-scoped subject (`fleet` cannot be a canonical box id). Its leaf APIs match
 HUB_IDLOG's read and consumer APIs and permit neither stream purge nor delete.
+
+`HUB_MEMORY` stores memory changes on `ck.fleet.memory.{kind}.{owner}`. Publishers
+encrypt each change before sending it so the hub cannot read its contents.
+Use `federation::hub_memory_subject` to validate the kind and owner. `project` and
+`primer` use a project ID, `workspace` uses a workspace ID, and `global` and
+`observation` use `all`. The owner is one token and cannot be `fed`. The hub
+binding and leaf publish grant accept exactly those two token positions.
+
+Each computer reads changes in stream order with its own durable consumer.
+To let new computers replay from the beginning, the stream has no expiry and
+refuses new writes once it reaches 1 GiB. It caps each message at 64 KiB. Leaf
+users have the same read and consumer APIs as for `HUB_ROOMS`, not purge or
+deletion access to stored changes.
+
 The bus module owns the box-account import/export rows; they are not described
 by this crate.

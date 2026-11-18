@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.2
+
+- Add account-wide `HUB_MEMORY` and typed fleet memory subjects for replicating
+  agent memories. The stream retains changes without expiry, refuses new
+  writes at 1 GiB, and caps messages at 64 KiB. Leaf users can publish and read
+  without purge or deletion access. Unlike `HUB_ROOMS`, the stream binding and
+  leaf publish grant accept exactly two routing tokens (`kind.owner`).
+- Fix ROOM, WAKE and PEER streams that NATS refused to create: 0.5.1 bound
+  each to its local subject plus an overlapping `fed.>` catch-all. They now
+  bind exact federated subjects for room posts, wake and peer handoffs, and
+  peer custody replies. Publish subjects and consumer filters are unchanged.
+
 ## 0.5.1
 
 - Add box-account FEDSEND and bus-only FEDSEND_DEAD, federation-account FEDOUT,

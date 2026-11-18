@@ -13,6 +13,20 @@ pub const FEDERATED_FAMILIES: [&str; 4] = ["room", "wake", "peer", "sync"];
 pub const HUB_IDLOG_STREAM: &str = "HUB_IDLOG";
 pub const HUB_ROOMS_STREAM: &str = "HUB_ROOMS";
 pub const HUB_ROOMS_SUBJECT: &str = "ck.fleet.room.>";
+pub const HUB_MEMORY_STREAM: &str = "HUB_MEMORY";
+pub const HUB_MEMORY_SUBJECT: &str = "ck.fleet.memory.*.*";
+pub const MEMORY_KIND_PROJECT: &str = "project";
+pub const MEMORY_KIND_WORKSPACE: &str = "workspace";
+pub const MEMORY_KIND_GLOBAL: &str = "global";
+pub const MEMORY_KIND_OBSERVATION: &str = "observation";
+pub const MEMORY_KIND_PRIMER: &str = "primer";
+pub const MEMORY_KINDS: [&str; 5] = [
+    MEMORY_KIND_PROJECT,
+    MEMORY_KIND_WORKSPACE,
+    MEMORY_KIND_GLOBAL,
+    MEMORY_KIND_OBSERVATION,
+    MEMORY_KIND_PRIMER,
+];
 pub const FEDOUT_STREAM: &str = "FEDOUT";
 pub const FEDOUT_SUBJECT: &str = "fedout.>";
 pub const IDLOG_SUBJECT: &str = "ck.fleet.idlog";
@@ -80,6 +94,22 @@ pub fn inbox_stream_name(box_id: &BoxId) -> String {
 pub fn hub_room_subject(room_id: &str) -> Result<String, NamingError> {
     validate_token(TokenKind::RoomId, room_id)?;
     Ok(format!("ck.fleet.room.{room_id}"))
+}
+
+/// Address a shared memory on the hub rather than on an individual computer.
+/// Project memories and primers use a project ID, workspace memories use a
+/// workspace ID, and global memories and observations use `all`.
+pub fn hub_memory_subject(kind: &str, owner: &str) -> Result<String, NamingError> {
+    validate_token(TokenKind::MemoryKind, kind)?;
+    validate_token(TokenKind::MemoryOwner, owner)?;
+    if matches!(kind, MEMORY_KIND_GLOBAL | MEMORY_KIND_OBSERVATION) && owner != "all" {
+        return Err(NamingError::new(
+            TokenKind::MemoryOwner,
+            owner,
+            "global and observation memories require owner all",
+        ));
+    }
+    Ok(format!("ck.fleet.memory.{kind}.{owner}"))
 }
 
 /// Sealed outbound frames live in the federation account, never the box account.
@@ -194,6 +224,21 @@ pub fn hub_rooms_stream() -> HubStreamSpec {
     spec
 }
 
+pub fn hub_memory_stream() -> HubStreamSpec {
+    let mut stream = StreamSpec::new(
+        StreamKind::HubMemory,
+        HUB_MEMORY_STREAM.to_owned(),
+        vec![HUB_MEMORY_SUBJECT.to_owned()],
+    );
+    // New computers replay from the start, so refuse new writes rather than evict history.
+    stream.discard = DiscardPolicy::New;
+    stream.max_bytes = GIB;
+    stream.max_message_size = Some(64 * 1024);
+    let mut spec = HubStreamSpec::new(stream);
+    spec.allow_direct = true;
+    spec
+}
+
 pub fn residence_bucket(hub: HubKind) -> KvBucketSpec {
     let mut stream = StreamSpec::new(
         StreamKind::KvResidence,
@@ -242,6 +287,7 @@ pub fn hub_streams(box_id: &BoxId, hub: HubKind) -> Vec<HubStreamSpec> {
         hub_inbox_stream(box_id),
         hub_idlog_stream(),
         hub_rooms_stream(),
+        hub_memory_stream(),
         residence_bucket(hub).backing_stream,
         cuts_object_store(),
     ]
@@ -284,10 +330,12 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
         format!("$O.{CUTS_BUCKET}.>"),
         IDLOG_SUBJECT.to_owned(),
         HUB_ROOMS_SUBJECT.to_owned(),
+        HUB_MEMORY_SUBJECT.to_owned(),
     ]);
     for stream in [
         HUB_IDLOG_STREAM,
         HUB_ROOMS_STREAM,
+        HUB_MEMORY_STREAM,
         RESIDENCE_STREAM,
         CUTS_STREAM,
     ] {
@@ -304,7 +352,7 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
             publish.push(format!("{HUB_API_PREFIX}.{suffix}"));
         }
     }
-    // Releasing an object purges its chunks; the log and KV bucket get no purge.
+    // Releasing an object purges its chunks; the other shared streams get no purge.
     publish.push(format!("{HUB_API_PREFIX}.STREAM.PURGE.{CUTS_STREAM}"));
     LeafUserGrant::new(
         publish,

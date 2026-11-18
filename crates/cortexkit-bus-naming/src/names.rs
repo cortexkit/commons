@@ -154,7 +154,10 @@ impl AccountNames {
     }
 
     pub fn room_bindings(&self) -> Vec<String> {
-        vec![self.room_binding(), self.federated_binding("room")]
+        vec![
+            self.room_binding(),
+            self.federated_binding("room", "*.post"),
+        ]
     }
 
     pub fn wake_fire(&self, agent_id: &str) -> Result<String, NamingError> {
@@ -167,7 +170,11 @@ impl AccountNames {
     }
 
     pub fn wake_bindings(&self) -> Vec<String> {
-        vec![self.wake_binding(), self.federated_binding("wake")]
+        vec![self.wake_binding(), self.wake_federated_binding()]
+    }
+
+    pub(crate) fn wake_federated_binding(&self) -> String {
+        self.federated_binding("wake", "*.handoff")
     }
 
     pub fn peer_delivery(&self, agent_id: &str, session_id: &str) -> Result<String, NamingError> {
@@ -194,11 +201,20 @@ impl AccountNames {
     }
 
     pub fn peer_bindings(&self) -> Vec<String> {
-        vec![self.peer_binding(), self.federated_binding("peer")]
+        let [handoff, custody] = self.peer_federated_bindings();
+        vec![self.peer_binding(), handoff, custody]
     }
 
-    fn federated_binding(&self, family: &str) -> String {
-        format!("ck.{}.{family}.fed.>", self.account)
+    pub(crate) fn peer_federated_bindings(&self) -> [String; 2] {
+        [
+            self.federated_binding("peer", "*.handoff"),
+            self.federated_binding("peer", "custody"),
+        ]
+    }
+
+    fn federated_binding(&self, family: &str, destination: &str) -> String {
+        // A trailing > would overlap local bindings such as ck.<account>.room.*.post.
+        format!("ck.{}.{family}.fed.*.{destination}", self.account)
     }
 
     pub fn fedsend_binding(&self) -> String {

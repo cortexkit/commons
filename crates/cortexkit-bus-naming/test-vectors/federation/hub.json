@@ -27,6 +27,7 @@
       "$O.cuts.>",
       "ck.fleet.idlog",
       "ck.fleet.room.>",
+      "ck.fleet.memory.*.*",
       "$JS.hub.API.STREAM.INFO.HUB_IDLOG",
       "$JS.hub.API.STREAM.MSG.GET.HUB_IDLOG",
       "$JS.hub.API.DIRECT.GET.HUB_IDLOG",
@@ -43,6 +44,14 @@
       "$JS.hub.API.CONSUMER.CREATE.HUB_ROOMS.>",
       "$JS.hub.API.CONSUMER.INFO.HUB_ROOMS.>",
       "$JS.hub.API.CONSUMER.DELETE.HUB_ROOMS.>",
+      "$JS.hub.API.STREAM.INFO.HUB_MEMORY",
+      "$JS.hub.API.STREAM.MSG.GET.HUB_MEMORY",
+      "$JS.hub.API.DIRECT.GET.HUB_MEMORY",
+      "$JS.hub.API.DIRECT.GET.HUB_MEMORY.>",
+      "$JS.hub.API.CONSUMER.CREATE.HUB_MEMORY",
+      "$JS.hub.API.CONSUMER.CREATE.HUB_MEMORY.>",
+      "$JS.hub.API.CONSUMER.INFO.HUB_MEMORY.>",
+      "$JS.hub.API.CONSUMER.DELETE.HUB_MEMORY.>",
       "$JS.hub.API.STREAM.INFO.KV_residence",
       "$JS.hub.API.STREAM.MSG.GET.KV_residence",
       "$JS.hub.API.DIRECT.GET.KV_residence",
@@ -72,6 +81,7 @@
   "names": {
     "cuts_bucket": "cuts",
     "deliver_prefix": "ckdel.0123456789abcdef0123456789abcdef",
+    "hub_memory": "ck.fleet.memory.project.pj-example",
     "hub_room": "ck.fleet.room.room_a",
     "inbox_stream": "INBOX_0123456789abcdef0123456789abcdef",
     "module_deliver_prefix": "ckdel.0123456789abcdef0123456789abcdef.example-module"
@@ -135,6 +145,25 @@
         "ck.0123456789abcdef0123456789abcdef.wake.>",
         "ck.0123456789abcdef0123456789abcdef.peer.>",
         "ck.0123456789abcdef0123456789abcdef.sync.>"
+      ],
+      "work_queue": false
+    },
+    "hub_memory": {
+      "allow_direct": true,
+      "allow_rollup_hdrs": false,
+      "deny_delete": false,
+      "discard": "new",
+      "duplicate_window_seconds": null,
+      "kind": "hub_memory",
+      "max_age_seconds": 0,
+      "max_bytes": 1073741824,
+      "max_message_size": 65536,
+      "max_msgs_per_subject": null,
+      "name": "HUB_MEMORY",
+      "replicas": null,
+      "storage": "file",
+      "subjects": [
+        "ck.fleet.memory.*.*"
       ],
       "work_queue": false
     },
