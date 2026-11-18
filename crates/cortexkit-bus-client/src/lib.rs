@@ -4,9 +4,11 @@ mod binding;
 mod buckets;
 mod credentials;
 mod events;
+mod hub;
 
 pub use buckets::{Bucket, BucketEntry, BucketItem, BucketWatch};
 pub use events::{EventDelivery, EventItem, EventReader, MalformedDelivery, MalformedReason};
+pub use hub::HubClient;
 
 use std::{
     sync::{Arc, RwLock},
@@ -24,7 +26,7 @@ const CONTENT_DIGEST_HEADER: &str = "Ck-Content-Digest";
 use subc_client_rs::SubcConsumer;
 use tokio::sync::watch;
 
-use credentials::{CredentialManager, SubcTransport};
+use credentials::CredentialManager;
 
 /// Errors contain refusal codes, not credential JWTs or nonce signatures.
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +34,12 @@ use credentials::{CredentialManager, SubcTransport};
 pub enum Error {
     #[error("ck-bus refused the request: {0}")]
     Refused(String),
+    /// Retry when the module next needs the hub.
+    #[error("ck-bus refused the hub credential: hub_unavailable")]
+    HubUnavailable,
+    /// This module is not allowed to use the hub. Do not retry.
+    #[error("ck-bus refused the hub credential: hub_not_granted")]
+    HubNotGranted,
     #[error("ck-bus request failed: {0}")]
     Transport(String),
     #[error("invalid ck-bus reply: {0}")]
@@ -81,14 +89,18 @@ impl BusClientOptions {
 
 /// A module's current connection and the task that maintains its credentials.
 pub struct BusClient {
-    connection: Arc<RwLock<NatsConnection>>,
+    managed: ManagedConnection,
     names: AccountNames,
     module: String,
+}
+
+struct ManagedConnection {
+    connection: Arc<RwLock<NatsConnection>>,
     changes: watch::Receiver<u64>,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl Drop for BusClient {
+impl Drop for ManagedConnection {
     fn drop(&mut self) {
         self.task.abort();
     }
@@ -98,27 +110,7 @@ impl BusClient {
     /// Issues a credential for the module identity that the subc daemon
     /// authenticates from the module's launch nonce.
     pub async fn connect(subc: Arc<SubcConsumer>, opts: BusClientOptions) -> Result<Self> {
-        let transport = SubcTransport::new(subc, &opts.module, opts.request_timeout);
-        // One module process can keep several connection snapshots, but issuing
-        // independently for them would revoke the other snapshots' credentials.
-        static MANAGERS: std::sync::LazyLock<
-            tokio::sync::Mutex<
-                std::collections::HashMap<String, std::sync::Weak<CredentialManager>>,
-            >,
-        > = std::sync::LazyLock::new(Default::default);
-        let mut managers = MANAGERS.lock().await;
-        let manager = match managers
-            .get(&opts.module)
-            .and_then(std::sync::Weak::upgrade)
-        {
-            Some(manager) => manager,
-            None => {
-                let manager = CredentialManager::start(Arc::new(transport)).await?;
-                managers.insert(opts.module.clone(), Arc::downgrade(&manager));
-                manager
-            }
-        };
-        drop(managers);
+        let manager = credentials::module_manager(subc, &opts, false).await?;
         Self::connect_manager(manager, opts).await
     }
 
@@ -126,13 +118,25 @@ impl BusClient {
         manager: Arc<CredentialManager>,
         opts: BusClientOptions,
     ) -> Result<Self> {
-        let mut revisions = manager.revisions();
         let initial = manager.credential().await;
         let names = AccountNames::derive(&initial.acct)?;
+        let managed = ManagedConnection::connect(manager, opts.request_timeout).await?;
+        Ok(Self {
+            managed,
+            names,
+            module: opts.module,
+        })
+    }
+}
+
+impl ManagedConnection {
+    async fn connect(manager: Arc<CredentialManager>, timeout: Duration) -> Result<Self> {
+        let mut revisions = manager.revisions();
         let (connection, mut ended) = loop {
             revisions.borrow_and_update();
+            manager.check_hub_refusal()?;
             let credential = manager.credential().await;
-            match connect_current(manager.clone(), &credential, opts.request_timeout).await {
+            match connect_current(manager.clone(), &credential, timeout).await {
                 Ok(current) if !revisions.has_changed().unwrap_or(false) => break current,
                 Ok((connection, _)) => {
                     let _ = connection.close(Duration::from_millis(50)).await;
@@ -140,7 +144,10 @@ impl BusClient {
                 Err(_)
                     if manager.credential().await.credential_public
                         != credential.credential_public => {}
-                Err(error) => return Err(error),
+                Err(error) => {
+                    manager.check_hub_refusal()?;
+                    return Err(error);
+                }
             }
         };
         let connection = Arc::new(RwLock::new(connection));
@@ -149,6 +156,14 @@ impl BusClient {
         let task = tokio::spawn(async move {
             let mut retry = None;
             loop {
+                if manager.check_hub_refusal().is_err() {
+                    let current = shared
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
+                    let _ = current.close(Duration::from_millis(50)).await;
+                    return;
+                }
                 let credential = manager.credential().await;
                 let delay = retry
                     .take()
@@ -162,6 +177,9 @@ impl BusClient {
                     }
                     () = tokio::time::sleep(delay) => {
                         if let Err(error) = manager.renew().await {
+                            if matches!(error, Error::HubUnavailable | Error::HubNotGranted) {
+                                continue;
+                            }
                             if credentials::transient(&error) || matches!(error, Error::Transport(_)) {
                                 retry = Some(Duration::from_secs(5));
                                 continue;
@@ -184,9 +202,11 @@ impl BusClient {
                 let mut backoff = Duration::from_millis(250);
                 loop {
                     let revision = *revisions.borrow_and_update();
+                    if manager.check_hub_refusal().is_err() {
+                        break;
+                    }
                     let credential = manager.credential().await;
-                    match connect_current(manager.clone(), &credential, opts.request_timeout).await
-                    {
+                    match connect_current(manager.clone(), &credential, timeout).await {
                         Ok((replacement, replacement_ended)) => {
                             if revisions.has_changed().unwrap_or(false) {
                                 let _ = replacement.close(Duration::from_millis(50)).await;
@@ -207,6 +227,9 @@ impl BusClient {
                             break;
                         }
                         Err(_) => {
+                            if manager.check_hub_refusal().is_err() {
+                                break;
+                            }
                             tokio::time::sleep(backoff).await;
                             backoff = (backoff * 2).min(Duration::from_secs(30));
                         }
@@ -216,19 +239,23 @@ impl BusClient {
         });
         Ok(Self {
             connection,
-            names,
-            module: opts.module,
             changes: receiver,
             task,
         })
     }
 
-    /// Returns a snapshot. A re-issue does not change an already held snapshot.
-    pub fn connection(&self) -> NatsConnection {
+    fn snapshot(&self) -> NatsConnection {
         self.connection
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+}
+
+impl BusClient {
+    /// Returns a snapshot. A re-issue does not change an already held snapshot.
+    pub fn connection(&self) -> NatsConnection {
+        self.managed.snapshot()
     }
 
     /// Changes only after a replacement connection with its issued inbox prefix is ready.
@@ -240,7 +267,7 @@ impl BusClient {
     /// any unseen change has been consumed. Reconnect with [`BusClient::connect`]
     /// or report the module as degraded when the change stream closes.
     pub fn connection_changes(&self) -> watch::Receiver<u64> {
-        self.changes.clone()
+        self.managed.changes.clone()
     }
 
     pub fn acct(&self) -> &str {

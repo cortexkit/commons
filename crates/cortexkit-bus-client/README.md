@@ -76,6 +76,27 @@ maintenance task ends and drops its sender. A terminal renewal refusal also
 logs one warning containing only its refusal code, not the credential. Reconnect
 with `BusClient::connect` or report the module as degraded when this happens.
 
+## Hub connection
+
+Use `HubClient::connect(subc, opts)` with the same daemon consumer and module
+options when the module needs account-wide hub streams. It opens a separate
+federation-account connection and does not require a `BusClient`. Opening a box
+connection never requests a hub credential. The hub credential must name domain
+`hub` and carry the issued box id, its `fed_{box}` account, and its
+`ckdel.{box}.{module}` inbox prefix.
+
+`HubClient::jetstream()` returns a JetStream context in domain `hub`;
+`HubClient::client()` returns a raw NATS client for core publishes. Both are
+snapshots; watch `connection_changes()` and get fresh handles after a replacement.
+The hub connection renews independently, with the same bounded NATS reconnect
+behavior as the box connection.
+
+`Error::HubUnavailable` means to try again when the module next needs the hub;
+`Error::HubNotGranted` means the module is not allowed to use it. The client
+does not retry either refusal. If a refusal stops maintenance, the change watch
+closes and requesting a new snapshot returns the typed error. To retry after
+`HubUnavailable`, call `HubClient::connect` again.
+
 ## Publishing and reading rules
 
 - Acknowledge a delivery **after your own transaction commits**, not before.

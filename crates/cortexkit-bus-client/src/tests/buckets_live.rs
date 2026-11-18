@@ -591,7 +591,7 @@ async fn bucket_live_snapshot_changes_reissue_and_terminal_renewal() {
             .await
             .is_err()
     );
-    reader.task.abort();
+    reader.managed.task.abort();
     let error = tokio::time::timeout(Duration::from_secs(5), watch.next())
         .await
         .unwrap()

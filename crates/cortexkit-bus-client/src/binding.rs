@@ -24,7 +24,7 @@ pub(crate) struct ConnectionBinding {
 impl ConnectionBinding {
     pub(crate) fn new(client: &BusClient) -> Self {
         Self {
-            connection: client.connection.clone(),
+            connection: client.managed.connection.clone(),
             changes: client.connection_changes(),
             bound: None,
             #[cfg(test)]

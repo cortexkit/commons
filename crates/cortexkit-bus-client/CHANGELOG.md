@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8
+
+- Add `HubClient` for a separate, on-demand federation-account connection.
+  It uses the issued module inbox and the `hub` JetStream domain, and renews
+  and replaces its credentials independently of the box connection.
+- Report `HubUnavailable` (retry when needed) and `HubNotGranted` (terminal)
+  without retrying either refusal in the client.
+
 ## 0.1.7
 
 - Accept a credential's `ckdel.{box}.{module}` inbox prefix for hub replies and

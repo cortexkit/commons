@@ -16,6 +16,8 @@ use crate::{
     MalformedReason,
 };
 
+mod hub;
+
 #[derive(Default)]
 struct Observed {
     auth: Vec<Value>,
@@ -498,7 +500,7 @@ async fn bucket_rebind_capacity_wait_stops_on_terminal_maintenance() {
     let server = Server::start().await;
     let (client, _) = event_client(&server).await;
     let mut binding = crate::binding::ConnectionBinding::new(&client);
-    client.task.abort();
+    client.managed.task.abort();
     let error = tokio::time::timeout(
         Duration::from_secs(5),
         crate::buckets::bind_watch(&mut binding, "full-bucket", true, |_| async {
@@ -877,8 +879,8 @@ async fn ended_connection_with_stopped_maintenance_errors_instead_of_waiting() {
         .extend([FakeEvent::new(1)]);
     let (mut client, _manager) = event_client(&server).await;
     let mut reader = client.event_reader("m_test_module").await.unwrap();
-    client.task.abort();
-    let _ = (&mut client.task).await;
+    client.managed.task.abort();
+    let _ = (&mut client.managed.task).await;
     client
         .connection()
         .close(Duration::from_secs(1))

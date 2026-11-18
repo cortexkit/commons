@@ -1,5 +1,6 @@
 use std::{
-    sync::Arc,
+    collections::HashMap,
+    sync::{Arc, LazyLock, OnceLock, Weak},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -10,7 +11,43 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::{watch, Mutex, RwLock};
 
-use crate::{Error, Result};
+use crate::{BusClientOptions, Error, Result};
+
+pub(crate) const HUB_DOMAIN: &str = "hub";
+
+pub(crate) async fn module_manager(
+    subc: Arc<subc_client_rs::SubcConsumer>,
+    opts: &BusClientOptions,
+    hub: bool,
+) -> Result<Arc<CredentialManager>> {
+    let transport = Arc::new(SubcTransport::new(subc, &opts.module, opts.request_timeout));
+    cached_manager(transport, &opts.module, hub).await
+}
+
+pub(crate) async fn cached_manager(
+    transport: Arc<dyn CredentialTransport>,
+    module: &str,
+    hub: bool,
+) -> Result<Arc<CredentialManager>> {
+    // Issuing a second credential for the same module and account revokes the
+    // first. Keep independent caches so hub calls never wait on box issuance.
+    type Managers = Mutex<HashMap<String, Weak<CredentialManager>>>;
+    static BOX_MANAGERS: LazyLock<Managers> = LazyLock::new(Default::default);
+    static HUB_MANAGERS: LazyLock<Managers> = LazyLock::new(Default::default);
+    let mut managers = if hub { &HUB_MANAGERS } else { &BOX_MANAGERS }.lock().await;
+    if let Some(manager) = managers.get(module).and_then(Weak::upgrade) {
+        if manager.check_hub_refusal().is_ok() {
+            return Ok(manager);
+        }
+    }
+    let manager = if hub {
+        CredentialManager::start_hub(transport, module).await?
+    } else {
+        CredentialManager::start(transport).await?
+    };
+    managers.insert(module.to_owned(), Arc::downgrade(&manager));
+    Ok(manager)
+}
 
 pub(crate) struct SubcTransport {
     consumer: Arc<subc_client_rs::SubcConsumer>,
@@ -77,25 +114,56 @@ pub(crate) struct Credential {
     pub acct: String,
     pub server_url: String,
     pub inbox_prefix: String,
+    #[serde(skip)]
+    box_id: Option<BoxId>,
 }
 
 impl Credential {
-    fn parse(value: Value) -> Result<Self> {
-        let credential: Self =
+    fn parse(value: Value, hub_module: Option<&str>) -> Result<Self> {
+        let hub_box = if hub_module.is_some() {
+            if value["domain"].as_str() != Some(HUB_DOMAIN) {
+                return Err(Error::Reply("expected hub credential domain to be hub"));
+            }
+            Some(
+                value["box_id"]
+                    .as_str()
+                    .and_then(|id| BoxId::parse(id).ok())
+                    .ok_or(Error::Reply("missing or invalid hub credential box id"))?,
+            )
+        } else {
+            None
+        };
+        let mut credential: Self =
             serde_json::from_value(value).map_err(|_| Error::Reply("missing credential fields"))?;
         let config = cortexkit_bus_nats::ConnectConfig::new(&credential.credential_public)?;
-        let deliver_prefix = credential
-            .inbox_prefix
-            .rsplit_once('.')
-            .and_then(|(_, module)| module_deliver_prefix(&box_id(&credential.acct)?, module).ok());
-        if config.inbox_prefix() != credential.inbox_prefix
-            && deliver_prefix.as_deref() != Some(credential.inbox_prefix.as_str())
-        {
-            return Err(Error::Reply(
-                "credential inbox prefix does not match its key",
-            ));
+        if let Some((module, id)) = hub_module.zip(hub_box.as_ref()) {
+            if credential.inbox_prefix != module_deliver_prefix(id, module)? {
+                return Err(Error::Reply(
+                    "hub credential inbox prefix does not match its box and module",
+                ));
+            }
+            if credential.acct != format!("fed_{id}") {
+                return Err(Error::Reply(
+                    "hub credential account does not match its box",
+                ));
+            }
+        } else {
+            let deliver_prefix =
+                credential
+                    .inbox_prefix
+                    .rsplit_once('.')
+                    .and_then(|(_, module)| {
+                        module_deliver_prefix(&box_id(&credential.acct)?, module).ok()
+                    });
+            if config.inbox_prefix() != credential.inbox_prefix
+                && deliver_prefix.as_deref() != Some(credential.inbox_prefix.as_str())
+            {
+                return Err(Error::Reply(
+                    "credential inbox prefix does not match its key",
+                ));
+            }
+            cortexkit_bus_naming::AccountNames::derive(&credential.acct)?;
         }
-        cortexkit_bus_naming::AccountNames::derive(&credential.acct)?;
         let port = credential
             .server_url
             .strip_prefix("nats://127.0.0.1:")
@@ -103,12 +171,38 @@ impl Credential {
         if !port.is_some_and(|port| port != 0) {
             return Err(Error::Reply("expected a plaintext loopback NATS URL"));
         }
+        credential.box_id = hub_box;
         Ok(credential)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum HubRefusal {
+    Unavailable,
+    NotGranted,
+}
+
+impl HubRefusal {
+    fn from_error(error: &Error) -> Option<Self> {
+        match error {
+            Error::Refused(code) if code == "hub_unavailable" => Some(Self::Unavailable),
+            Error::Refused(code) if code == "hub_not_granted" => Some(Self::NotGranted),
+            _ => None,
+        }
+    }
+
+    fn error(self) -> Error {
+        match self {
+            Self::Unavailable => Error::HubUnavailable,
+            Self::NotGranted => Error::HubNotGranted,
+        }
     }
 }
 
 pub(crate) struct CredentialManager {
     transport: Arc<dyn CredentialTransport>,
+    hub_module: Option<String>,
+    hub_refusal: OnceLock<HubRefusal>,
     current: RwLock<Credential>,
     // Serializing issue and renewal prevents replies for an old key from
     // replacing the current credential.
@@ -118,10 +212,35 @@ pub(crate) struct CredentialManager {
 
 impl CredentialManager {
     pub async fn start(transport: Arc<dyn CredentialTransport>) -> Result<Arc<Self>> {
-        let credential = Self::issue(&*transport).await?;
+        Self::start_for(transport, None).await
+    }
+
+    pub async fn start_hub(
+        transport: Arc<dyn CredentialTransport>,
+        module: &str,
+    ) -> Result<Arc<Self>> {
+        Self::start_for(transport, Some(module.to_owned())).await
+    }
+
+    async fn start_for(
+        transport: Arc<dyn CredentialTransport>,
+        hub_module: Option<String>,
+    ) -> Result<Arc<Self>> {
+        let credential = Self::issue(&*transport, hub_module.as_deref())
+            .await
+            .map_err(|error| {
+                if hub_module.is_some() {
+                    if let Some(refusal) = HubRefusal::from_error(&error) {
+                        return refusal.error();
+                    }
+                }
+                error
+            })?;
         let (revisions, _) = watch::channel(0);
         Ok(Arc::new(Self {
             transport,
+            hub_module,
+            hub_refusal: OnceLock::new(),
             current: RwLock::new(credential),
             flight: Mutex::new(()),
             revisions,
@@ -136,11 +255,39 @@ impl CredentialManager {
         self.revisions.subscribe()
     }
 
-    async fn issue(transport: &dyn CredentialTransport) -> Result<Credential> {
+    pub fn check_hub_refusal(&self) -> Result<()> {
+        match self.hub_refusal.get() {
+            Some(refusal) => Err(refusal.error()),
+            None => Ok(()),
+        }
+    }
+
+    fn record_refusal(&self, error: Error) -> Error {
+        if self.hub_module.is_some() {
+            if let Some(refusal) = HubRefusal::from_error(&error) {
+                // Wake maintenance even if the refusal came from a nonce
+                // callback during NATS reconnect, rather than a renewal.
+                if self.hub_refusal.set(refusal).is_ok() {
+                    self.revisions.send_modify(|_| {});
+                }
+                return refusal.error();
+            }
+        }
+        error
+    }
+
+    async fn issue(
+        transport: &dyn CredentialTransport,
+        hub_module: Option<&str>,
+    ) -> Result<Credential> {
+        if hub_module.is_some() {
+            let value = transport.call("ckbus.hub_credential", json!({})).await?;
+            return Credential::parse(value, hub_module);
+        }
         let mut backoff = Duration::from_millis(250);
         loop {
             match transport.call("ckbus.credential", json!({})).await {
-                Ok(value) => return Credential::parse(value),
+                Ok(value) => return Credential::parse(value, None),
                 Err(error) if transient(&error) => {
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(Duration::from_secs(30));
@@ -154,13 +301,19 @@ impl CredentialManager {
     /// that another waiter has just issued, because issuance revokes that key.
     pub async fn reissue(&self, observed_public: &str) -> Result<()> {
         let _flight = self.flight.lock().await;
+        self.check_hub_refusal()?;
         if self.current.read().await.credential_public != observed_public {
             return Ok(());
         }
-        let credential = Self::issue(&*self.transport).await?;
+        let credential = Self::issue(&*self.transport, self.hub_module.as_deref())
+            .await
+            .map_err(|error| self.record_refusal(error))?;
         let mut current = self.current.write().await;
         if credential.acct != current.acct {
             return Err(Error::Reply("re-issue changed the account"));
+        }
+        if credential.box_id != current.box_id {
+            return Err(Error::Reply("re-issue changed the hub credential box id"));
         }
         *current = credential;
         self.revisions.send_modify(|revision| *revision += 1);
@@ -168,6 +321,7 @@ impl CredentialManager {
     }
 
     pub async fn sign(&self, public: &str, nonce: Vec<u8>) -> Result<Vec<u8>> {
+        self.check_hub_refusal()?;
         if self.current.read().await.credential_public != public {
             return Err(Error::Reply("connection credential was replaced"));
         }
@@ -202,13 +356,19 @@ impl CredentialManager {
     pub async fn renew(&self) -> Result<()> {
         let observed = self.credential().await;
         let _flight = self.flight.lock().await;
+        self.check_hub_refusal()?;
         if self.current.read().await.credential_public != observed.credential_public {
             return Ok(());
         }
+        let method = if self.hub_module.is_some() {
+            "ckbus.hub_credential_renew"
+        } else {
+            "ckbus.credential_renew"
+        };
         let value = self
             .transport
             .call(
-                "ckbus.credential_renew",
+                method,
                 json!({
                     "credential_public": observed.credential_public,
                 }),
@@ -216,6 +376,32 @@ impl CredentialManager {
             .await;
         match value {
             Ok(value) => {
+                if let Some(box_id) = &observed.box_id {
+                    for (field, expected, error) in [
+                        (
+                            "box_id",
+                            box_id.as_str(),
+                            "renewal changed the hub credential box id",
+                        ),
+                        (
+                            "domain",
+                            HUB_DOMAIN,
+                            "renewal changed the hub credential domain",
+                        ),
+                        (
+                            "inbox_prefix",
+                            observed.inbox_prefix.as_str(),
+                            "renewal changed the inbox prefix",
+                        ),
+                    ] {
+                        if value
+                            .get(field)
+                            .is_some_and(|got| got.as_str() != Some(expected))
+                        {
+                            return Err(Error::Reply(error));
+                        }
+                    }
+                }
                 #[derive(Deserialize)]
                 struct Renewal {
                     jwt: String,
@@ -243,7 +429,7 @@ impl CredentialManager {
                 drop(_flight);
                 self.reissue(&observed.credential_public).await
             }
-            Err(error) => Err(error),
+            Err(error) => Err(self.record_refusal(error)),
         }
     }
 }
@@ -288,12 +474,12 @@ mod tests {
     #[test]
     fn inbox_prefix_accepts_credential_and_box_module_forms() {
         for prefix in ["_INBOX.UKEY0", DELIVER] {
-            let credential = Credential::parse(reply(prefix, &format!("box_{BOX}"))).unwrap();
+            let credential = Credential::parse(reply(prefix, &format!("box_{BOX}")), None).unwrap();
             assert_eq!(credential.inbox_prefix, prefix);
             assert_eq!(box_id(&credential.acct).unwrap().as_str(), BOX);
         }
         for acct in ["box_test", "another_account"] {
-            let credential = Credential::parse(reply("_INBOX.UKEY0", acct)).unwrap();
+            let credential = Credential::parse(reply("_INBOX.UKEY0", acct), None).unwrap();
             assert_eq!(box_id(&credential.acct), None);
         }
     }
@@ -313,7 +499,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    Credential::parse(reply(prefix, &format!("box_{BOX}"))),
+                    Credential::parse(reply(prefix, &format!("box_{BOX}")), None),
                     Err(Error::Reply(
                         "credential inbox prefix does not match its key"
                     ))
@@ -328,7 +514,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    Credential::parse(reply(DELIVER, acct)),
+                    Credential::parse(reply(DELIVER, acct), None),
                     Err(Error::Reply(
                         "credential inbox prefix does not match its key"
                     ))
