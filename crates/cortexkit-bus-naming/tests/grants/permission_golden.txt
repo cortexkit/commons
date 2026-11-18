@@ -348,6 +348,9 @@ allow cerebellum publish ck.box_goldenfixture.effect.dead
 allow cerebellum publish ck.box_goldenfixture.event.cerebellum.>
 allow cerebellum subscribe $KV.CK_BOX_GOLDENFIXTURE_CENSUS.>
 allow cerebellum subscribe _INBOX.cerebellum.>
+allow cerebellum subscribe ck.box_goldenfixture.event.broca.run.ended.v1
+allow cerebellum subscribe ck.box_goldenfixture.event.broca.run.paused.v1
+allow cerebellum subscribe ck.box_goldenfixture.event.broca.run.started.v1
 allow colliculus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT.*.>
 allow colliculus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EVENT.m_colliculus_events.>
 allow colliculus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_PEER.*.>

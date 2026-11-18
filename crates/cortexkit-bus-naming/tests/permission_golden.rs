@@ -823,6 +823,20 @@ fn event_consumer_grants_and_federation_publishes_are_exact() {
                 operation: Operation::Publish,
                 subject,
             })
+            .chain(
+                [
+                    "ck.box_readers.event.broca.run.started.v1",
+                    "ck.box_readers.event.broca.run.paused.v1",
+                    "ck.box_readers.event.broca.run.ended.v1",
+                ]
+                .into_iter()
+                .filter(|_| module_id == "cerebellum")
+                .map(|subject| AllowEntry {
+                    principal: Principal::Participant,
+                    operation: Operation::Subscribe,
+                    subject: subject.to_owned(),
+                }),
+            )
             .collect::<BTreeSet<_>>();
         assert_eq!(extra, expected);
         assert!(allowed(

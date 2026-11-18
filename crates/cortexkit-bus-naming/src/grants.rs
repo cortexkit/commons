@@ -224,6 +224,18 @@ impl From<NamingError> for GrantError {
     }
 }
 
+/// Exact event subjects for headers-only live listeners that must not hold a
+/// durable for those events. List a subject only if the reader may see its full
+/// messages: a core NATS subscription grants access to the payload too.
+const CORE_EVENT_SUBSCRIPTIONS: &[(&str, &[&str])] = &[(
+    "cerebellum",
+    &[
+        "event.broca.run.started.v1",
+        "event.broca.run.paused.v1",
+        "event.broca.run.ended.v1",
+    ],
+)];
+
 /// The grant for every host and module except the delivery authority.
 ///
 /// Credentials are account-scoped and name no agents: a participant may pull,
@@ -250,6 +262,19 @@ pub fn participant_permissions(
         module_id,
         bound_rooms,
     )?;
+    for (_, subjects) in CORE_EVENT_SUBSCRIPTIONS
+        .iter()
+        .filter(|(reader, _)| *reader == module_id)
+    {
+        for subject in *subjects {
+            add(
+                &mut entries,
+                Principal::Participant,
+                Operation::Subscribe,
+                format!("ck.{}.{subject}", account.account()),
+            );
+        }
+    }
     Ok(entries.into_iter().collect())
 }
 

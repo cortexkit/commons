@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- `cerebellum` reads Broca's run started, paused, and ended events through
+  core NATS subscriptions.
+
 ## 0.5.2
 
 - Add account-wide `HUB_MEMORY` and typed fleet memory subjects for replicating
