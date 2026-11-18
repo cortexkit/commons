@@ -1,10 +1,11 @@
-//! Shared hub names and leaf permissions for the cross-computer message plane.
+//! Shared hub names and permissions for the cross-computer message plane.
 
 use std::fmt;
 use std::str::FromStr;
 
 use crate::{
-    validate_token, DiscardPolicy, NamingError, StreamKind, StreamSpec, TokenKind, GIB, HOUR, MIB,
+    validate_token, DenyEntry, DiscardPolicy, NamingError, Operation, StreamKind, StreamSpec,
+    TokenKind, GIB, HOUR, MIB,
 };
 
 pub const HUB_DOMAIN: &str = "hub";
@@ -34,6 +35,26 @@ pub const RESIDENCE_BUCKET: &str = "residence";
 pub const RESIDENCE_STREAM: &str = "KV_residence";
 pub const CUTS_BUCKET: &str = "cuts";
 pub const CUTS_STREAM: &str = "OBJ_cuts";
+
+const HUB_MEMORY_MODULE: &str = "magic-context";
+const HUB_ROOMS_MODULE: &str = "prefrontal";
+const HUB_ROOMS_MODULE_LEGACY: &str = "prefrontal-core";
+const HUB_IDLOG_MODULE: &str = "entorhinal";
+const HUB_CUTS_MODULE: &str = "engram";
+
+/// Canonical module IDs with direct hub access. Use [`is_hub_module`] to also check the legacy ID.
+pub const HUB_MODULES: [&str; 4] = [
+    HUB_MEMORY_MODULE,
+    HUB_ROOMS_MODULE,
+    HUB_IDLOG_MODULE,
+    HUB_CUTS_MODULE,
+];
+
+/// Whether the caller's module ID is eligible for a hub credential.
+/// `prefrontal-core` is accepted only during prefrontal's rename, until the old name retires.
+pub fn is_hub_module(module_id: &str) -> bool {
+    HUB_MODULES.contains(&module_id) || module_id == HUB_ROOMS_MODULE_LEGACY
+}
 
 /// A machine id in its canonical, unprefixed 32-character lowercase hexadecimal form.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -366,11 +387,126 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
     )
 }
 
+/// Ordered permissions for a module's hub-only user in the federation account.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct HubUserGrant {
+    pub publish: Vec<String>,
+    pub subscribe: Vec<String>,
+    /// Explicit denies to attach alongside both allow lists.
+    pub denies: Vec<DenyEntry>,
+}
+
+impl HubUserGrant {
+    pub fn new(publish: Vec<String>, subscribe: Vec<String>, denies: Vec<DenyEntry>) -> Self {
+        Self {
+            publish,
+            subscribe,
+            denies,
+        }
+    }
+}
+
+/// Limit a module to its shared hub streams and its own delivery and reply subjects.
+/// Use the module ID verified by the daemon, not one supplied in a credential request.
+pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant> {
+    let (streams, extra_publish): (&[&str], _) = match module_id {
+        HUB_MEMORY_MODULE => (
+            &[HUB_MEMORY_STREAM],
+            vec![
+                HUB_MEMORY_SUBJECT.to_owned(),
+                format!("$JS.ACK.{HUB_MEMORY_STREAM}.>"),
+            ],
+        ),
+        HUB_ROOMS_MODULE | HUB_ROOMS_MODULE_LEGACY => (
+            &[HUB_ROOMS_STREAM],
+            vec![
+                HUB_ROOMS_SUBJECT.to_owned(),
+                format!("$JS.ACK.{HUB_ROOMS_STREAM}.>"),
+            ],
+        ),
+        HUB_IDLOG_MODULE => (
+            &[HUB_IDLOG_STREAM, RESIDENCE_STREAM],
+            vec![
+                IDLOG_SUBJECT.to_owned(),
+                format!("{HUB_API_PREFIX}.$KV.{RESIDENCE_BUCKET}.>"),
+                format!("$JS.FC.{HUB_IDLOG_STREAM}.*.*"),
+                format!("$JS.FC.{RESIDENCE_STREAM}.*.*"),
+            ],
+        ),
+        HUB_CUTS_MODULE => (
+            &[CUTS_STREAM],
+            vec![
+                format!("$O.{CUTS_BUCKET}.>"),
+                format!("{HUB_API_PREFIX}.STREAM.MSG.GET.{CUTS_STREAM}"),
+                format!("{HUB_API_PREFIX}.STREAM.PURGE.{CUTS_STREAM}"),
+                format!("$JS.FC.{CUTS_STREAM}.*.*"),
+            ],
+        ),
+        _ => return None,
+    };
+    let mut publish = Vec::new();
+    for stream in streams {
+        // `>` requires a trailing token, so direct gets and consumer creation need bare forms too.
+        publish.extend([
+            format!("{HUB_API_PREFIX}.STREAM.INFO.{stream}"),
+            format!("{HUB_API_PREFIX}.DIRECT.GET.{stream}"),
+            format!("{HUB_API_PREFIX}.DIRECT.GET.{stream}.>"),
+            format!("{HUB_API_PREFIX}.CONSUMER.CREATE.{stream}"),
+            format!("{HUB_API_PREFIX}.CONSUMER.CREATE.{stream}.>"),
+            format!("{HUB_API_PREFIX}.CONSUMER.INFO.{stream}.>"),
+            format!("{HUB_API_PREFIX}.CONSUMER.DELETE.{stream}.>"),
+        ]);
+    }
+    publish.extend(extra_publish);
+
+    let inbox_prefix = module_deliver_prefix(box_id, module_id).ok()?;
+    let denies = [Operation::Publish, Operation::Subscribe]
+        .into_iter()
+        .flat_map(|operation| {
+            ["fedlocal.>", FEDOUT_SUBJECT, "fedsend.>"]
+                .map(|subject| DenyEntry::new(operation, subject.to_owned()))
+        })
+        .collect();
+    Some(HubUserGrant::new(
+        publish,
+        vec![format!("{inbox_prefix}.>")],
+        denies,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::limits::subject_filters_overlap;
+
     use super::*;
 
     const SAMPLE_BOX: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn federation_hub_module_grants_do_not_overlap() {
+        let box_id = BoxId::parse(SAMPLE_BOX).unwrap();
+        let grants = HUB_MODULES.map(|module| (module, hub_module_grant(&box_id, module).unwrap()));
+        for (i, (module, grant)) in grants.iter().enumerate() {
+            for subject in grant.publish.iter().chain(&grant.subscribe) {
+                for (other, foreign) in &grants[i + 1..] {
+                    for foreign_subject in foreign.publish.iter().chain(&foreign.subscribe) {
+                        assert!(
+                            !subject_filters_overlap(subject, foreign_subject).unwrap(),
+                            "{module}: {subject} overlaps {other}: {foreign_subject}"
+                        );
+                    }
+                }
+                for deny in &grant.denies {
+                    assert!(
+                        !subject_filters_overlap(subject, &deny.subject).unwrap(),
+                        "{module}: {subject} overlaps denied subject {}",
+                        deny.subject
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn box_id_accepts_only_canonical_lowercase_hex() {

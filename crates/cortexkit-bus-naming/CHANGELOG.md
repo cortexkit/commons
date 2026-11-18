@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.4
+
+- Add per-module user grants for direct hub access from the federation account.
+  Each user can publish only to its own shared streams and their required APIs,
+  subscribe only to its own delivery prefix, and cannot use per-machine
+  federation subjects. The room grant accepts both `prefrontal` and
+  `prefrontal-core` during the rename, with a separate delivery prefix for each ID.
+
 ## 0.5.3
 
 - `cerebellum` reads Broca's run started, paused, and ended events through

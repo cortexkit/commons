@@ -1,0 +1,184 @@
+{
+  "box_id": "0123456789abcdef0123456789abcdef",
+  "grants": {
+    "engram": {
+      "denies": [
+        {
+          "operation": "publish",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedsend.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedsend.>"
+        }
+      ],
+      "publish": [
+        "$JS.hub.API.STREAM.INFO.OBJ_cuts",
+        "$JS.hub.API.DIRECT.GET.OBJ_cuts",
+        "$JS.hub.API.DIRECT.GET.OBJ_cuts.>",
+        "$JS.hub.API.CONSUMER.CREATE.OBJ_cuts",
+        "$JS.hub.API.CONSUMER.CREATE.OBJ_cuts.>",
+        "$JS.hub.API.CONSUMER.INFO.OBJ_cuts.>",
+        "$JS.hub.API.CONSUMER.DELETE.OBJ_cuts.>",
+        "$O.cuts.>",
+        "$JS.hub.API.STREAM.MSG.GET.OBJ_cuts",
+        "$JS.hub.API.STREAM.PURGE.OBJ_cuts",
+        "$JS.FC.OBJ_cuts.*.*"
+      ],
+      "subscribe": [
+        "ckdel.0123456789abcdef0123456789abcdef.engram.>"
+      ]
+    },
+    "entorhinal": {
+      "denies": [
+        {
+          "operation": "publish",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedsend.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedsend.>"
+        }
+      ],
+      "publish": [
+        "$JS.hub.API.STREAM.INFO.HUB_IDLOG",
+        "$JS.hub.API.DIRECT.GET.HUB_IDLOG",
+        "$JS.hub.API.DIRECT.GET.HUB_IDLOG.>",
+        "$JS.hub.API.CONSUMER.CREATE.HUB_IDLOG",
+        "$JS.hub.API.CONSUMER.CREATE.HUB_IDLOG.>",
+        "$JS.hub.API.CONSUMER.INFO.HUB_IDLOG.>",
+        "$JS.hub.API.CONSUMER.DELETE.HUB_IDLOG.>",
+        "$JS.hub.API.STREAM.INFO.KV_residence",
+        "$JS.hub.API.DIRECT.GET.KV_residence",
+        "$JS.hub.API.DIRECT.GET.KV_residence.>",
+        "$JS.hub.API.CONSUMER.CREATE.KV_residence",
+        "$JS.hub.API.CONSUMER.CREATE.KV_residence.>",
+        "$JS.hub.API.CONSUMER.INFO.KV_residence.>",
+        "$JS.hub.API.CONSUMER.DELETE.KV_residence.>",
+        "ck.fleet.idlog",
+        "$JS.hub.API.$KV.residence.>",
+        "$JS.FC.HUB_IDLOG.*.*",
+        "$JS.FC.KV_residence.*.*"
+      ],
+      "subscribe": [
+        "ckdel.0123456789abcdef0123456789abcdef.entorhinal.>"
+      ]
+    },
+    "magic-context": {
+      "denies": [
+        {
+          "operation": "publish",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedsend.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedsend.>"
+        }
+      ],
+      "publish": [
+        "$JS.hub.API.STREAM.INFO.HUB_MEMORY",
+        "$JS.hub.API.DIRECT.GET.HUB_MEMORY",
+        "$JS.hub.API.DIRECT.GET.HUB_MEMORY.>",
+        "$JS.hub.API.CONSUMER.CREATE.HUB_MEMORY",
+        "$JS.hub.API.CONSUMER.CREATE.HUB_MEMORY.>",
+        "$JS.hub.API.CONSUMER.INFO.HUB_MEMORY.>",
+        "$JS.hub.API.CONSUMER.DELETE.HUB_MEMORY.>",
+        "ck.fleet.memory.*.*",
+        "$JS.ACK.HUB_MEMORY.>"
+      ],
+      "subscribe": [
+        "ckdel.0123456789abcdef0123456789abcdef.magic-context.>"
+      ]
+    },
+    "prefrontal": {
+      "denies": [
+        {
+          "operation": "publish",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedsend.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedsend.>"
+        }
+      ],
+      "publish": [
+        "$JS.hub.API.STREAM.INFO.HUB_ROOMS",
+        "$JS.hub.API.DIRECT.GET.HUB_ROOMS",
+        "$JS.hub.API.DIRECT.GET.HUB_ROOMS.>",
+        "$JS.hub.API.CONSUMER.CREATE.HUB_ROOMS",
+        "$JS.hub.API.CONSUMER.CREATE.HUB_ROOMS.>",
+        "$JS.hub.API.CONSUMER.INFO.HUB_ROOMS.>",
+        "$JS.hub.API.CONSUMER.DELETE.HUB_ROOMS.>",
+        "ck.fleet.room.>",
+        "$JS.ACK.HUB_ROOMS.>"
+      ],
+      "subscribe": [
+        "ckdel.0123456789abcdef0123456789abcdef.prefrontal.>"
+      ]
+    }
+  }
+}

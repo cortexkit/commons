@@ -19,6 +19,12 @@ with no purge or delete authority. `fleet` is not a canonical box id.
 age or per-subject message limit, caps messages at 64 KiB, and refuses new
 publishes when it reaches 1 GiB. Its leaf read and consumer APIs match HUB_ROOMS.
 
+`hub-module-grants.json` pins the four canonical modules' federation-account
+hub user grants for the same sample box. Each entry has publish and subscribe
+allow lists and explicit denies keyed by operation and subject. During the
+rename, `prefrontal-core` gets the same publish allows and denies as
+`prefrontal`, but can subscribe only to `ckdel.<box id>.prefrontal-core.>`.
+
 `local.json` pins the box-account handoff streams, inbound/outbound subjects,
 universal publish deny, both delivery authority ids' outbound grants and module
 readers, and the federation account's separate `FEDOUT` stream. Box-account names
@@ -39,9 +45,8 @@ it to zero. `history` and the backing stream's per-subject cap must agree.
 KV and object-store backing settings must also agree with the client API's
 creation settings, including rollup, direct-get, and delete policies.
 
-Run `cargo test -p cortexkit-bus-naming --all-features federation_golden_matches_bytes`
-and `cargo test -p cortexkit-bus-naming --all-features federation_local_golden_matches_bytes`
-to check the fixtures against the Rust builders. To regenerate both, run
+Run `cargo test -p cortexkit-bus-naming --all-features --test federation golden_matches_bytes`
+to check the fixtures against the Rust builders. To regenerate them, run
 `UPDATE_FEDERATION_GOLDENS=1 cargo test -p cortexkit-bus-naming --all-features --test federation golden_matches_bytes`.
 Intentional policy changes update the fixtures and their `SHA256SUMS` in the same
 commit. Verify the checksums from this

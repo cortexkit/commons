@@ -359,6 +359,54 @@ fn federation_golden_matches_bytes() {
     );
 }
 
+#[test]
+fn federation_hub_module_golden_matches_bytes() {
+    let box_id = sample_box();
+    let mut grants = serde_json::Map::new();
+    for module in HUB_MODULES {
+        assert!(is_hub_module(module));
+        let grant = hub_module_grant(&box_id, module).unwrap();
+        grants.insert(
+            module.into(),
+            json!({
+                "publish": grant.publish,
+                "subscribe": grant.subscribe,
+                "denies": grant.denies.iter().map(|entry| json!({
+                    "operation": entry.operation.as_str(), "subject": entry.subject,
+                })).collect::<Vec<_>>(),
+            }),
+        );
+    }
+    assert_golden(
+        "hub-module-grants.json",
+        &json!({ "box_id": box_id.as_str(), "grants": grants }),
+        include_str!("../test-vectors/federation/hub-module-grants.json"),
+    );
+}
+
+#[test]
+fn federation_hub_module_refuses_other_ids() {
+    let box_id = sample_box();
+    for module in ["example-module", "Prefrontal", "prefrontal.core", "", "*"] {
+        assert!(!is_hub_module(module), "{module:?}");
+        assert_eq!(hub_module_grant(&box_id, module), None, "{module:?}");
+    }
+}
+
+#[test]
+fn federation_hub_module_alias_uses_attested_deliver_prefix() {
+    let box_id = sample_box();
+    assert!(is_hub_module("prefrontal-core"));
+    let legacy = hub_module_grant(&box_id, "prefrontal-core").unwrap();
+    let current = hub_module_grant(&box_id, "prefrontal").unwrap();
+    assert_eq!(legacy.publish, current.publish);
+    assert_eq!(legacy.denies, current.denies);
+    assert_eq!(
+        legacy.subscribe,
+        [format!("ckdel.{SAMPLE_BOX}.prefrontal-core.>")]
+    );
+}
+
 fn assert_golden(name: &str, document: &Value, expected: &str) {
     let actual = format!("{}\n", serde_json::to_string_pretty(document).unwrap());
     if std::env::var_os("UPDATE_FEDERATION_GOLDENS").as_deref() == Some(std::ffi::OsStr::new("1")) {

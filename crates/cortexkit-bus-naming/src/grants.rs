@@ -57,8 +57,7 @@ pub struct AllowEntry {
     pub subject: String,
 }
 
-/// An explicit deny that must be attached to every user of a box account,
-/// including the bus and system users. NATS denies take precedence over allows.
+/// An explicit permission deny. NATS denies take precedence over allows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct DenyEntry {
@@ -72,8 +71,9 @@ impl DenyEntry {
     }
 }
 
-/// Local credentials cannot forge the origin of a frame opened by federation.
-/// These denies do not apply to the federation account's import.
+/// Attach these denies to every box-account user, including the bus and system users.
+/// Only the federation import may publish to subjects that carry authenticated box IDs.
+/// Denying local users those subjects keeps them from impersonating another box.
 pub fn box_account_denies(account: &AccountNames) -> Vec<DenyEntry> {
     vec![DenyEntry::new(
         Operation::Publish,
