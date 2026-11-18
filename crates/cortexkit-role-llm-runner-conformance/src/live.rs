@@ -7,9 +7,11 @@
 //! and, for the attach replay, a stream attached while the adapter holds a
 //! model answer mid-stream or a tool call in flight.
 
+use std::collections::{HashMap, HashSet};
+
 use cortexkit_role_llm_runner::{
     capabilities as groups,
-    live::{LiveEvent, LiveSubscribeRequest, FIRST_SEQ},
+    live::{LiveEvent, LiveSubscribeRequest, EVENT_FIELD, FIRST_SEQ},
     ops,
     send::SendReply,
     subscribe::{kinds, SubscribeEvent, SubscribeFrom},
@@ -81,13 +83,13 @@ async fn stream_params<R: RunnerRoute>(route: &R, params: Value) -> Result<Vec<F
             ))
         }
     };
-    events
+    let frames = events
         .into_iter()
         .map(|raw| {
             let frame: SubscribeEvent = decode("a stream frame", raw)?;
             let event = frame
                 .body
-                .get("event")
+                .get(EVENT_FIELD)
                 .map(|event| {
                     LiveEvent::decode_strict(event).map_err(|e| {
                         format!("a {} frame's event {event} is malformed: {e}", frame.kind)
@@ -96,7 +98,49 @@ async fn stream_params<R: RunnerRoute>(route: &R, params: Value) -> Result<Vec<F
                 .transpose()?;
             Ok(Frame { frame, event })
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+    check_tool_input_names(
+        frames
+            .iter()
+            .filter_map(|frame| Some((frame.event.as_ref()?, frame.frame.body.get(EVENT_FIELD)?))),
+    )?;
+    Ok(frames)
+}
+
+pub(crate) fn check_tool_input_names<'a>(
+    events: impl IntoIterator<Item = (&'a LiveEvent, &'a Value)>,
+) -> Check {
+    let mut seen: HashMap<Option<&str>, HashSet<&str>> = HashMap::new();
+    for (event, wire) in events {
+        match event {
+            LiveEvent::ToolInputDelta(delta) => {
+                let message = delta.mid.as_deref().or(delta.live_id.as_deref());
+                let first = seen.entry(message).or_default().insert(&delta.tool_call_id);
+                // A reader decodes null as None, but writers must omit the key.
+                if !first && wire.get("tool_name").is_some() {
+                    return Err(format!(
+                        "tool_input_delta carries tool_name on a non-first chunk for call {:?}",
+                        delta.tool_call_id
+                    ));
+                }
+            }
+            LiveEvent::MessageStarted(message) => {
+                // Storage changes the message id, not where its arguments begin.
+                if let Some(calls) = message
+                    .live_id
+                    .as_deref()
+                    .and_then(|id| seen.remove(&Some(id)))
+                {
+                    seen.entry(Some(&message.mid)).or_default().extend(calls);
+                }
+            }
+            // A reset starts a new snapshot. A gap may hide a reset, so do
+            // not compare chunks across it.
+            LiveEvent::DisplayReset | LiveEvent::DisplayGap(_) => seen.clear(),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// A control frame's cursor and its event.

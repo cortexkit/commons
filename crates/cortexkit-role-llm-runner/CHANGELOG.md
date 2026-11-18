@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.65
+
+- §9: a host drain before a planned host update is an untimed wait, never `host_unavailable`.
+- §7.1: `tool_input_delta` can name the tool on the first chunk of its
+  arguments, including after a display reset and in an attach snapshot.
+
 ## 0.8.64
 
 - Add optional `default_variant` to `HeadModel` so readers

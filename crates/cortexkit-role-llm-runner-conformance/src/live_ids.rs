@@ -1,13 +1,14 @@
 //! Provisional display ids, checked against an adapter's native storage boundary.
 
 use cortexkit_role_llm_runner::{
-    live::{LiveEvent, LiveSubscribeRequest},
+    live::{LiveEvent, LiveSubscribeRequest, EVENT_FIELD},
     subscribe::{kinds, SubscribeEvent},
 };
 use serde_json::Value;
 
 use crate::{
     cases::{Case, Ending},
+    live::check_tool_input_names,
     subject::LlmRunnerSubject,
     RunnerRoute,
 };
@@ -46,8 +47,14 @@ where
     }
     let before = events(&observed.before_storage)?;
     let after = events(&observed.after_storage)?;
+    check_tool_input_names(
+        before
+            .iter()
+            .chain(&after)
+            .map(|(event, wire)| (event, *wire)),
+    )?;
     let mut live_id = None;
-    for event in &before {
+    for (event, _) in &before {
         if let Some((mid, id, part)) = delta(event) {
             if !opt_in {
                 return Err(
@@ -66,14 +73,14 @@ where
         if observed.stored_mid.is_some() {
             return Err("the aborted message was stored".into());
         }
-        for event in &after {
+        for (event, _) in &after {
             if let Some((mid, id, part)) = delta(event) {
                 provisional(mid, id, part, &mut live_id)?;
             } else if !matches!(event, LiveEvent::DisplayReset) {
                 return Err("a never-stored message emitted a control event".into());
             }
         }
-        if after.last() != Some(&LiveEvent::DisplayReset) {
+        if !matches!(after.last(), Some((LiveEvent::DisplayReset, _))) {
             return Err("a never-stored message did not end with display_reset".into());
         }
         return Ok(Ending::Passed);
@@ -87,7 +94,7 @@ where
     }
     let mut started = false;
     let mut finished = false;
-    for event in &after {
+    for (event, _) in &after {
         match event {
             LiveEvent::MessageStarted(message) => {
                 if started || message.mid != mid || message.live_id != live_id {
@@ -124,16 +131,13 @@ where
     Ok(Ending::Passed)
 }
 
-fn events(frames: &[Value]) -> Result<Vec<LiveEvent>, String> {
+fn events(frames: &[Value]) -> Result<Vec<(LiveEvent, &Value)>, String> {
     frames
         .iter()
         .map(|raw| {
             let frame: SubscribeEvent =
                 serde_json::from_value(raw.clone()).map_err(|e| format!("stream frame: {e}"))?;
-            let wire = frame
-                .body
-                .get("event")
-                .ok_or("a stream frame has no event")?;
+            let wire = raw.get(EVENT_FIELD).ok_or("a stream frame has no event")?;
             let event = LiveEvent::decode_strict(wire)?;
             let display = delta(&event).is_some() || matches!(event, LiveEvent::DisplayReset);
             if frame.kind
@@ -148,7 +152,7 @@ fn events(frames: &[Value]) -> Result<Vec<LiveEvent>, String> {
             if !display && frame.cursor.is_none() {
                 return Err("a durable control event has no cursor".into());
             }
-            Ok(event)
+            Ok((event, wire))
         })
         .collect()
 }

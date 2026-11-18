@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.79
+
+- Pin llm-runner `=0.8.65` for the host-drain wait clarification.
+- Reject `tool_name` on a continuation of a live `tool_input_delta`.
+
 ## 0.17.78
 
 - Pin llm-runner `=0.8.64`. Reject `session.head.model` replies with both

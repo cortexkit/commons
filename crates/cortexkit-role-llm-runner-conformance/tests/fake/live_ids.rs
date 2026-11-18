@@ -1,7 +1,7 @@
 //! A small delayed-storage runner: subscriber ids depend on native storage state.
 
 use cortexkit_role_llm_runner::live::LiveSubscribeRequest;
-use cortexkit_role_llm_runner_conformance::LiveIdsObservation;
+use cortexkit_role_llm_runner_conformance::{LiveIdsObservation, SCRIPTED_TOOL};
 use serde_json::{json, Value};
 
 use super::Defects;
@@ -26,8 +26,11 @@ impl Runner<'_> {
         self.frames.push(frame);
     }
 
-    fn delta(&mut self, kind: &str) {
+    fn delta(&mut self, kind: &str, tool_name: Option<Value>) {
         let mut event = json!({"type":kind,"message_id":"","tool_call_id":"call-1","delta":"words","part":"part-1"});
+        if let Some(name) = tool_name {
+            event["tool_name"] = name;
+        }
         if self.stored.is_none() || self.defects.live_ids_after_storage {
             if self.opt_in || self.defects.live_ids_without_opt_in {
                 event["live_id"] = "live-1".into();
@@ -72,9 +75,9 @@ pub(super) fn observe(
     if defects.live_ids_started_before_storage {
         runner.started();
     }
-    runner.delta("reasoning_delta");
-    runner.delta("text_delta");
-    runner.delta("tool_input_delta");
+    runner.delta("reasoning_delta", None);
+    runner.delta("text_delta", None);
+    runner.delta("tool_input_delta", None);
     let before = std::mem::take(&mut runner.frames);
     if store {
         runner.stored = Some("stored-1".into());
@@ -83,11 +86,19 @@ pub(super) fn observe(
             event["mid"] = "stored-1".into();
             runner.emit(false, event);
         }
+        if runner.opt_in && !defects.live_ids_store_at_end {
+            runner.delta(
+                "tool_input_delta",
+                defects
+                    .tool_input_name_json_on_continuation
+                    .map(|json| serde_json::from_str(json).expect("the fake name is valid JSON")),
+            );
+        }
         runner.emit(false, json!({"type":"display_reset"}));
         if !defects.live_ids_store_at_end {
-            runner.delta("text_delta");
-            runner.delta("reasoning_delta");
-            runner.delta("tool_input_delta");
+            runner.delta("text_delta", None);
+            runner.delta("reasoning_delta", None);
+            runner.delta("tool_input_delta", Some(json!(SCRIPTED_TOOL)));
         }
         runner.emit(true, json!({"type":"message_finished","mid":"stored-1"}));
     } else if !defects.live_ids_no_reset {

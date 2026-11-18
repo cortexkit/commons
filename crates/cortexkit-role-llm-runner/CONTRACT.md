@@ -3120,7 +3120,7 @@ new members.
   instead (**Attach replay** below). They use the envelope
   `{kind: "display", event: {type, ...}}`:
   `text_delta {message_id, delta, tool_call_id?}`, `reasoning_delta
-  {message_id, delta}`, `tool_input_delta {tool_call_id, delta}`,
+  {message_id, delta}`, `tool_input_delta {tool_call_id, delta, tool_name?}`,
   `display_gap {dropped}`, `display_reset` and `run_status {awaits?}`. `message_id` is the model
   provider's id and may be empty. For an assistant message in scope of
   §4.2.2, grouped by the part's key: in the last display epoch for that
@@ -3136,6 +3136,16 @@ new members.
   `live_id`. Without that opt-in, `mid` is known from the first delta and
   unchanged across a `display_reset`; unstored words wait until it is known.
   Deltas are coalesced chunks, never one per token.
+- [pinned] **Tool names on input deltas (added in 0.8.65).** `tool_name` is
+  the called tool's name. A chunk with `tool_name` begins that call's
+  arguments text: it is either the call's first chunk after `display_reset`
+  or the whole-text chunk for the call in an attach snapshot. A writer
+  omits `tool_name` on every later chunk and when it does not know the name.
+  A reader uses the name to label the call while its arguments are still
+  streaming.
+- [informative] No readers-first rollout is needed. `live::ToolInputDelta`
+  is non-exhaustive and live decoders ignore unknown members on this event,
+  so a reader that ignores `tool_name` is unaffected.
 - [pinned] **Provisional display ids (`live_ids`, added in 0.7.46).** A host
   that names a message only when storing it can stream words before storage:
   1. Opt-in is per subscriber. `LiveSubscribeRequest.live_ids` is a boolean,
@@ -3486,7 +3496,8 @@ Model-view reads and replacement-entry pages are not part of this contract.
     this time holds it, where a later attempt can succeed; a known repeatable
     failure instead follows the rules below. After 5 minutes (300
     seconds) of this wait, counted from the later of the send's acceptance and
-    the moment its run became due, the send ends `not_delivered`. A send
+    the moment its run became due, the send ends `not_delivered`. A host drain
+    before a planned host update never counts toward this wait. A send
     accepted to join the session's active run (a steer) is due from its
     acceptance and follows this same deadline if never handed to the host.
     The runner computes the deadline from its own durable timestamps so it
@@ -3563,8 +3574,10 @@ Model-view reads and replacement-entry pages are not part of this contract.
   that deadline or a proven host refusal, a queued send
   whose run never started stays queued without a time limit while its session
   is parked by its owner, or it waits on a running or paused turn, an account
-  or concurrency wait, or a context-ceiling wait, and runs when the session can
-  run again. It is never marked `not_delivered` for those waits. An interrupt
+  or concurrency wait, a context-ceiling wait, or a host drain before a planned
+  host update, bounded by the runner, and runs when the session can run again.
+  A host drain before a planned host update is never `host_unavailable`. The
+  send is never marked `not_delivered` for those waits. An interrupt
   or `run.cancel` ends only the running
   turn (§9, §9.22). A send queued for a later turn stays `pending` even if the
   host's own queue dropped it; the runner hands it over again itself under the

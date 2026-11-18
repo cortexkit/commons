@@ -6776,6 +6776,28 @@ async fn live_ids_correct_runner_passes_all_three_cases() {
 }
 
 #[tokio::test]
+async fn live_ids_tool_input_name_on_continuation_fails_by_name() {
+    for wire_name in [r#""conformance_echo""#, "null"] {
+        let report = live_ids_report(Defects {
+            tool_input_name_json_on_continuation: Some(wire_name),
+            ..Defects::default()
+        })
+        .await;
+        let failure = failed(&report, "live_ids_rekey_on_store");
+        assert!(
+            failure.contains("tool_input_delta carries tool_name on a non-first chunk"),
+            "tool_name {wire_name}: {failure}"
+        );
+        for name in [
+            "live_ids_not_sent_without_opt_in",
+            "live_ids_never_stored_resets",
+        ] {
+            assert_eq!(report.outcome(name), Some(&CaseOutcome::Passed));
+        }
+    }
+}
+
+#[tokio::test]
 async fn live_ids_storage_only_at_message_end_passes_all_three_cases() {
     let report = live_ids_report(Defects {
         live_ids_store_at_end: true,

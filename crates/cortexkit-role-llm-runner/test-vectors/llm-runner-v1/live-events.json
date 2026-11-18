@@ -142,11 +142,22 @@
       }
     },
     {
-      "name": "tool input delta",
+      "name": "first tool input delta names the tool",
       "event": {
         "type": "tool_input_delta",
         "tool_call_id": "toolu_2",
         "delta": "{\"q\":",
+        "tool_name": "search",
+        "mid": "m8",
+        "part": "2"
+      }
+    },
+    {
+      "name": "later tool input delta omits the tool name",
+      "event": {
+        "type": "tool_input_delta",
+        "tool_call_id": "toolu_2",
+        "delta": "\"weather\"}",
         "mid": "m8",
         "part": "2"
       }
@@ -162,6 +173,34 @@
       "name": "display reset",
       "event": {
         "type": "display_reset"
+      }
+    },
+    {
+      "name": "first tool input delta after display reset names the tool again",
+      "event": {
+        "type": "tool_input_delta",
+        "tool_call_id": "toolu_2",
+        "delta": "{\"q\":",
+        "tool_name": "search",
+        "mid": "m8",
+        "part": "2"
+      }
+    },
+    {
+      "name": "display reset at the start of an attach snapshot",
+      "event": {
+        "type": "display_reset"
+      }
+    },
+    {
+      "name": "whole tool input in an attach snapshot names the tool",
+      "event": {
+        "type": "tool_input_delta",
+        "tool_call_id": "toolu_2",
+        "delta": "{\"q\":\"weather\"}",
+        "tool_name": "search",
+        "mid": "m8",
+        "part": "2"
       }
     }
   ],

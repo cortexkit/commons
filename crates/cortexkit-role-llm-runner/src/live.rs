@@ -490,6 +490,10 @@ impl TextDelta {
 pub struct ToolInputDelta {
     pub tool_call_id: String,
     pub delta: String,
+    /// The called tool's name, if known, on the chunk that begins the call's
+    /// arguments text after `display_reset` or in an attach snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -508,10 +512,17 @@ impl ToolInputDelta {
         Self {
             tool_call_id: tool_call_id.into(),
             delta: delta.into(),
+            tool_name: None,
             mid: Some(mid.into()),
             live_id: None,
             part: Some(part.into()),
         }
+    }
+
+    /// Name the tool on the first chunk of the call's arguments text.
+    pub fn with_tool_name(mut self, tool_name: impl Into<String>) -> Self {
+        self.tool_name = Some(tool_name.into());
+        self
     }
 }
 
@@ -901,6 +912,23 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn tool_input_delta_reads_an_optional_name_and_ignores_unknown_members() {
+        let delta = ToolInputDelta::new("call-1", "{}", "m1", "0");
+        let unnamed = serde_json::to_value(LiveEvent::ToolInputDelta(delta.clone())).unwrap();
+        assert!(unnamed.get("tool_name").is_none());
+
+        let named = LiveEvent::ToolInputDelta(delta.with_tool_name("search"));
+        let mut wire = serde_json::to_value(&named).unwrap();
+        assert_eq!(wire["tool_name"], "search");
+        wire["future_member"] = serde_json::json!({"extra": true});
+        assert_eq!(LiveEvent::decode_strict(&wire).unwrap(), named);
+
+        let frame: SubscribeEvent =
+            serde_json::from_value(serde_json::json!({"kind": "display", "event": wire})).unwrap();
+        assert_eq!(frame.live_event(), Some(named));
     }
 
     #[test]

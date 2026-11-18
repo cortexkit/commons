@@ -252,6 +252,7 @@ pub struct Defects {
     pub live_ids_no_reset: bool,
     pub live_ids_no_fixture: bool,
     pub live_ids_store_at_end: bool,
+    pub tool_input_name_json_on_continuation: Option<&'static str>,
     pub finish_first_step: bool,
     pub finish_length_as_stop: bool,
     pub finish_without_model_step: bool,
