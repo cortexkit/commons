@@ -31,6 +31,8 @@ use serde_json::{json, Value};
 
 #[path = "vectors/registration.rs"]
 mod registration;
+#[path = "vectors/workload.rs"]
+mod workload;
 
 /// Every vector file this test reads. A test checks this list against
 /// `vectors::FILES`, which `tests/vectors_feature.rs` checks against the
@@ -71,6 +73,7 @@ const FILES: &[&str] = &[
     "route-select-prefer.json",
     "route-select-settings.json",
     "route-select-task-ref.json",
+    "route-select-workload.json",
     "route-select.json",
     "runner-declarations.json",
 ];

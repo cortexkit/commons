@@ -1,5 +1,11 @@
 # cortexkit-role-routing
 
+Version 0.7.37 adds `select_workload`. Once routing advertises the group, modules
+can declare a workload such as `code` for a consumer or override it with
+`route.select`'s `requirements.workload`. Routing settings can override the
+name; the model catalog supplies the effort policy. Absent or unknown names do
+not apply workload-specific policy (CONTRACT.md §16.1.2).
+
 Version 0.7.34 adds `select_pin_origin`. Send `pin_origin: "user"` beside
 `pin` only after discovering that group. Routers honour the marker only from
 operator-enrolled callers (by default the full `reserved:prefrontal-core`

@@ -29,6 +29,11 @@ pub struct DemandDefaults {
     #[doc(hidden)]
     #[serde(skip)]
     pub priority_present: bool,
+    /// Distinguishes explicit null from omission for readers without `select_workload`.
+    /// Never serialized as a wire member.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub workload_present: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<ConsumerPriority>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,6 +60,9 @@ pub struct DemandDefaults {
     pub modalities: Option<Vec<Modality>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<bool>,
+    /// Workload name for catalog effort policy, declared only with `select_workload`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<String>,
     /// Unknown members are retained so validation can reject them by name.
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub unknown: BTreeMap<String, Value>,
@@ -77,6 +85,7 @@ impl<'de> Deserialize<'de> for DemandDefaults {
         Ok(Self {
             iq_present: fields.contains_key("iq"),
             priority_present: fields.contains_key("priority"),
+            workload_present: fields.contains_key("workload"),
             priority: take(&mut fields, "priority")?,
             iq: take(&mut fields, "iq")?,
             eq: take(&mut fields, "eq")?,
@@ -90,6 +99,7 @@ impl<'de> Deserialize<'de> for DemandDefaults {
             tool_capabilities: take(&mut fields, "tool_capabilities")?,
             modalities: take(&mut fields, "modalities")?,
             structured_output: take(&mut fields, "structured_output")?,
+            workload: take(&mut fields, "workload")?,
             unknown: fields,
         })
     }
@@ -110,6 +120,7 @@ impl PartialEq for DemandDefaults {
             && self.tool_capabilities == other.tool_capabilities
             && self.modalities == other.modalities
             && self.structured_output == other.structured_output
+            && self.workload == other.workload
             && self.unknown == other.unknown
     }
 }
@@ -127,6 +138,11 @@ impl DemandDefaults {
     pub fn with_priority(mut self, priority: ConsumerPriority) -> Self {
         self.priority_present = true;
         self.priority = Some(priority);
+        self
+    }
+    pub fn with_workload(mut self, workload: impl Into<String>) -> Self {
+        self.workload_present = true;
+        self.workload = Some(workload.into());
         self
     }
     pub fn with_ladder(mut self, ladder: Vec<String>) -> Self {
@@ -202,8 +218,8 @@ impl ConsumerDeclarations {
         self
     }
 
-    /// Validate for a reader without optional consumer groups. Even decoded
-    /// `iq: null` and `priority: null` are refused as unknown legacy members.
+    /// Validate for a reader without optional consumer groups. Explicit nulls
+    /// for gated members are refused as unknown legacy members.
     pub fn validate(&self) -> Result<(), DeclarationError> {
         self.validate_serving::<&str>(&[])
     }
@@ -211,6 +227,7 @@ impl ConsumerDeclarations {
     /// Validate typed declarations for the reader's advertised groups. With
     /// `consumer_declarations`, `iq: null` is absent and valid iq defaults apply.
     /// Priority independently requires `consumer_priority`, including null.
+    /// Workload independently requires `select_workload`, including null.
     pub fn validate_serving<C: AsRef<str>>(
         &self,
         capabilities: &[C],
@@ -222,6 +239,9 @@ impl ConsumerDeclarations {
             }
             if consumer.defaults.priority_present && consumer.defaults.priority.is_none() {
                 value["consumers"][index]["priority"] = Value::Null;
+            }
+            if consumer.defaults.workload_present && consumer.defaults.workload.is_none() {
+                value["consumers"][index]["workload"] = Value::Null;
             }
         }
         parse_consumer_declarations_serving(&value, capabilities)?;
@@ -852,6 +872,9 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
         let extended = capabilities
             .iter()
             .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_DECLARATIONS);
+        let workload_enabled = capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SELECT_WORKLOAD);
         let extensions = ["iq", "ladder", "placement", "selectors", "kind"];
         if let Some(field) = fields.keys().find(|key| {
             key.as_str() != "name"
@@ -859,6 +882,8 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
                     !capabilities
                         .iter()
                         .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_PRIORITY)
+                } else if key.as_str() == "workload" {
+                    !workload_enabled
                 } else if extensions.contains(&key.as_str()) {
                     !extended
                 } else {
@@ -881,7 +906,7 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
         if demands.get("iq").is_none_or(Value::is_null) {
             demands.insert("iq".into(), json!(0));
         }
-        parse_requirements(Some(&Value::Object(demands))).map_err(|refusal| {
+        parse_requirements(Some(&Value::Object(demands)), workload_enabled).map_err(|refusal| {
             let field = refusal
                 .detail
                 .get("field")

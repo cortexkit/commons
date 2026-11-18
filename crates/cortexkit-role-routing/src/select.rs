@@ -24,10 +24,15 @@ pub const REQUIREMENT_FIELDS: &[&str] = &[
     "questions",
     "input_tokens",
     "max_cost_usd",
+    "workload",
 ];
 
-/// Requirement members callers send only when the router lists them.
-pub const OPTIONAL_REQUIREMENT_FIELDS: &[&str] = &["questions", "input_tokens", "max_cost_usd"];
+/// Requirement members that older routers need not list in `requirement_fields`.
+pub const OPTIONAL_REQUIREMENT_FIELDS: &[&str] =
+    &["questions", "input_tokens", "max_cost_usd", "workload"];
+
+/// Currently known model catalog `workload.<name>.*` keys, not a validation list.
+pub const KNOWN_WORKLOADS: &[&str] = &["code", "reason", "synthesize", "lookup", "quick"];
 
 /// The highest `iq` or `eq` a request may state.
 pub const DEMAND_MAX: u8 = 100;
@@ -189,6 +194,10 @@ pub struct Requirements {
     /// Positive input-spend cap; requires a positive `input_tokens` estimate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cost_usd: Option<Number>,
+    /// Workload name for catalog effort policy, sent only with `select_workload`.
+    /// Unknown names are retained on the wire but do not apply workload policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<String>,
     /// Members this version does not define, kept so a provider can refuse
     /// them by name instead of losing them in a decode.
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -202,6 +211,11 @@ impl Requirements {
             iq,
             ..Self::default()
         }
+    }
+
+    pub fn with_workload(mut self, workload: impl Into<String>) -> Self {
+        self.workload = Some(workload.into());
+        self
     }
 }
 
@@ -744,6 +758,7 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// and `select_settings`, respectively.
 /// `pin_origin` requires `select_pin_origin` and a `pin`. Enrollment is checked
 /// by the provider after parsing, never inferred from request members.
+/// `requirements.workload` requires `select_workload`.
 /// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
@@ -816,7 +831,12 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
             "service_tier requires the service_tier group",
         ));
     }
-    let requirements = parse_requirements(members.object.get("requirements"))?;
+    let requirements = parse_requirements(
+        members.object.get("requirements"),
+        capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SELECT_WORKLOAD),
+    )?;
     let pin = members.optional_text("pin", None)?;
     let pin_origin: Option<PinOrigin> = members.optional("pin_origin")?;
     if pin_origin.is_some() && pin.is_none() {
@@ -1066,17 +1086,20 @@ pub(crate) fn parse_settings(value: Option<&Value>) -> Result<Option<SelectSetti
     }))
 }
 
-pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, Refusal> {
+pub(crate) fn parse_requirements(
+    value: Option<&Value>,
+    workload_enabled: bool,
+) -> Result<Requirements, Refusal> {
     let Some(Value::Object(object)) = value else {
         return Err(Refusal::invalid_requirements(
             "requirements",
             "requirements must be an object",
         ));
     };
-    if let Some(unknown) = object
-        .keys()
-        .find(|key| !REQUIREMENT_FIELDS.contains(&key.as_str()))
-    {
+    if let Some(unknown) = object.keys().find(|key| {
+        !REQUIREMENT_FIELDS.contains(&key.as_str())
+            || (!workload_enabled && key.as_str() == "workload")
+    }) {
         return Err(Refusal::invalid_requirements(
             unknown.clone(),
             format!("{unknown} is not a requirement this provider reads"),
@@ -1094,6 +1117,13 @@ pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, 
     };
     let iq = demand("iq", Some(members.required("iq")?))?.unwrap_or_default();
     let eq = demand("eq", members.optional("eq")?)?;
+    let workload: Option<String> = members.optional("workload")?;
+    if workload
+        .as_deref()
+        .is_some_and(|name| !is_workload_name(name))
+    {
+        return Err(members.refuse("workload", "workload must match ^[a-z][a-z0-9_]{0,31}$"));
+    }
     let tools: Option<ToolsRequirement> = members.optional("tools")?;
     if tools.as_ref().is_some_and(|tools| !tools.is_known()) {
         return Err(members.refuse("tools", "tools must be \"none\" or \"required\""));
@@ -1145,8 +1175,20 @@ pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, 
         questions,
         input_tokens,
         max_cost_usd,
+        workload,
         unknown: BTreeMap::new(),
     })
+}
+
+fn is_workload_name(name: &str) -> bool {
+    let Some((first, rest)) = name.as_bytes().split_first() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && rest.len() <= 31
+        && rest
+            .iter()
+            .all(|&byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 /// Why a `route.select` answer breaks a rule a consumer can check alone.
@@ -1327,10 +1369,13 @@ pub fn parse_select_request_with_defaults<C: AsRef<str>>(
     capabilities: &[C],
     defaults: &crate::declarations::DemandDefaults,
 ) -> Result<SelectRequest, Refusal> {
-    if !capabilities
+    let declaration_defaults = capabilities
         .iter()
-        .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_DECLARATIONS)
-    {
+        .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_DECLARATIONS);
+    let workload_default = capabilities
+        .iter()
+        .any(|cap| cap.as_ref() == crate::capabilities::SELECT_WORKLOAD);
+    if !declaration_defaults && !workload_default {
         return parse_select_request_serving(params, capabilities);
     }
     let mut params = params.clone();
@@ -1340,6 +1385,14 @@ pub fn parse_select_request_with_defaults<C: AsRef<str>>(
     {
         let defaults = serde_json::to_value(defaults).expect("declaration defaults are JSON");
         for field in REQUIREMENT_FIELDS {
+            let enabled = if *field == "workload" {
+                workload_default
+            } else {
+                declaration_defaults
+            };
+            if !enabled {
+                continue;
+            }
             if requirements.get(*field).is_none_or(Value::is_null) {
                 if let Some(value) = defaults.get(*field).filter(|v| !v.is_null()) {
                     requirements.insert((*field).into(), value.clone());
@@ -1457,7 +1510,7 @@ mod tests {
     fn decision_input_requirements_validate_and_keep_unknowns() {
         let valid = serde_json::json!({"iq": 0, "questions": 3,
             "input_tokens": 1000, "max_cost_usd": 0.01});
-        let parsed = parse_requirements(Some(&valid)).unwrap();
+        let parsed = parse_requirements(Some(&valid), false).unwrap();
         assert_eq!(parsed.questions, Some(3));
         assert_eq!(parsed.input_tokens, Some(1000));
         assert_eq!(
@@ -1485,7 +1538,7 @@ mod tests {
                 .unwrap()
                 .extend(addition.as_object().unwrap().clone());
             assert_eq!(
-                field(&parse_requirements(Some(&requirements)).unwrap_err()),
+                field(&parse_requirements(Some(&requirements), false).unwrap_err()),
                 expected
             );
         }
@@ -1493,13 +1546,13 @@ mod tests {
             serde_json::json!({"iq":0}),
             serde_json::json!({"iq":0,"input_tokens":0}),
         ] {
-            assert!(parse_requirements(Some(&value)).is_ok());
+            assert!(parse_requirements(Some(&value), false).is_ok());
         }
         let unknown = serde_json::json!({"iq":0,"future_requirement":1});
         let decoded: Requirements = serde_json::from_value(unknown.clone()).unwrap();
         assert_eq!(decoded.unknown["future_requirement"], 1);
         assert_eq!(
-            field(&parse_requirements(Some(&unknown)).unwrap_err()),
+            field(&parse_requirements(Some(&unknown), false).unwrap_err()),
             "future_requirement"
         );
     }

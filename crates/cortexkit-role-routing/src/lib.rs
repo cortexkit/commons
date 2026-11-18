@@ -213,6 +213,9 @@ pub mod capabilities {
     /// Enrolled callers mark a person's pin for the subscription reserve exemption.
     pub const SELECT_PIN_ORIGIN: &str = "select_pin_origin";
 
+    /// Routing reads workload in consumer declarations and `route.select` requirements.
+    pub const SELECT_WORKLOAD: &str = "select_workload";
+
     /// Multi-model panels and seat replacements.
     pub const SELECT_PANEL: &str = "select_panel";
     /// Read-only panel sizing without decisions or reservations.
@@ -287,6 +290,7 @@ pub mod capabilities {
         SELECT_EXCLUDE_PROVIDERS,
         SELECT_TASK_REF,
         SELECT_PIN_ORIGIN,
+        SELECT_WORKLOAD,
         SELECT_PANEL,
         SELECT_PANEL_ESTIMATE,
         BUDGET_QUOTE,

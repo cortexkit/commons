@@ -393,8 +393,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   with routes priced per token, never with a route paid from subscription
   quota. A consumer reads the policy here instead of knowing it.
 - [pinned] `requirement_fields` lists every requirement member the provider
-  reads. A `routing/v1` provider reads every member §5 defines
-  (`select::REQUIREMENT_FIELDS`), so it lists all of them.
+  reads. A `routing/v1` provider reads the members in `select::REQUIREMENT_FIELDS`
+  except optional members it does not serve (§5.1).
 - [pinned] `detail_supported` states whether a `detail: true` select is
   answered with the provider's explanation object.
 - [pinned] `capabilities` lists the optional groups the provider serves
@@ -467,6 +467,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `select_pin_slot`: operator-policy slot pins (§5.6).
   - `select_pin_origin`: enrolled callers mark a person's pin for the
     subscription keep-free reserve exemption (§§5.1, 9.1).
+  - `select_workload`: workload names in consumer declarations and
+    `route.select` requirements (§§5.1, 16.1.2).
   - `select_available_routes`: caller-reachable route restriction (§5.6).
   - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
   - `select_settings`: project and service-tier settings lookup (§5.6).
@@ -541,6 +543,11 @@ That group's additive defaults, attested namespace and selector rules are in §1
     only to routers listing it in `requirement_fields`.
     Existing `context_window` covers the largest single request, and
     `modalities: ["image"]` covers image inputs.
+  - `workload`: an optional workload name for model catalog effort policy
+    (§16.1.2). Modules send it only to providers advertising `select_workload`.
+    A provider without the group refuses the member by name, even if null.
+    With the group, null is absent; a malformed value is
+    `invalid_requirements {field: "workload"}`.
 - [pinned] A requirement member the provider does not read is refused
   `invalid_requirements {field}` naming it as sent; it is never ignored. A
   malformed requirement (a missing llm `iq`, a demand above 100, a `tools` or
@@ -2189,7 +2196,9 @@ Replacement params and answer:
   score to inject because JSON has no non-finite numeric literal.
   `route-account-continue.json` holds opt-in continuation requests, all three
   outcomes, an identical-offer retry, refusal reasons and malformed or
-  undeclared requests (§9.1.1). `SHA256SUMS` pins every file.
+  undeclared requests (§9.1.1). `route-select-workload.json` holds consumer
+  declaration defaults, request overrides, unknown and absent workloads, and
+  malformed declarations and requests (§16.1.2). `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks
@@ -2468,6 +2477,29 @@ breaking release, after callers have migrated to `route.select`.
   accept it only with this group and reject invalid values by name. Presence
   metadata preserves null through typed serving validation without emitting
   a new wire member; omission keeps old bytes and equality unchanged.
+
+#### 16.1.2 Catalog effort policy — group `select_workload`
+
+- [pinned] Consumer declarations may include optional `workload` on the
+  flattened consumer object. LLM `route.select` reads the same member under
+  `requirements`. A workload name is a string matching `^[a-z][a-z0-9_]{0,31}$`.
+  Validation checks the shape, not membership in a fixed list. A malformed
+  declaration is `InvalidField` naming `consumers[i].workload`.
+- [pinned] Routing uses `consumers.<name>.workload` from its own settings if
+  configured; otherwise explicit `requirements.workload` overrides the
+  declared default. After resolving precedence, an unknown name is accepted
+  and treated as no workload, not as a reason to fall back to the declaration.
+  Without a workload, routing skips the per-workload default effort, minimum
+  and exclusion. Effort values come only from the model catalog; there is no
+  effort override in the declaration, request or per-consumer workload setting.
+  Known names today are `code`, `reason`, `synthesize`, `lookup` and `quick`,
+  from the model catalog's `workload.<name>.*` keys.
+- [pinned] Routing advertises `select_workload` only once its reader is live.
+  Modules send `workload` in declarations and requests only to routing that
+  advertises the group. A declaration reader without the group rejects the
+  member by name, even when null. With the group, null or omission contributes
+  no workload at that level. Serializers omit absent values, preserving the
+  exact wire bytes of existing declarations and requests.
 
 ### 16.2 `runner_harness_facts` and shared exclusion specs
 

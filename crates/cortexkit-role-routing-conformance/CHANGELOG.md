@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.42
+
+- Pin routing `=0.7.37`, exposing its `select_workload` capability through `wire`.
+
 ## 0.10.41
 
 - Pin routing `=0.7.36`. Add `account_fork_of`-gated checks for exact parent

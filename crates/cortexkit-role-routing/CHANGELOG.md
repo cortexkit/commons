@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.37
+
+- Add optional `workload` to consumer declaration defaults and `route.select`
+  demand. A request overrides the declaration, and routing settings may override
+  the workload per consumer. Only the model catalog supplies effort defaults;
+  absent or unknown workloads do not apply workload-specific policy.
+- **Upgrading:** routing advertises `select_workload` only once its reader is
+  live. Modules send `workload` only after discovering that capability. Leaving
+  the member absent preserves the existing wire bytes.
+- The operator approved the workload names and catalog-owned effort on 18 Nov.
+
 ## 0.7.36
 
 - Add `account_fork_of` and optional strict `fork_of: {admission_id}` on

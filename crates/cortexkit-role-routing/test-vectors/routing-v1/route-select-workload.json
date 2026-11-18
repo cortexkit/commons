@@ -1,0 +1,21 @@
+{
+  "about": "With select_workload, request requirements override declaration defaults. Routing treats a well-formed unknown name as no workload after resolving precedence.",
+  "capabilities": ["select_workload"],
+  "declaration": {"consumers": [{"name": "example.review", "workload": "code"}, {"name": "example.chat"}]},
+  "declaration_wire": "{\"consumers\":[{\"name\":\"example.review\",\"workload\":\"code\"},{\"name\":\"example.chat\"}]}",
+  "requests": [
+    {"name": "declaration_default", "params": {"consumer": "example.review", "requirements": {"iq": 50}}, "resolved_workload": "code"},
+    {"name": "request_overrides_declaration", "params": {"consumer": "example.review", "requirements": {"iq": 50, "workload": "reason"}}, "resolved_workload": "reason"},
+    {"name": "unknown_does_not_fall_back", "params": {"consumer": "example.review", "requirements": {"iq": 50, "workload": "future_2"}}, "resolved_workload": "future_2"},
+    {"name": "absent", "params": {"consumer": "example.chat", "requirements": {"iq": 50}}, "resolved_workload": null, "wire": "{\"consumer\":\"example.chat\",\"requirements\":{\"iq\":50}}"},
+    {"name": "null_uses_declaration_default", "params": {"consumer": "example.review", "requirements": {"iq": 50, "workload": null}}, "resolved_workload": "code"}
+  ],
+  "refused": {
+    "params": {"consumer": "example.review", "requirements": {"iq": 50, "workload": "Code"}},
+    "refusal": {"code": "invalid_requirements", "detail": {"field": "workload"}}
+  },
+  "invalid_declaration": {
+    "declaration": {"consumers": [{"name": "example.review", "workload": "Code"}]},
+    "field": "consumers[0].workload"
+  }
+}

@@ -1190,11 +1190,9 @@ impl FakeRoute {
                 describe = describe.with_capability(*group);
             }
         }
-        describe.requirement_fields.extend(
-            cortexkit_role_routing_conformance::wire::select::OPTIONAL_REQUIREMENT_FIELDS
-                .iter()
-                .map(|field| (*field).to_owned()),
-        );
+        describe
+            .requirement_fields
+            .extend(["questions", "input_tokens", "max_cost_usd"].map(str::to_owned));
         if self.extensions {
             describe = describe.with_capability("select_pin_origin");
             describe = describe.with_capability("select_engine");
