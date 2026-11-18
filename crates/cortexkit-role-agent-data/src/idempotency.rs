@@ -4,8 +4,9 @@
 //! Every op that changes state (`prepare`, `export`, `import`, `activate`,
 //! `abort`, `release`) is keyed by `(cutId, op)`, and the whole request is
 //! compared. A repeat that is the same request gets the first reply back;
-//! a repeat with any field different (another ref set, `holder`, anything
-//! else) is refused `id_reused`. The reads (`describe`, `busy`, `status`,
+//! a repeat with any field different (another ref set, `holder` or
+//! `holderBox` on `release`, anything else) is refused `id_reused`.
+//! The reads (`describe`, `busy`, `status`,
 //! `diverged`) are exempt: they are answered afresh every time.
 //!
 //! The comparison is on the decoded request, so member order and

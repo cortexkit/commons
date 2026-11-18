@@ -193,7 +193,7 @@ impl std::fmt::Display for CutId {
 
 /// Whether `value` is exactly `len` characters of lowercase hex
 /// (`0-9`, `a-f`).
-fn is_lower_hex(value: &str, len: usize) -> bool {
+pub(crate) fn is_lower_hex(value: &str, len: usize) -> bool {
     value.len() == len
         && value
             .bytes()

@@ -228,8 +228,9 @@ The crate's source files use these words as defined here.
     compare as a set: a driver that rebuilds its list after a crash may
     reorder it, and a reordered list is the same request, never
     `id_reused`, which would stop the move for good;
-  - a repeat with any field different (another ref set, `holder` on
-    `release`, anything else) is refused `id_reused`.
+  - a repeat with any field different (another ref set, a different `holder`
+    or `holderBox` on `release`, anything else) is refused `id_reused`.
+    Adding or omitting `holderBox` on a repeat counts as a difference.
   - The comparison is on the decoded request: member order and whitespace
     on the wire never make two requests differ.
   - The reads `describe`, `busy`, `status` and `diverged` are exempt: they
@@ -606,18 +607,27 @@ unfreezes and removes its durable freeze; the receiver drops its staging.
 - **Step:** any earlier step (`none`, `prepared`, `exported`, `imported`),
   or `aborted` itself, → `aborted`.
 
-### 7.10 `agent_data.release {refs, cutId, holder}`
+### 7.10 `agent_data.release {refs, cutId, holder, holderBox?}`
 
 On the source, after the move record reads `activated`. The freeze becomes
 a durable tombstone naming the new holder (`holder` is its author
 pseudonym), and the old copy is hidden.
 
-- Request: `{refs, cutId, holder}` (`release::ReleaseRequest`).
+- Request: `{refs, cutId, holder, holderBox?}` (`release::ReleaseRequest`).
+  `holder` is required. `holderBox` is the new holder's permanent box id,
+  exactly 32 lowercase hex characters (`^[0-9a-f]{32}$`). A malformed
+  `holderBox` is refused `invalid_request` (§3), with `holderBox` named in
+  the error message.
+- When a participant names the holder to its own callers, it uses `holderBox`,
+  never the `holder` pseudonym. If the driver omits `holderBox`, the
+  participant names no holder rather than guessing.
+- Upgrade participant readers before drivers send `holderBox`. Readers
+  through 0.3.2 reject the unknown member and refuse the whole request.
 - Reply: `{enforced: bool}` (`release::ReleaseReply`). `enforced` is
   required.
-  - `true`: later local writes for these refs are refused, naming the
-    holder, by the participant to its own local callers, with the
-    participant's own error codes (§10).
+  - `true`: the participant refuses later writes for these refs by its
+    local callers, using its own error codes (§10) and naming the holder
+    only if `holderBox` was supplied.
   - `false`: the tombstone is recorded and the old copy hidden, but writes
     aren't blocked, so anything written afterwards becomes a fork that
     `diverged` reports (`advanced`) on a move back.

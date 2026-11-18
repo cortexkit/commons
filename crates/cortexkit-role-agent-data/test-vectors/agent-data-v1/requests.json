@@ -189,6 +189,21 @@
         "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
         "holder": "ada-mbp-7c1e"
       }
+    },
+    {
+      "name": "release names the new holder with a box id",
+      "method": "agent_data.release",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "sample.stream",
+            "ref": "stream-1"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+        "holder": "ada-mbp-7c1e",
+        "holderBox": "0123456789abcdef0123456789abcdef"
+      }
     }
   ],
   "refused": [
@@ -314,6 +329,22 @@
           }
         ],
         "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15"
+      },
+      "code": "invalid_request"
+    },
+    {
+      "name": "release with malformed holderBox",
+      "method": "agent_data.release",
+      "params": {
+        "refs": [
+          {
+            "ref_kind": "sample.stream",
+            "ref": "stream-1"
+          }
+        ],
+        "cutId": "7f3a9c2e5b8d41f6a0c3e9b7d2f84a15",
+        "holder": "ada-mbp-7c1e",
+        "holderBox": "0123456789ABCDEF0123456789ABCDEF"
       },
       "code": "invalid_request"
     },

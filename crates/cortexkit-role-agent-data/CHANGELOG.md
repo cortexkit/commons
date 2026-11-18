@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3
+
+- Add optional `holderBox` to `release` so participants can tell their callers
+  the new holder's box id. `holder` remains the required author pseudonym.
+  When `holderBox` is absent, name no holder to callers. Changing `holderBox`
+  on a repeat is `id_reused`.
+- Upgrade participant readers before drivers send `holderBox`: strict 0.3.2
+  readers refuse the whole request as `invalid_request` for the unknown
+  member. The wire version stays `agent-data/v1`.
+
 ## 0.3.2
 
 - Let a participant declare `optional: true` in its describe reply. When

@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-agent-data"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "cortexkit-role-llm-runner 0.8.65",
  "serde",
