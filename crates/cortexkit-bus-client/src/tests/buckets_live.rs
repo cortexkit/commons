@@ -331,7 +331,18 @@ async fn inbox_prefix_live_deliver_request_and_kv_watch() {
     assert_eq!(reader.box_id().unwrap().as_str(), BOX);
     assert_eq!(reader.inbox_prefix(), prefix);
     let mut deliveries = rig.admin.subscribe(format!("{prefix}.>")).await.unwrap();
-    rig.admin.flush().await.unwrap();
+    // Flushing writes the SUB to the socket but does not wait for the broker
+    // to process it. Receive a probe before sending the request on the reader.
+    let ready_subject = async_nats::Subject::from(format!("{prefix}.ready"));
+    rig.admin
+        .publish(ready_subject.clone(), "".into())
+        .await
+        .unwrap();
+    let ready = tokio::time::timeout(Duration::from_secs(10), deliveries.next())
+        .await
+        .expect("admin delivery subscription did not receive its readiness probe")
+        .expect("admin delivery subscription closed");
+    assert_eq!(ready.subject, ready_subject);
 
     let bucket_name = AccountNames::derive(reader.acct())
         .unwrap()
@@ -345,11 +356,12 @@ async fn inbox_prefix_live_deliver_request_and_kv_watch() {
         .unwrap();
     let info: Value = serde_json::from_slice(&reply.payload).unwrap();
     assert_eq!(info["config"]["name"], format!("KV_{bucket_name}"));
+    assert!(reply.subject.starts_with(&format!("{prefix}.")));
     let observed = tokio::time::timeout(Duration::from_secs(10), deliveries.next())
         .await
-        .unwrap()
-        .unwrap();
-    assert!(observed.subject.starts_with(&format!("{prefix}.")));
+        .expect("admin delivery subscription did not receive the stream info reply")
+        .expect("admin delivery subscription closed");
+    assert_eq!(observed.subject, reply.subject);
     assert_eq!(observed.payload, reply.payload);
 
     let mut watch = reader
