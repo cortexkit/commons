@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+- Preserve the holding computer's optional box id in whereabouts replies, and
+  provide a helper to check its lowercase hexadecimal format.
+- Preserve the optional delegated role in session lookup replies: `delegated` marks a session
+  opened on the agent's behalf for delegated work, such as a worker. The session the agent
+  itself talks in still omits the role.
+
 ## 0.1.3
 
 - Add optional `stale_since_ms` to `PinStatus`: present only when the registry

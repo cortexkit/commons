@@ -2,9 +2,8 @@
 
 The JSON files in `memory-context-v1/`, `agent-sessions-v1/`, and
 `agent-identity-reads-v1/` are unchanged published captures from the
-agent registry's handler. Each directory's `SHA256SUMS` lists exactly
-its copied JSON files; the checksum test verifies the
-manifests against the embedded bytes.
+agent registry's handler. Each directory's `SHA256SUMS` lists its JSON files;
+the checksum test verifies the manifests against the embedded bytes.
 
 Only context project/session and agent resolve/where/batch, session lookup and
 fleet identity records are included. Session writes and unrelated reads are not
@@ -28,6 +27,18 @@ captures remain unchanged.
 a runner, an OpenCode head with a null runner, a remote ended session, a `not_found`
 refusal, and an `invalid_request` refusal for an extra `session_id` param. Its
 SHA-256 is `32ec4b73a8571b8d534b76c4858d4d0190063c8343fe5aea5f2630e50a2c9544`.
+
+`sessions-delegated.json` is copied byte for byte from the agent registry's
+`agent-sessions-v1.10` tag. Its `agent.sessions` reply is checked as untyped JSON
+because this crate has no typed reply for that operation; the three lookup replies
+are checked with the corresponding types. The tag's `register-session-delegated.json`
+and `register-session-unknown-role.json` request samples are not bundled because
+this crate has no typed register-session request.
+
+`where-holder-box.json`, `where-box-unknown.json`, and `where-many-holder-box.json`
+are copied byte for byte from the agent registry's `agent-sessions-v1.11` tag.
+The tag's `node-self-box.json` is not bundled because this crate has no typed
+`node.self` reply.
 
 Record metadata is not part of a reply. Tests decode each reply and serialize
 through a sorted-key JSON value to compare with its exact embedded compact bytes.

@@ -21,6 +21,13 @@ const FOR_HARNESS: &str =
     include_str!("../test-vectors/agent-sessions-v1/session-for-harness.json");
 const LOOKUPS: &str = include_str!("../test-vectors/agent-sessions-v1/session-lookup-cases.json");
 const FLEET: &str = include_str!("../test-vectors/agent-identity-reads-v1/fleet-identity.json");
+const WHERE_BOX: &str =
+    include_str!("../test-vectors/agent-identity-reads-v1/where-holder-box.json");
+const WHERE_BOX_UNKNOWN: &str =
+    include_str!("../test-vectors/agent-identity-reads-v1/where-box-unknown.json");
+const MANY_BOX: &str =
+    include_str!("../test-vectors/agent-identity-reads-v1/where-many-holder-box.json");
+const DELEGATED: &str = include_str!("../test-vectors/agent-sessions-v1/sessions-delegated.json");
 
 #[derive(Deserialize)]
 struct Record<'a> {
@@ -220,8 +227,72 @@ fn where_unclaimed() {
 #[test]
 fn where_held_here() {
     let reply = whereabouts(WHERE, 1);
+    assert!(reply.holder_box.is_none());
     assert_eq!(reply.status, WhereStatus::HeldHere);
     assert_eq!(reply.holder_name.as_deref(), Some("This machine"));
+}
+
+#[test]
+fn where_box_single_and_flattened() {
+    let reply: AgentWhereReply = whereabouts(WHERE_BOX, 0);
+    assert_eq!(
+        reply.holder_box.as_deref(),
+        Some("abababababababababababababababab")
+    );
+    let unknown: AgentWhereReply = whereabouts(WHERE_BOX_UNKNOWN, 0);
+    assert_eq!(unknown.holder_box, None);
+    let many: AgentWhereManyReply = success(sample::<AgentWhereManyParams, _>(
+        MANY_BOX,
+        0,
+        "agent.where_many",
+    ));
+    assert_eq!(many.agents[0].whereabouts.holder_box, reply.holder_box);
+    assert_eq!(many.agents[1].whereabouts.holder_box, None);
+}
+
+#[test]
+fn box_id_format_check() {
+    assert!(is_valid_box_id("0123456789abcdef0123456789abcdef"));
+    for invalid in [
+        "",
+        "0123456789abcdef0123456789abcde",
+        "0123456789abcdef0123456789abcdef0",
+        "0123456789abcdef0123456789abcdeF",
+        "0123456789abcdef0123456789abcdeg",
+        "é123456789abcdef0123456789abcde",
+    ] {
+        assert!(!is_valid_box_id(invalid), "{invalid}");
+    }
+}
+
+#[test]
+fn delegated_session_vectors() {
+    let sessions: Value = success(sample::<AgentIdParams, _>(DELEGATED, 0, "agent.sessions"));
+    assert_eq!(sessions["sessions"][0]["role"], "delegated");
+    let by_ref: AgentSessionForRefReply = success(sample::<AgentSessionForRefParams, _>(
+        DELEGATED,
+        1,
+        "agent.session_for_ref",
+    ));
+    let by_runner: AgentSessionForRunnerReply = success(sample::<AgentSessionForRunnerParams, _>(
+        DELEGATED,
+        2,
+        "agent.session_for_runner",
+    ));
+    let by_harness: AgentSessionForHarnessReply = success(
+        sample::<AgentSessionForHarnessParams, _>(DELEGATED, 3, "agent.session_for_harness"),
+    );
+    assert_eq!(by_ref.role, Some(SessionRole::Delegated));
+    assert_eq!(by_runner.role, Some(SessionRole::Delegated));
+    assert_eq!(by_harness.role, Some(SessionRole::Delegated));
+    let head: AgentSessionForHarnessReply = success(sample::<AgentSessionForHarnessParams, _>(
+        FOR_HARNESS,
+        1,
+        "agent.session_for_harness",
+    ));
+    assert_eq!(head.role, None);
+    assert!(serde_json::from_str::<SessionRole>("\"other\"").is_err());
+    assert!(serde_json::from_str::<SessionRole>("\"head\"").is_err());
 }
 
 #[test]
@@ -787,6 +858,9 @@ fn vector_checksums() {
                 ("agent-resolve-merged.json", RESOLVE_MERGED),
                 ("agent-resolve.json", RESOLVE),
                 ("fleet-identity.json", FLEET),
+                ("where-box-unknown.json", WHERE_BOX_UNKNOWN),
+                ("where-holder-box.json", WHERE_BOX),
+                ("where-many-holder-box.json", MANY_BOX),
             ],
         ),
         (
@@ -804,6 +878,7 @@ fn vector_checksums() {
                 ("session-for-ref.json", FOR_REF),
                 ("session-for-runner.json", FOR_RUNNER),
                 ("session-lookup-cases.json", LOOKUPS),
+                ("sessions-delegated.json", DELEGATED),
                 ("where-many.json", MANY),
                 ("where-moving-receiver.json", RECEIVER),
                 ("where-moving-source.json", SOURCE),

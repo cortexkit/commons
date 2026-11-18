@@ -45,6 +45,20 @@ macro_rules! open_string {
 }
 
 macro_rules! wire_struct {
+    ($(#[$doc:meta])* $name:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? ; $(#[$extra_attr:meta])* $extra:ident: $extra_ty:ty }) => {
+        #[non_exhaustive]
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        $(#[$doc])*
+        pub struct $name {
+            $($(#[$attr])* pub $field: $ty,)*
+            $(#[$extra_attr])* pub $extra: Option<$extra_ty>,
+        }
+        impl $name {
+            /// Constructs data without validating relationships between fields.
+            #[allow(clippy::too_many_arguments)]
+            pub fn new($($field: $ty),*) -> Self { Self { $($field,)* $extra: None } }
+        }
+    };
     ($(#[$doc:meta])* $name:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
         // Caller attributes come after the derive so serde container
         // attributes such as `deny_unknown_fields` are accepted.
@@ -58,6 +72,15 @@ macro_rules! wire_struct {
             pub fn new($($field: $ty),*) -> Self { Self { $($field,)* } }
         }
     };
+}
+
+/// Checks whether a box id is exactly 32 lowercase hexadecimal characters.
+/// Reply decoding does not validate this format automatically.
+pub fn is_valid_box_id(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 wire_struct!(
@@ -307,6 +330,10 @@ wire_struct!(
         move_warnings: Presence<Vec<MoveWarning>>,
         #[serde(rename = "moveDiagnostics", default, skip_serializing_if = "Presence::is_missing")]
         move_diagnostics: Presence<Vec<MoveDiagnostic>>,
+        ;
+        /// The holding computer's box id, when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        holder_box: String
     }
 );
 pub type AgentWhereReply = AgentWhere;
@@ -346,6 +373,16 @@ wire_struct!(
 );
 /// Request envelope for a session lookup by harness and session.
 pub type AgentSessionForHarnessRequest = Request<AgentSessionForHarnessParams>;
+/// How a session relates to its agent. A session the agent itself talks in (its head
+/// session) carries no role. A session opened on the agent's behalf to do delegated work,
+/// such as a worker it launched, is marked `delegated`, so moving the agent to another
+/// computer leaves it where it runs. Only `delegated` is represented because head rows omit
+/// the member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionRole {
+    Delegated,
+}
 wire_struct!(
     /// Reference lookup row, distinct from the runner lookup's lifecycle row.
     AgentSessionForRefReply {
@@ -358,6 +395,9 @@ wire_struct!(
         #[serde(rename = "heldOn", default, skip_serializing_if = "Presence::is_missing")]
         held_on: Presence<String>,
         incarnation: String,
+        ;
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: SessionRole
     }
 );
 open_string!(SessionNetwork { Yes => "yes", No => "no", Unknown => "unknown" });
@@ -376,6 +416,9 @@ wire_struct!(
         held_on: Presence<String>,
         ended_at_ms: Option<i64>, network: SessionNetwork,
         network_history: Vec<SessionNetworkEntry>, incarnation: String,
+        ;
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: SessionRole
     }
 );
 wire_struct!(
@@ -391,6 +434,9 @@ wire_struct!(
         held_on: Presence<String>,
         ended_at_ms: Option<i64>, network: SessionNetwork,
         network_history: Vec<SessionNetworkEntry>, incarnation: String,
+        ;
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: SessionRole
     }
 );
 

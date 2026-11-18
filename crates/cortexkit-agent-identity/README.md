@@ -6,7 +6,8 @@ Serde-only requests and replies for the agent registry's `context.project`,
 and `agent.fleet_identity` reads. Version 0.1.2 adds harness session lookup
 compatibly to 0.1.1, including sessions without a recorded runner.
 
-The crate does no I/O, ID/path validation, or cross-field validation. Params
+The crate does no I/O, automatic ID/path validation, or cross-field validation.
+`is_valid_box_id` provides an explicit check for box IDs. Params
 types refuse unknown members, as the handler does; ID syntax, `agentIds` count
 and duplicates are still checked only by the handler. It uses workspace
 `cortexkit-project-identity` with version requirement `0.1.4` (retained for
@@ -201,6 +202,7 @@ refusal aborts the whole read. `AgentWhereEntry.whereabouts` is flattened in JSO
 | `known` | bool, R | Local cache exists or sharing disabled; foreign reads always false. |
 | `status` | `WhereStatus`, R | `unclaimed`, `held_here`, `held_elsewhere`, or future string. |
 | `holder` | string, R+N | Cached holder, null without a holder. |
+| `holder_box` | string, O | Holding computer's box ID, 32 lowercase hexadecimal characters; omitted when unknown. |
 | `holder_name` | string, R+N | Known member name, null without local author/holder/name. |
 | `epoch` | i64, R | Cached epoch, zero without a claim. |
 | `cut_id` | string, R+N | Cached cut ID; does not imply a local move. |
@@ -274,6 +276,7 @@ Reply: `AgentSessionForRefReply`.
 | `runner` | string, O | Present only when recorded; **never null**. |
 | `heldOn` | string, O | Remote holder of finished session data; exact camelCase spelling. |
 | `incarnation` | string, R | Handler lifetime nonce. |
+| `role` | `SessionRole`, O | `delegated` for a session opened on the agent's behalf for delegated work (such as a worker); absent for the session the agent itself talks in. |
 
 A missing reference, including a structurally valid unknown kind, refuses
 `not_found` (`RefusalCode::NotFound`), not a null result or `found: false`.
@@ -311,6 +314,7 @@ Reply: `AgentSessionForRunnerReply`, deliberately separate from the ref row.
 | `network_history[].network` | `SessionNetwork`, R | Same network vocabulary. |
 | `network_history[].since_ms` | i64, R | Timestamp in milliseconds. |
 | `incarnation` | string, R | Handler lifetime nonce. |
+| `role` | `SessionRole`, O | `delegated` for a session opened on the agent's behalf for delegated work (such as a worker); absent for the session the agent itself talks in. |
 
 There is no `session_id` reply member. An unknown pair, wrong runner or
 runnerless binding refuses `not_found`. Runnerless rows cannot match the query;
