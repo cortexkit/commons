@@ -187,19 +187,23 @@ idempotency key. It requires `outcome`, permits
 `reason`, and makes `durationMs` optional: deferred run time can be a declared
 provider field. All other record field rules apply unchanged.
 
-### 3.1 No free-text kinds
+### 3.1 Field kinds
 
-`RecordSchema` is `{name, revision, fields: {<field>: <kind>}}`, with a u64
-integer `revision`. `fields` declares **every provider extension field**, not
-just strings. It cannot redefine a standard field. A declared extension is
-optional, but when present must be one scalar of its kind or a **nonempty array
-of at most 64 scalars** of that kind. Nested objects, arrays of arrays, nulls,
-wrong JSON types and every undeclared extension fail the schema check. The same
-schema describes records and completions; standard fields are always validated
-by their fixed rules, never by declarations. There is no free-text kind: each
-kind is a code, an identifier, a number, a boolean, a project path, a web
-origin or an app id, checked by its lexical rule. The validators can't tell
-whether a string that passes those rules is meaningful. The fixed `message`
+`RecordSchema` is `{name, revision, fields, completion_fields?}`, with a u64
+integer `revision`. Each map declares provider extension names and their kinds.
+`fields` applies to both records and completions; `completion_fields` adds
+fields only for completions. An absent `completion_fields` means an empty map;
+an empty map is omitted when serialized. Neither map may redefine a standard
+field or declare a name already present in the other map. The
+`completion_fields` map is part of a view's `record_schema`, which never changes
+for a given pin. A provider adds a completion field only with a new schema pin.
+
+A declared extension is optional. Except for `text_lines`, a present field
+must be one scalar of its kind or a **nonempty array of at most 64 scalars** of
+that kind. Nested objects, arrays of arrays, nulls, wrong JSON types and every
+undeclared extension fail the schema check. Standard fields are always
+validated by their fixed rules, never by declarations. The validators can't
+tell whether a string that passes the rules is meaningful. The fixed `message`
 body (§9) is not a provider extension schema and adds no `FieldKind`.
 
 The display server doesn't check bodies against the schema when it stores a
@@ -208,7 +212,7 @@ server checks a record or completion against its view's schema when it joins
 it (`validate_record`, `validate_completion`), and leaves a body that fails out
 of the transcript, showing the call without display data.
 
-| Kind | Scalar rule |
+| Kind | Rule |
 | --- | --- |
 | `code` | string matching `^[a-z][a-z0-9_]{0,63}$` |
 | `id` | string following subc-protocol's opaque-field rule |
@@ -219,6 +223,22 @@ of the transcript, showing the call without display data.
 | `project_path` | nonempty project-relative string, at most 1,024 UTF-8 bytes; `/` separators; not absolute, a drive path or UNC path; no `..` segment or NUL |
 | `web_origin` | lowercase `scheme://host[:port]`, with no userinfo, path (even `/`), query or fragment |
 | `app_id` | nonempty reverse-DNS id or executable base name, at most 255 bytes, matching `[A-Za-z0-9._-]+`, with no path separator |
+| `text_lines` | only in `completion_fields`: JSON array of zero to three line objects |
+
+A `text_lines` line object requires `text`, a string of 1–200 Unicode scalar
+values with no control characters (`char::is_control()`, including line breaks,
+tabs and ESC). It may have a `tone` of `"muted"` or `"danger"`; omitting `tone`
+uses the default tone. No other members are allowed. An invalid item is refused
+as an invalid field, with its index and, when applicable, member name (for
+example `tail[1].text`). A declaration outside completion fields is refused as
+an invalid schema, naming the field.
+
+Writers strip ANSI escape sequences and cut a long line with a trailing `…`,
+which counts toward the 200-scalar limit. Providers are responsible for limiting
+the content to text the chat's step log already shows for the same call.
+Upgrade display servers to 0.1.12 before any provider declares `text_lines`.
+Older readers ignore `completion_fields` and refuse a completion carrying an
+undeclared field. The completion is lost, so the row stays without its tail.
 
 Apps render every kind as **plain text, never a link**, with one exception:
 an app may pass a value of an `id` field to its own item opener. The opener
@@ -227,10 +247,10 @@ question for the person (`ask_`), an artifact (`art_`) or a work item
 (`wi_`). Which of those an app can open is the app's own; an id it can't
 resolve stays plain text. The opener shows the app's own card for the item and
 never treats an id as a URL, so a wrong or forged id opens an item the app
-already holds or stays plain text, never a web page. The crate supplies one
-validator per kind, `FieldKind::validate_scalar`, the scalar-or-array
-`FieldKind::validate`, and `validate_record` / `validate_completion` to check
-required fields, fixed fields and provider declarations together.
+already holds or stays plain text, never a web page. The crate supplies
+`FieldKind::validate_scalar` for scalar kinds, `FieldKind::validate` for full
+field values, and `validate_record` / `validate_completion` to check required
+fields, fixed fields and provider declarations together.
 
 ## 4. Details
 

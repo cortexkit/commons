@@ -253,6 +253,10 @@ impl ViewManifest {
 }
 
 /// A view or the exact string `unknown`; no interpretation of template JSON.
+// Almost every entry is a manifest and `Unknown` carries nothing, so boxing
+// the manifest would only add an allocation per entry and change the public
+// pattern `ViewEntry::Manifest(manifest)`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ViewEntry {

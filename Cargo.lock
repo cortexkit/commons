@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-display"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "serde",
  "serde_jcs",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.15.13"
+version = "0.15.14"
 dependencies = [
  "cortexkit-bus-naming",
  "cortexkit-role-tool-display",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.14"
+version = "0.15.15"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",

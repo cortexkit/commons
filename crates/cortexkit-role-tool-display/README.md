@@ -25,8 +25,8 @@ cortexkit-role-tool-display = "0.1.0"
 
 The [contract](CONTRACT.md) is normative. `DisplayWrite`, `DisplayKind`,
 `DisplayLimits` and `WriteReply` cover writes; `RecordSchema`, `FieldKind` and
-the `schema` validators check flat records and completions against fixed
-field kinds, none of which is free text.
+the `schema` validators check records and completions against declared field
+kinds, including the completion-only `text_lines` kind for bounded step-log text.
 `canonical_body`, `idempotency_key`, `validate_write` and `write_outcome` are
 pure helpers. They do not route, persist, fetch views or authorize joins.
 `DisplayRead` names a provider-stored record to pull over its management surface;

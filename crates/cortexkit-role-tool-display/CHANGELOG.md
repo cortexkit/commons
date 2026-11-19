@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Add `text_lines`, a completion-only field for up to three bounded lines
+  already shown in the chat step log. The operator approved the tool-row mock.
+  Upgrade display servers before providers declare the new kind.
+
 ## 0.1.11
 
 - Add the `ask_answer` wake kind so apps can display answers as structured

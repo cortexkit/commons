@@ -83,6 +83,8 @@ fn field_kind_vectors_validate_every_scalar_kind() {
 fn record_and_completion_vectors_enforce_flat_declared_fields() {
     let fixture = vector("records.json");
     let schema: RecordSchema = serde_json::from_value(fixture["schema"].clone()).unwrap();
+    schema.validate().unwrap();
+    assert_eq!(serde_json::to_value(&schema).unwrap(), fixture["schema"]);
     for case in fixture["cases"].as_array().unwrap() {
         let result = if case["kind"] == "completion" {
             validate_completion(object(&case["body"]), &schema)
@@ -96,9 +98,59 @@ fn record_and_completion_vectors_enforce_flat_declared_fields() {
             case["name"]
         );
         if let Err(error) = result {
-            assert_eq!(error.field, case["field"].as_str().unwrap());
+            assert_eq!(
+                error.field,
+                case["field"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
         }
     }
+}
+
+#[test]
+fn record_and_completion_schema_vectors_refuse_invalid_declarations() {
+    let fixture = vector("records.json");
+    for case in fixture["invalid_schemas"].as_array().unwrap() {
+        let schema: RecordSchema = serde_json::from_value(case["schema"].clone()).unwrap();
+        let expected = case["field"].as_str().unwrap();
+        assert_eq!(schema.validate().unwrap_err().field, expected);
+        let body = json!({"durationMs": 1, "outcome": "success"});
+        assert_eq!(
+            validate_record(object(&body), &schema).unwrap_err().field,
+            expected
+        );
+        assert_eq!(
+            validate_completion(object(&body), &schema)
+                .unwrap_err()
+                .field,
+            expected
+        );
+    }
+}
+
+#[test]
+fn record_and_completion_schema_omits_empty_completion_fields() {
+    let legacy = json!({"name": "command", "revision": 1, "fields": {"exit_code": "integer"}});
+    let schema: RecordSchema = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(schema.completion_fields.is_empty());
+    assert_eq!(serde_json::to_value(&schema).unwrap(), legacy);
+
+    let mut explicit = legacy.clone();
+    explicit["completion_fields"] = json!({});
+    let explicit: RecordSchema = serde_json::from_value(explicit).unwrap();
+    assert_eq!(explicit, schema);
+    assert_eq!(serde_json::to_value(explicit).unwrap(), legacy);
+}
+
+#[test]
+fn record_and_completion_text_lines_count_unicode_scalars() {
+    let line = format!("{}…", "é".repeat(199));
+    let kind = FieldKind::TextLines;
+    let tail = json!([{"text": line}]);
+    assert!(kind.validate(&tail));
+    assert!(!kind.validate_scalar(&tail));
+    assert!(!kind.validate(&json!([{"text": format!("{line}é")}])));
 }
 
 #[test]

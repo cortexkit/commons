@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.15
+
+- Follows tool-provider 0.15.14; no new checks.
+
 ## 0.15.14
 
 - Follows tool-provider 0.15.13; no new checks.

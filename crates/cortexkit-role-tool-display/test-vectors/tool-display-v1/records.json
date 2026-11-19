@@ -1,5 +1,5 @@
 {
-  "schema":{"name":"command","revision":1,"fields":{"paths":"project_path","exit_code":"integer","ready":"boolean","job":"id"}},
+  "schema":{"name":"command","revision":1,"fields":{"paths":"project_path","exit_code":"integer","ready":"boolean","job":"id"},"completion_fields":{"tail":"text_lines","finished":"boolean"}},
   "cases":[
     {"name":"required","kind":"record","body":{"durationMs":12,"outcome":"success"},"valid":true},
     {"name":"missing_duration","kind":"record","body":{"outcome":"success"},"valid":false,"field":"durationMs"},
@@ -23,6 +23,27 @@
     {"name":"negative_held","kind":"record","body":{"durationMs":0,"outcome":"success","heldMs":-1},"valid":false,"field":"heldMs"},
     {"name":"completion_without_duration","kind":"completion","body":{"outcome":"success","exit_code":0},"valid":true},
     {"name":"completion_with_duration","kind":"completion","body":{"outcome":"error","reason":"killed","durationMs":12},"valid":true},
-    {"name":"completion_missing_outcome","kind":"completion","body":{"exit_code":0},"valid":false,"field":"outcome"}
+    {"name":"completion_missing_outcome","kind":"completion","body":{"exit_code":0},"valid":false,"field":"outcome"},
+    {"name":"completion_tail","kind":"completion","body":{"outcome":"error","exit_code":1,"finished":true,"tail":[{"text":"Checking files","tone":"muted"},{"text":"Read 12 files"},{"text":"Missing input","tone":"danger"}]},"valid":true},
+    {"name":"completion_empty_tail","kind":"completion","body":{"outcome":"success","tail":[]},"valid":true},
+    {"name":"completion_four_lines","kind":"completion","body":{"outcome":"success","tail":[{"text":"one"},{"text":"two"},{"text":"three"},{"text":"four"}]},"valid":false,"field":"tail[3]"},
+    {"name":"completion_long_line","kind":"completion","body":{"outcome":"success","tail":[{"text":"12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890…"}]},"valid":false,"field":"tail[0].text"},
+    {"name":"completion_empty_line","kind":"completion","body":{"outcome":"success","tail":[{"text":""}]},"valid":false,"field":"tail[0].text"},
+    {"name":"completion_newline","kind":"completion","body":{"outcome":"success","tail":[{"text":"one"},{"text":"two\nthree"}]},"valid":false,"field":"tail[1].text"},
+    {"name":"completion_escape","kind":"completion","body":{"outcome":"success","tail":[{"text":"\u001b[31mred"}]},"valid":false,"field":"tail[0].text"},
+    {"name":"completion_c1_control","kind":"completion","body":{"outcome":"success","tail":[{"text":"one\u0085two"}]},"valid":false,"field":"tail[0].text"},
+    {"name":"completion_unknown_tone","kind":"completion","body":{"outcome":"success","tail":[{"text":"one","tone":"bright"}]},"valid":false,"field":"tail[0].tone"},
+    {"name":"completion_null_tone","kind":"completion","body":{"outcome":"success","tail":[{"text":"one","tone":null}]},"valid":false,"field":"tail[0].tone"},
+    {"name":"completion_unknown_line_member","kind":"completion","body":{"outcome":"success","tail":[{"text":"one","extra":true}]},"valid":false,"field":"tail[0]"},
+    {"name":"completion_missing_line_text","kind":"completion","body":{"outcome":"success","tail":[{"tone":"muted"}]},"valid":false,"field":"tail[0].text"},
+    {"name":"completion_non_object_line","kind":"completion","body":{"outcome":"success","tail":["one"]},"valid":false,"field":"tail[0]"},
+    {"name":"completion_non_array_tail","kind":"completion","body":{"outcome":"success","tail":{"text":"one"}},"valid":false,"field":"tail"},
+    {"name":"record_completion_only_tail","kind":"record","body":{"durationMs":2,"outcome":"success","tail":[]},"valid":false,"field":"tail"},
+    {"name":"record_completion_only_boolean","kind":"record","body":{"durationMs":2,"outcome":"success","finished":true},"valid":false,"field":"finished"}
+  ],
+  "invalid_schemas":[
+    {"schema":{"name":"command","revision":1,"fields":{"tail":"text_lines"}},"field":"record_schema.fields.tail"},
+    {"schema":{"name":"command","revision":1,"fields":{"finished":"boolean"},"completion_fields":{"finished":"boolean"}},"field":"record_schema.completion_fields.finished"},
+    {"schema":{"name":"command","revision":1,"fields":{},"completion_fields":{"outcome":"code"}},"field":"record_schema.completion_fields.outcome"}
   ]
 }

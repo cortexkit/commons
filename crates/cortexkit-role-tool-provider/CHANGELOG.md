@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.14
+
+- No API or wire change. `ViewEntry` allows Clippy's large-variant lint: the record
+  schema in tool-display 0.1.12 makes a manifest larger, and boxing it would
+  change the public `ViewEntry::Manifest(manifest)` pattern.
+
 ## 0.15.13
 
 - Add optional `half_of` to `tool.views` rows so apps can show or hide a row

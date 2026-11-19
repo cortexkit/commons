@@ -8,10 +8,11 @@ existing spelling. Lookup examples describe server behavior, not an app read op.
 
 - `canonical.json`: equivalent bodies with differing spacing, key order and
   number spelling, with the exact RFC 8785 JCS bytes.
-- `field-kinds.json`: valid and invalid scalars for all nine field kinds,
+- `field-kinds.json`: valid and invalid scalars for all nine scalar field kinds,
   including traversal, drive/UNC paths, uppercase or suffixed origins and app paths.
 - `records.json`: required and fixed fields, held reasons, location, declared
-  scalars and arrays, forbidden nested/undeclared fields and completions.
+  scalars and arrays, forbidden nested and undeclared fields, and completions
+  with valid and invalid `text_lines` values and completion-field declarations.
 - `details.json`: free-form detail objects and standard cut metadata.
 - `writes.json`: limits, wire params, stored/already-stored/conflict/too-large
   answers and invalid params, with the retryable not-ready code.
