@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 
-use super::{is_liveness, FakeSubc, Server};
+use super::{FakeSubc, Server};
 use crate::{
     credentials::{cached_manager, CredentialManager, CredentialTransport},
     BusClient, BusClientOptions, Error, HubClient, Result,
@@ -128,7 +128,7 @@ async fn hub_obtains_connects_and_renews_with_hub_domain_and_inbox() {
         assert!(observed
             .subscriptions
             .iter()
-            .any(|subject| subject.starts_with(&format!("{PREFIX}.")) && !is_liveness(subject)));
+            .any(|subject| subject.starts_with(&format!("{PREFIX}."))));
         assert_eq!(observed.auth[0]["jwt"], "hub-jwt-0");
     }
 

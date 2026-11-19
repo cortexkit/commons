@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9
+
+- Replace a connection promptly when its credential is re-issued or its NATS
+  handler gives up reconnecting, even if renewal is still pending. Waiting
+  event readers and bucket watches resume on the replacement.
+- A connection with a stale credential skips reconnect delays. It may make a
+  burst of short failing attempts before it closes. The client waits briefly
+  for it to close before opening a replacement; the retry window for a current
+  credential is unchanged.
+
 ## 0.1.8
 
 - Add `HubClient` for a separate, on-demand federation-account connection.

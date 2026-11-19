@@ -25,10 +25,6 @@ use tokio::{
 use super::buckets_live::Rig;
 use crate::{EventDelivery, EventItem, EventReader};
 
-/// async-nats gives up after the client's reconnect bound, about 36 s after
-/// the connection drops. Waiting this long leaves room for scheduling delays.
-const PAST_THE_BOUND: Duration = Duration::from_secs(45);
-
 struct Proxy {
     url: String,
     accepts: Arc<AtomicUsize>,
@@ -157,49 +153,53 @@ async fn ended(connection: &cortexkit_bus_nats::NatsConnection) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replaced_connection_stops_reconnecting_within_the_bound() {
+async fn revoked_connection_closes_promptly_and_the_waiting_reader_resumes() {
     let Some(rig) = Rig::start().await else {
         return;
     };
+    let (names, context) = provision_events(&rig, "reader").await;
     let proxy = Proxy::start(rig.server.port).await;
-    let (client, _manager, issuer) = rig.client_via("occipital", &proxy.url).await;
+    let (client, _manager, issuer) = rig.client_via("reader", &proxy.url).await;
+    let mut reader = client.event_reader("m_reader").await.unwrap();
+    publish(&names, &context, "before-revocation").await;
+    let event = delivery(&mut reader).await;
+    assert_eq!(event.msg_id, "before-revocation");
+    event.ack().await.unwrap();
     let mut changes = client.connection_changes();
     changes.borrow_and_update();
     let old = client.connection();
-    let old_key = old
-        .inbox_prefix()
-        .strip_prefix("_INBOX.")
-        .unwrap()
-        .to_owned();
+    let old_key = old.inbox_prefix().strip_prefix("_INBOX.").unwrap();
 
-    // A ck-bus restart: every connection drops and the old key is revoked, so
-    // the old connection's reconnect makes the client re-issue and replace it.
-    issuer.revoked.lock().unwrap().push(old_key);
-    let outage = Instant::now();
-    proxy.down();
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    proxy.up();
-    tokio::time::timeout(Duration::from_secs(20), changes.changed())
-        .await
-        .expect("the client replaces the revoked connection")
-        .unwrap();
+    let next = delivery(&mut reader);
+    tokio::pin!(next);
+    assert!(futures_util::poll!(&mut next).is_pending());
+    tokio::select! {
+        () = async {
+            rig.revoke(&issuer, old_key).await;
+            tokio::time::timeout(Duration::from_secs(5), changes.changed())
+                .await
+                .expect("revocation prompts a swap without waiting for renewal")
+                .unwrap();
+        } => {}
+        _ = &mut next => panic!("the reader returned before the replacement and publish"),
+    }
     assert_ne!(client.connection().inbox_prefix(), old.inbox_prefix());
-    let at_replacement = proxy.accepts();
-
-    tokio::time::sleep_until(outage + PAST_THE_BOUND).await;
-    let settled = proxy.accepts();
     assert!(
-        settled > at_replacement,
-        "the replaced connection kept trying after the swap, until its bound"
+        ended(&old).await,
+        "the revoked connection must already have ended at the swap"
     );
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    let settled = proxy.accepts();
+    publish(&names, &context, "after-revocation").await;
+    let event = tokio::time::timeout(Duration::from_secs(5), next)
+        .await
+        .expect("the pending reader resumes on the replacement");
+    assert_eq!(event.msg_id, "after-revocation");
+    event.ack().await.unwrap();
     assert_eq!(
         proxy.accepts(),
         settled,
-        "the replaced connection still opens connections past its reconnect bound"
+        "the revoked connection does not try again after the swap"
     );
-    assert!(ended(&old).await, "the replaced connection has ended");
-    // The replacement is unaffected and was not replaced again.
     client.connection().client().flush().await.unwrap();
     assert!(!changes.has_changed().unwrap());
 }
@@ -236,14 +236,17 @@ async fn short_outage_keeps_the_same_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn long_outage_replaces_the_connection_and_the_reader_resumes() {
+async fn ended_connection_is_replaced_during_a_pending_renewal() {
     let Some(rig) = Rig::start().await else {
         return;
     };
-    let (names, context) = provision_events(&rig, "occipital").await;
+    let (names, context) = provision_events(&rig, "reader").await;
     let proxy = Proxy::start(rig.server.port).await;
-    let (client, _manager, _issuer) = rig.client_via("occipital", &proxy.url).await;
-    let mut reader = client.event_reader("m_occipital").await.unwrap();
+    let (client, renewal) = rig.client_with_pending_renewal("reader", &proxy.url).await;
+    tokio::time::timeout(Duration::from_secs(5), renewal.started.notified())
+        .await
+        .expect("renewal is pending before the outage");
+    let mut reader = client.event_reader("m_reader").await.unwrap();
     publish(&names, &context, "before-outage").await;
     let event = delivery(&mut reader).await;
     assert_eq!(event.msg_id, "before-outage");
@@ -279,10 +282,11 @@ async fn long_outage_replaces_the_connection_and_the_reader_resumes() {
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(!pending.is_finished(), "the reader waits for a replacement");
     proxy.up();
-    tokio::time::timeout(Duration::from_secs(60), changes.changed())
+    tokio::time::timeout(Duration::from_secs(5), changes.changed())
         .await
-        .expect("the client replaces the ended connection")
+        .expect("the client replaces the ended connection without waiting for renewal")
         .unwrap();
+    renewal.release.notify_one();
     client.connection().client().flush().await.unwrap();
 
     publish(&names, &context, "after-outage").await;

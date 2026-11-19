@@ -67,9 +67,11 @@ so a bus restart of about 30 seconds keeps the same connection and emits no
 change. After that the connection ends for good and the client replaces it the
 same way as a re-issue, retrying with backoff from 250 ms to 30 seconds while the
 bus is still down. `EventReader` and `BucketWatch` wait for the replacement
-instead of returning errors from the ended connection. A replaced connection
-also stops reconnecting within that bound, so it never keeps retrying with a
-revoked key.
+instead of returning errors from the ended connection. An in-flight renewal
+does not hold up replacement. When the old credential is no longer current,
+the connection skips reconnect delays and may make a burst of short failing
+attempts before it closes. The client waits briefly for the old connection to
+close before opening a replacement, but does not wait indefinitely.
 
 After any unseen change is consumed, `changed()` returns `Err` when the
 maintenance task ends and drops its sender. A terminal renewal refusal also

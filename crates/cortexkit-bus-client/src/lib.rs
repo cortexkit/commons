@@ -11,7 +11,10 @@ pub use events::{EventDelivery, EventItem, EventReader, MalformedDelivery, Malfo
 pub use hub::HubClient;
 
 use std::{
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
     time::Duration,
 };
 
@@ -24,9 +27,9 @@ use cortexkit_bus_trait::{ContentDigest, Headers, PublishReceipt, Stream};
 /// for claim checks.
 const CONTENT_DIGEST_HEADER: &str = "Ck-Content-Digest";
 use subc_client_rs::SubcConsumer;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
-use credentials::CredentialManager;
+use credentials::{CredentialManager, REPLACED_CREDENTIAL};
 
 /// Errors contain refusal codes, not credential JWTs or nonce signatures.
 #[derive(Debug, thiserror::Error)]
@@ -132,14 +135,14 @@ impl BusClient {
 impl ManagedConnection {
     async fn connect(manager: Arc<CredentialManager>, timeout: Duration) -> Result<Self> {
         let mut revisions = manager.revisions();
-        let (connection, mut ended) = loop {
+        let (connection, lifetime) = loop {
             revisions.borrow_and_update();
             manager.check_hub_refusal()?;
             let credential = manager.credential().await;
             match connect_current(manager.clone(), &credential, timeout).await {
                 Ok(current) if !revisions.has_changed().unwrap_or(false) => break current,
-                Ok((connection, _)) => {
-                    let _ = connection.close(Duration::from_millis(50)).await;
+                Ok((connection, mut lifetime)) => {
+                    lifetime.retire(&connection).await;
                 }
                 Err(_)
                     if manager.credential().await.credential_public
@@ -154,87 +157,16 @@ impl ManagedConnection {
         let shared = connection.clone();
         let (changes, receiver) = watch::channel(0);
         let task = tokio::spawn(async move {
-            let mut retry = None;
-            loop {
-                if manager.check_hub_refusal().is_err() {
-                    let current = shared
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone();
-                    let _ = current.close(Duration::from_millis(50)).await;
-                    return;
-                }
-                let credential = manager.credential().await;
-                let delay = retry
-                    .take()
-                    .unwrap_or_else(|| credentials::renewal_delay(credential.exp));
-                tokio::select! {
-                    result = revisions.changed() => { if result.is_err() { return; } }
-                    () = connection_ended(&mut ended) => {
-                        // Replace it through the same path as a re-issue, so
-                        // event readers and bucket watches rebind to the new one.
-                        tracing::warn!("bus connection closed for good; replacing it");
-                    }
-                    () = tokio::time::sleep(delay) => {
-                        if let Err(error) = manager.renew().await {
-                            if matches!(error, Error::HubUnavailable | Error::HubNotGranted) {
-                                continue;
-                            }
-                            if credentials::transient(&error) || matches!(error, Error::Transport(_)) {
-                                retry = Some(Duration::from_secs(5));
-                                continue;
-                            }
-                            // A terminal refusal (notably generation_not_live)
-                            // must not cause issuance under a dead generation.
-                            let refusal_code = match &error {
-                                Error::Refused(code) => code.as_str(),
-                                _ => "client_renewal_error",
-                            };
-                            tracing::warn!(
-                                refusal_code,
-                                "bus credential maintenance stopped; reconnect or report degraded"
-                            );
-                            return;
-                        }
-                        if !revisions.has_changed().unwrap_or(false) { continue; }
-                    }
-                }
-                let mut backoff = Duration::from_millis(250);
-                loop {
-                    let revision = *revisions.borrow_and_update();
-                    if manager.check_hub_refusal().is_err() {
-                        break;
-                    }
-                    let credential = manager.credential().await;
-                    match connect_current(manager.clone(), &credential, timeout).await {
-                        Ok((replacement, replacement_ended)) => {
-                            if revisions.has_changed().unwrap_or(false) {
-                                let _ = replacement.close(Duration::from_millis(50)).await;
-                                continue;
-                            }
-                            let old = {
-                                let mut slot = shared
-                                    .write()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                std::mem::replace(&mut *slot, replacement)
-                            };
-                            ended = replacement_ended;
-                            changes.send_replace(revision);
-                            // A replaced connection that is reconnecting can't
-                            // drain, and its auth callback now refuses every
-                            // attempt; MAX_RECONNECTS ends it instead.
-                            let _ = old.close(Duration::from_millis(50)).await;
-                            break;
-                        }
-                        Err(_) => {
-                            if manager.check_hub_refusal().is_err() {
-                                break;
-                            }
-                            tokio::time::sleep(backoff).await;
-                            backoff = (backoff * 2).min(Duration::from_secs(30));
-                        }
-                    }
-                }
+            // Renewal is a request to ck-bus that can wait or retry while
+            // async-nats has already given up on the connection. Run both
+            // side by side, so a lost connection is replaced at once and a
+            // replacement never cancels a renewal that is still in flight.
+            tokio::select! {
+                () = renew_credentials(&manager) => {}
+                () = replace_connections(&manager, &shared, &changes, revisions, lifetime, timeout) => {}
+            }
+            if manager.check_hub_refusal().is_err() {
+                let _ = snapshot(&shared).close(Duration::from_millis(50)).await;
             }
         });
         Ok(Self {
@@ -245,10 +177,111 @@ impl ManagedConnection {
     }
 
     fn snapshot(&self) -> NatsConnection {
-        self.connection
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        snapshot(&self.connection)
+    }
+}
+
+fn snapshot(connection: &RwLock<NatsConnection>) -> NatsConnection {
+    connection
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+async fn renew_credentials(manager: &CredentialManager) {
+    let mut revisions = manager.revisions();
+    let mut retry = None;
+    loop {
+        if manager.check_hub_refusal().is_err() {
+            return;
+        }
+        revisions.borrow_and_update();
+        let delay = match retry.take() {
+            Some(delay) => delay,
+            None => credentials::renewal_delay(manager.credential().await.exp),
+        };
+        tokio::select! {
+            result = revisions.changed() => {
+                if result.is_err() { return; }
+                continue;
+            }
+            () = tokio::time::sleep(delay) => {}
+        }
+        if let Err(error) = manager.renew().await {
+            if matches!(error, Error::HubUnavailable | Error::HubNotGranted) {
+                return;
+            }
+            if credentials::transient(&error) || matches!(error, Error::Transport(_)) {
+                retry = Some(Duration::from_secs(5));
+                continue;
+            }
+            // A terminal refusal (notably generation_not_live) must not cause
+            // issuance under a dead generation.
+            let refusal_code = match &error {
+                Error::Refused(code) => code.as_str(),
+                _ => "client_renewal_error",
+            };
+            tracing::warn!(
+                refusal_code,
+                "bus credential maintenance stopped; reconnect or report degraded"
+            );
+            return;
+        }
+    }
+}
+
+async fn replace_connections(
+    manager: &Arc<CredentialManager>,
+    connection: &RwLock<NatsConnection>,
+    changes: &watch::Sender<u64>,
+    mut revisions: watch::Receiver<u64>,
+    mut lifetime: ConnectionLifetime,
+    timeout: Duration,
+) {
+    loop {
+        tokio::select! {
+            result = revisions.changed() => {
+                if result.is_err() || manager.check_hub_refusal().is_err() { return; }
+                lifetime.retire(&snapshot(connection)).await;
+            }
+            _ = &mut lifetime.ended => {
+                tracing::warn!("bus connection closed for good; replacing it");
+            }
+        }
+
+        let mut backoff = Duration::from_millis(250);
+        loop {
+            let revision = *revisions.borrow_and_update();
+            if manager.check_hub_refusal().is_err() {
+                return;
+            }
+            let credential = manager.credential().await;
+            match connect_current(manager.clone(), &credential, timeout).await {
+                Ok((replacement, mut replacement_lifetime)) => {
+                    if revisions.has_changed().unwrap_or(false) {
+                        replacement_lifetime.retire(&replacement).await;
+                        continue;
+                    }
+                    *connection
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = replacement;
+                    lifetime = replacement_lifetime;
+                    changes.send_replace(revision);
+                    break;
+                }
+                Err(_) => {
+                    tokio::select! {
+                        result = revisions.changed() => {
+                            if result.is_err() { return; }
+                            backoff = Duration::from_millis(250);
+                        }
+                        () = tokio::time::sleep(backoff) => {
+                            backoff = (backoff * 2).min(Duration::from_secs(30));
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -401,57 +434,86 @@ impl BusClient {
 /// it gives up and ends the connection for good.
 ///
 /// async-nats waits nothing before the first attempt, then 2 ms doubling up to
-/// a 4 s cap, so twenty attempts span about 36 s: a ck-bus restart of about
-/// 30 s rides through on the same connection. The bound matters most for a
-/// replaced connection. Its credential is no longer current, so its auth
-/// callback refuses every attempt; without a bound it would keep connecting
-/// and failing every 4 s for the life of the process.
+/// a 4 s cap, so twenty attempts span about 36 s for a current credential:
+/// a ck-bus restart of about 30 s rides through on the same connection.
 const MAX_RECONNECTS: usize = 20;
 
-/// A subject under the connection's own inbox that nothing ever publishes to.
-/// A hyphen never appears in async-nats's generated inbox tokens, so it
-/// cannot collide with a request inbox.
-pub(crate) const LIVENESS_SUBJECT: &str = "bus-client-liveness";
+struct ConnectionLifetime {
+    stale: Arc<AtomicBool>,
+    ended: oneshot::Receiver<()>,
+}
 
-/// Resolves once async-nats has ended the connection for good: after it runs
-/// out of reconnect attempts, or after a drain. The connection's handler task
-/// then exits and drops every subscription, which ends this stream. The
-/// subscription survives ordinary reconnects because async-nats resubscribes it.
-/// async-nats 0.50 emits no `Event::Closed` when it gives up reconnecting, only
-/// a `ClientError::MaxReconnects` event that can be dropped from a full queue,
-/// and `NatsConnection` keeps its event stream private; the ended subscription
-/// is the signal that can't be missed.
-async fn connection_ended(ended: &mut async_nats::Subscriber) {
-    use futures_util::StreamExt;
-    while ended.next().await.is_some() {}
+impl ConnectionLifetime {
+    async fn retire(&mut self, connection: &NatsConnection) {
+        self.stale.store(true, Ordering::Relaxed);
+        // A connected handler can drain; a reconnecting one can't read that
+        // command. It skips further backoff now that its key can never sign.
+        let closed = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = connection.close(Duration::from_millis(50)).await;
+            let _ = (&mut self.ended).await;
+        })
+        .await;
+        if closed.is_err() {
+            tracing::warn!("old bus connection did not close in time; replacing it anyway");
+        }
+    }
 }
 
 async fn connect_current(
     manager: Arc<CredentialManager>,
     credential: &credentials::Credential,
     timeout: Duration,
-) -> Result<(NatsConnection, async_nats::Subscriber)> {
+) -> Result<(NatsConnection, ConnectionLifetime)> {
     let public = credential.credential_public.clone();
+    let stale = Arc::new(AtomicBool::new(false));
+    let auth_stale = stale.clone();
+    let delay_stale = stale.clone();
+    let (handler, ended) = oneshot::channel();
     let options = async_nats::ConnectOptions::with_auth_callback(move |nonce| {
         let manager = manager.clone();
         let public = public.clone();
-        // The spawned subc request future only needs to be Send; async-nats
-        // also requires the callback future to be Sync.
-        let task = tokio::spawn(async move {
-            let credential = manager.credential().await;
-            if credential.credential_public != public {
-                return Err(Error::Reply("connection credential was replaced"));
-            }
-            let signature = manager.sign(&public, nonce).await?;
-            let mut auth = async_nats::Auth::new();
-            auth.jwt = Some(credential.jwt);
-            auth.signature = Some(signature);
-            Ok(auth)
-        });
+        let stale = auth_stale.clone();
         async move {
+            if stale.load(Ordering::Relaxed) {
+                return Err(async_nats::AuthError::new(Error::Reply(
+                    REPLACED_CREDENTIAL,
+                )));
+            }
+            // The spawned nonce-signing request future only needs to be Send;
+            // async-nats also requires the callback future to be Sync.
+            let task = tokio::spawn(async move {
+                let credential = manager.credential().await;
+                if credential.credential_public != public {
+                    stale.store(true, Ordering::Relaxed);
+                    return Err(Error::Reply(REPLACED_CREDENTIAL));
+                }
+                let signature = manager.sign(&public, nonce).await.inspect_err(|error| {
+                    if matches!(error, Error::Reply(REPLACED_CREDENTIAL)) {
+                        stale.store(true, Ordering::Relaxed);
+                    }
+                })?;
+                if stale.load(Ordering::Relaxed) {
+                    return Err(Error::Reply(REPLACED_CREDENTIAL));
+                }
+                let mut auth = async_nats::Auth::new();
+                auth.jwt = Some(credential.jwt);
+                auth.signature = Some(signature);
+                Ok(auth)
+            });
             task.await
                 .map_err(async_nats::AuthError::new)?
                 .map_err(async_nats::AuthError::new)
+        }
+    })
+    .reconnect_delay_callback(move |attempts| {
+        // The handler owns this callback, so dropping it wakes the supervisor
+        // even when async-nats exits without emitting Closed (MaxReconnects).
+        let _handler = &handler;
+        if delay_stale.load(Ordering::Relaxed) || attempts <= 1 {
+            Duration::ZERO
+        } else {
+            // Match async-nats 0.50's default delay for a current credential.
+            Duration::from_millis((1 << (attempts - 1).min(12)).min(4000))
         }
     })
     .connection_timeout(timeout)
@@ -471,14 +533,7 @@ async fn connect_current(
         .await
     }
     .map_err(Error::from)?;
-    let subject = format!("{}.{LIVENESS_SUBJECT}", connection.inbox_prefix());
-    match connection.client().subscribe(subject).await {
-        Ok(ended) => Ok((connection, ended)),
-        Err(error) => {
-            let _ = connection.close(Duration::from_millis(50)).await;
-            Err(Error::Nats(error.to_string()))
-        }
-    }
+    Ok((connection, ConnectionLifetime { stale, ended }))
 }
 
 #[cfg(test)]

@@ -193,12 +193,6 @@ impl Server {
     }
 }
 
-/// Every connection also subscribes to a liveness subject under its inbox;
-/// only the request-reply subscription shows that the new inbox is in use.
-fn is_liveness(subject: &str) -> bool {
-    subject.ends_with(&format!(".{}", crate::LIVENESS_SUBJECT))
-}
-
 #[tokio::test]
 async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
     let server = Server::start().await;
@@ -271,7 +265,7 @@ async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
     assert!(seen
         .subscriptions
         .iter()
-        .any(|subject| subject.starts_with("_INBOX.UKEY1.") && !is_liveness(subject)));
+        .any(|subject| subject.starts_with("_INBOX.UKEY1.")));
 }
 
 #[tokio::test]
@@ -834,7 +828,7 @@ async fn event_reader_reissue_rebinds_pending_pull_and_redelivers_unacked_event(
     assert!(seen
         .subscriptions
         .iter()
-        .any(|subject| subject.starts_with("_INBOX.UKEY1.") && !is_liveness(subject)));
+        .any(|subject| subject.starts_with("_INBOX.UKEY1.")));
 }
 
 #[tokio::test]

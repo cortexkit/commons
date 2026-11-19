@@ -18,6 +18,7 @@ use cortexkit_bus_testkit::{
 use futures_util::StreamExt;
 use nkeys::KeyPair;
 use serde_json::{json, Value};
+use tokio::sync::Notify;
 
 use crate::{
     credentials::{CredentialManager, CredentialTransport},
@@ -51,6 +52,13 @@ pub(super) struct Issuer {
     pub(super) revoked: Mutex<Vec<String>>,
     signing: tokio::sync::Mutex<()>,
     sign_calls: AtomicUsize,
+    renewal_gate: Option<Arc<RenewalGate>>,
+}
+
+#[derive(Default)]
+pub(super) struct RenewalGate {
+    pub(super) started: Notify,
+    pub(super) release: Notify,
 }
 
 impl Issuer {
@@ -112,6 +120,12 @@ impl Issuer {
 #[async_trait]
 impl CredentialTransport for Issuer {
     async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        if method == "ckbus.credential_renew" {
+            if let Some(gate) = &self.renewal_gate {
+                gate.started.notify_one();
+                gate.release.notified().await;
+            }
+        }
         let _signing = if method == "ckbus.nonce_sign" {
             self.sign_calls.fetch_add(1, Ordering::SeqCst);
             Some(self.signing.lock().await)
@@ -122,7 +136,11 @@ impl CredentialTransport for Issuer {
         match method {
             "ckbus.credential" => {
                 keys.push(KeyPair::new_user());
-                Ok(self.credential(keys.last().unwrap()))
+                let mut credential = self.credential(keys.last().unwrap());
+                if self.renewal_gate.is_some() {
+                    credential["exp"] = json!(trust::unix_now() + 300);
+                }
+                Ok(credential)
             }
             "ckbus.credential_renew" => Ok(self.credential(keys.last().unwrap())),
             "ckbus.nonce_sign" => {
@@ -146,6 +164,34 @@ pub(super) struct Rig {
     account: String,
     acct: &'static str,
     pub(super) admin: async_nats::Client,
+    system: async_nats::Client,
+}
+
+async fn update_account(
+    server: &BusServer,
+    system: &async_nats::Client,
+    account: &str,
+    revocations: Value,
+) {
+    let account_jwt = jwt(
+        &server.trust.signer.root(&trust::signer_root_id()).pair,
+        account,
+        "bucket-fixture-account",
+        json!({"type":"account", "version":2,
+            "limits":{"subs":-1,"data":-1,"payload":-1,"imports":-1,"exports":-1,
+                "wildcards":true,"conn":-1,"leaf":-1,"mem_storage":104857600,
+                "disk_storage":104857600,"streams":-1,"consumer":-1},
+            "signing_keys":[server.trust.box_root_public()], "revocations":revocations}),
+    );
+    let update = system
+        .request("$SYS.REQ.CLAIMS.UPDATE", account_jwt.into())
+        .await
+        .unwrap();
+    let update: Value = serde_json::from_slice(&update.payload).unwrap();
+    assert!(
+        update.get("error").is_none(),
+        "account claim update: {update}"
+    );
 }
 
 impl Rig {
@@ -197,25 +243,7 @@ impl Rig {
         .connect(&server.url)
         .await
         .unwrap();
-        let account_jwt = jwt(
-            &server.trust.signer.root(&trust::signer_root_id()).pair,
-            &account,
-            "bucket-fixture-account",
-            json!({"type":"account", "version":2,
-                "limits":{"subs":-1,"data":-1,"payload":-1,"imports":-1,"exports":-1,
-                    "wildcards":true,"conn":-1,"leaf":-1,"mem_storage":104857600,
-                    "disk_storage":104857600,"streams":-1,"consumer":-1},
-                "signing_keys":[server.trust.box_root_public()]}),
-        );
-        let update = system
-            .request("$SYS.REQ.CLAIMS.UPDATE", account_jwt.into())
-            .await
-            .unwrap();
-        let update: Value = serde_json::from_slice(&update.payload).unwrap();
-        assert!(
-            update.get("error").is_none(),
-            "account claim update: {update}"
-        );
+        update_account(&server, &system, &account, json!({})).await;
         let key = KeyPair::new_user();
         let jwt = server.trust.user_jwt(
             &trust::box_root_id(),
@@ -258,7 +286,19 @@ impl Rig {
             account,
             acct,
             admin,
+            system,
         })
+    }
+
+    pub(super) async fn revoke(&self, issuer: &Issuer, public: &str) {
+        issuer.revoked.lock().unwrap().push(public.to_owned());
+        update_account(
+            &self.server,
+            &self.system,
+            &self.account,
+            json!({(public): trust::unix_now()}),
+        )
+        .await;
     }
 
     async fn client(&self, module: &'static str) -> (BusClient, Arc<CredentialManager>) {
@@ -289,6 +329,28 @@ impl Rig {
         url: &str,
         inbox_prefix: Option<String>,
     ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
+        self.connect_client(module, url, inbox_prefix, None).await
+    }
+
+    pub(super) async fn client_with_pending_renewal(
+        &self,
+        module: &'static str,
+        url: &str,
+    ) -> (BusClient, Arc<RenewalGate>) {
+        let gate = Arc::new(RenewalGate::default());
+        let (client, _, _) = self
+            .connect_client(module, url, None, Some(gate.clone()))
+            .await;
+        (client, gate)
+    }
+
+    async fn connect_client(
+        &self,
+        module: &'static str,
+        url: &str,
+        inbox_prefix: Option<String>,
+        renewal_gate: Option<Arc<RenewalGate>>,
+    ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
         let issuer = Arc::new(Issuer {
             url: url.into(),
             account: self.account.clone(),
@@ -300,6 +362,7 @@ impl Rig {
             revoked: Mutex::new(vec![]),
             signing: tokio::sync::Mutex::new(()),
             sign_calls: AtomicUsize::new(0),
+            renewal_gate,
         });
         let manager = CredentialManager::start(issuer.clone()).await.unwrap();
         let client =

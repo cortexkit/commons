@@ -13,6 +13,8 @@ use tokio::sync::{watch, Mutex, RwLock};
 
 use crate::{BusClientOptions, Error, Result};
 
+pub(crate) const REPLACED_CREDENTIAL: &str = "connection credential was replaced";
+
 pub(crate) const HUB_DOMAIN: &str = "hub";
 
 pub(crate) async fn module_manager(
@@ -323,7 +325,7 @@ impl CredentialManager {
     pub async fn sign(&self, public: &str, nonce: Vec<u8>) -> Result<Vec<u8>> {
         self.check_hub_refusal()?;
         if self.current.read().await.credential_public != public {
-            return Err(Error::Reply("connection credential was replaced"));
+            return Err(Error::Reply(REPLACED_CREDENTIAL));
         }
         match self
             .transport
@@ -347,7 +349,7 @@ impl CredentialManager {
                 self.reissue(public).await?;
                 // This connection still uses the old credential. Only a replacement
                 // connection may authenticate with the newly issued key.
-                Err(Error::Reply("connection credential was replaced"))
+                Err(Error::Reply(REPLACED_CREDENTIAL))
             }
             Err(error) => Err(error),
         }
