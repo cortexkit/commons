@@ -1,6 +1,9 @@
 use std::{
     future::Future,
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
     time::Duration,
 };
 
@@ -16,6 +19,7 @@ pub(crate) struct ConnectionBinding {
     changes: watch::Receiver<u64>,
     /// The connection the last successful [`Self::bind`] opened on.
     bound: Option<NatsConnection>,
+    forged_deliveries_dropped: Arc<AtomicU64>,
     /// Warning-branch executions for this binding, independent of tracing filters.
     #[cfg(test)]
     pub(crate) bucket_watch_capacity_warnings: usize,
@@ -27,6 +31,7 @@ impl ConnectionBinding {
             connection: client.managed.connection.clone(),
             changes: client.connection_changes(),
             bound: None,
+            forged_deliveries_dropped: client.forged_deliveries_dropped.clone(),
             #[cfg(test)]
             bucket_watch_capacity_warnings: 0,
         }
@@ -81,6 +86,19 @@ impl ConnectionBinding {
         match &self.bound {
             Some(connection) => wait_for_replacement(&mut self.changes, connection, error).await,
             None => Err(error),
+        }
+    }
+
+    pub(crate) fn drop_forged(&self, warned: &mut bool, expected: &str, subject: &str) {
+        self.forged_deliveries_dropped
+            .fetch_add(1, Ordering::Relaxed);
+        if !*warned {
+            *warned = true;
+            tracing::warn!(
+                subject,
+                expected,
+                "dropping forged delivery with unexpected origin or subject"
+            );
         }
     }
 }

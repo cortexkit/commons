@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10
+
+- Drop forged JetStream push deliveries before live hints or bucket watches
+  process their subjects or sequence metadata. Live hints require their exact
+  subscribed subject; bucket watches require their own stream and consumer and
+  a valid key in the watched bucket. The shared `forged_deliveries_dropped`
+  counter reports rejected deliveries without exposing their payloads.
+
 ## 0.1.9
 
 - Replace a connection promptly when its credential is re-issued or its NATS

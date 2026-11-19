@@ -2,7 +2,7 @@ use std::{future::Future, time::Duration};
 
 use async_nats::jetstream::{
     self,
-    consumer::{push, DeliverPolicy},
+    consumer::{push, AckPolicy, DeliverPolicy},
     kv,
     stream::ConsumerErrorKind,
 };
@@ -12,6 +12,8 @@ use cortexkit_bus_nats::NatsConnection;
 use futures_util::StreamExt;
 
 use crate::{binding::ConnectionBinding, BusClient, Error, Result};
+
+const WATCH_IDLE_HEARTBEAT: Duration = Duration::from_secs(5);
 
 /// A current value and its bucket-wide JetStream revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,10 +161,12 @@ impl Bucket {
         let mut watch = BucketWatch {
             bucket: self.clone(),
             subscription: None,
+            consumer_sequence: 0,
             revision: 0,
             caught_up: false,
             marker_pending: false,
             opened: false,
+            forged_warning_logged: false,
         };
         watch.bind().await?;
         Ok(watch)
@@ -183,14 +187,30 @@ fn validate_key(key: &str) -> Result<()> {
     Ok(())
 }
 
+fn watch_key<'a>(subject: &'a str, bucket: &str) -> Option<&'a str> {
+    let key = subject.strip_prefix(&format!("$KV.{bucket}."))?;
+    validate_key(key).ok()?;
+    Some(key)
+}
+
+struct WatchSubscription {
+    messages: push::Messages,
+    stream: String,
+    consumer: String,
+}
+
 /// A revision-resuming snapshot and live watch. Cancellation of next() is safe.
+/// Origin and subject checks run before sequence bookkeeping so forged pushes
+/// cannot change the resume point or inject bucket changes.
 pub struct BucketWatch {
     bucket: Bucket,
-    subscription: Option<push::Ordered>,
+    subscription: Option<WatchSubscription>,
+    consumer_sequence: u64,
     revision: u64,
     caught_up: bool,
     marker_pending: bool,
     opened: bool,
+    forged_warning_logged: bool,
 }
 
 impl BucketWatch {
@@ -208,7 +228,7 @@ impl BucketWatch {
                 let context = jetstream::new(connection.client());
                 let consumer = context
                     .create_consumer_on_stream(
-                        push::OrderedConfig {
+                        push::Config {
                             deliver_subject: connection.client().new_inbox(),
                             filter_subject: format!("$KV.{name}.>"),
                             deliver_policy: if revision == 0 {
@@ -218,6 +238,14 @@ impl BucketWatch {
                                     start_sequence: revision + 1,
                                 }
                             },
+                            ack_policy: AckPolicy::None,
+                            max_deliver: 1,
+                            max_ack_pending: 0,
+                            flow_control: true,
+                            idle_heartbeat: WATCH_IDLE_HEARTBEAT,
+                            inactive_threshold: Duration::from_secs(30),
+                            num_replicas: 1,
+                            memory_storage: true,
                             ..Default::default()
                         },
                         format!("KV_{name}"),
@@ -225,17 +253,24 @@ impl BucketWatch {
                     .await
                     .map_err(|error| consumer_error(name, error))?;
                 let empty = consumer.cached_info().num_pending == 0;
+                let stream = consumer.cached_info().stream_name.clone();
+                let consumer_name = consumer.cached_info().name.clone();
                 Ok((
-                    consumer
-                        .messages()
-                        .await
-                        .map_err(|error| Error::Nats(error.to_string()))?,
+                    WatchSubscription {
+                        messages: consumer
+                            .messages()
+                            .await
+                            .map_err(|error| Error::Nats(error.to_string()))?,
+                        stream,
+                        consumer: consumer_name,
+                    },
                     empty,
                 ))
             },
         )
         .await?;
         self.subscription = Some(subscription);
+        self.consumer_sequence = 0;
         self.opened = true;
         self.marker_pending = !self.caught_up && empty;
         Ok(())
@@ -255,25 +290,52 @@ impl BucketWatch {
                     self.caught_up = true;
                     return Ok(BucketItem::CaughtUp);
                 }
-                message = self.subscription.as_mut().expect("bound watch").next() => {
-                    let message = match message
-                        .ok_or_else(|| Error::Nats("bucket watch closed".into()))
-                        .and_then(|message| message.map_err(|error| Error::Nats(error.to_string())))
-                    {
-                        Ok(message) => message,
-                        Err(error) => {
-                            // A connection that closed for good ends the watch;
-                            // resume on its replacement after the last revision.
+                message = self.subscription.as_mut().expect("bound watch").messages.next() => {
+                    let message = match message {
+                        Some(Ok(message)) => message,
+                        Some(Err(error)) if error.kind() == push::MessagesErrorKind::MissingHeartbeat => {
+                            // A missed heartbeat invalidates only this consumer. Recreate it
+                            // from the last verified stream revision on the same connection.
+                            self.subscription = None;
+                            continue;
+                        }
+                        Some(Err(error)) => {
+                            let error = Error::Nats(error.to_string());
                             self.bucket.binding.recover(error).await?;
                             self.subscription = None;
                             continue;
                         }
+                        None => {
+                            // A connection that closed for good ends the watch;
+                            // resume on its replacement after the last revision.
+                            self.bucket.binding.recover(Error::Nats("bucket watch closed".into())).await?;
+                            self.subscription = None;
+                            continue;
+                        }
                     };
-                    let info = message.info().map_err(|error| Error::Nats(error.to_string()))?;
+                    let verified = message.info().ok().and_then(|info| {
+                        let key = watch_key(message.subject.as_str(), &self.bucket.name)?;
+                        let subscription = self.subscription.as_ref().expect("bound watch");
+                        if info.stream != subscription.stream || info.consumer != subscription.consumer {
+                            return None;
+                        }
+                        Some((info, key.to_owned()))
+                    });
+                    let Some((info, key)) = verified else {
+                        self.bucket.binding.drop_forged(
+                            &mut self.forged_warning_logged,
+                            &format!("$KV.{}.<valid-key>", self.bucket.name),
+                            message.subject.as_str(),
+                        );
+                        continue;
+                    };
+                    if info.consumer_sequence != self.consumer_sequence + 1 {
+                        self.subscription = None;
+                        continue;
+                    }
+                    self.consumer_sequence = info.consumer_sequence;
                     if !self.caught_up && info.pending == 0 { self.marker_pending = true; }
                     if !advance_revision(&mut self.revision, info.stream_sequence) { continue; }
-                    let key = message.subject.strip_prefix(&format!("$KV.{}.", self.bucket.name))
-                        .ok_or(Error::Reply("bucket watch subject mismatch"))?.to_owned();
                     let revision = info.stream_sequence;
                     let deleted = message.headers.as_ref().and_then(|headers| headers.get("KV-Operation"))
                         .is_some_and(|operation| matches!(operation.as_str(), "DEL" | "PURGE"));

@@ -127,6 +127,15 @@ closes and requesting a new snapshot returns the typed error. To retry after
 - `live_hint(kind, version, body)` is a plain-NATS, versioned publish on
   `ck.{acct}.live.{module}.{kind}.v{version}`; it is not a stored fact.
 
+### Receiving
+
+`live_hints(module, name, version)` yields only deliveries on that exact hint
+subject, and `BucketWatch` accepts only its own consumer and stream with a valid
+key in the watched bucket. Both drop other pushed deliveries before processing
+their sequence metadata and count them in `forged_deliveries_dropped()`. Modules
+that subscribe with a raw NATS client must perform the same subject and origin
+checks themselves: the delivery inbox alone does not authenticate a message.
+
 ### Reading event bodies
 
 `bus.event_reader(durable).await?` attaches to the module's existing EVENT

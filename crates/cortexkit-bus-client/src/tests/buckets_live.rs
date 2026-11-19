@@ -45,6 +45,7 @@ pub(super) struct Issuer {
     account: String,
     acct: &'static str,
     inbox_prefix: Option<String>,
+    live_subscription: Option<String>,
     trust: TrustChain,
     module: &'static str,
     keys: Mutex<Vec<KeyPair>>,
@@ -90,6 +91,9 @@ impl Issuer {
                 publish.push(format!("$KV.{bucket}.>"));
             }
         }
+        // A module may publish its own live hints. Tests that subscribe receive
+        // one additional exact grant rather than wildcard read access.
+        publish.push(format!("ck.{}.live.{}.>", names.account(), self.module));
         // A module may read its own EVENT durable.
         let event = &names.streams().event;
         let durable = AccountNames::module_consumer_name(self.module).unwrap();
@@ -100,12 +104,16 @@ impl Issuer {
         ]);
         let now = trust::unix_now();
         let signer = &self.trust.signer.root(&trust::box_root_id()).pair;
+        let mut subscribe = vec![format!("{inbox_prefix}.>")];
+        if let Some(subject) = &self.live_subscription {
+            subscribe.push(subject.clone());
+        }
         let jwt = jwt(
             signer,
             &public,
             "bucket-fixture-user",
             json!({"type":"user", "version":2, "issuer_account":self.account,
-                "pub":{"allow": publish}, "sub":{"allow":[format!("{inbox_prefix}.>")]},
+                "pub":{"allow": publish}, "sub":{"allow":subscribe},
                 "subs":-1, "data":-1, "payload":-1}),
         );
         // The credential envelope is the same shape returned by the bus. Its
@@ -329,7 +337,8 @@ impl Rig {
         url: &str,
         inbox_prefix: Option<String>,
     ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
-        self.connect_client(module, url, inbox_prefix, None).await
+        self.connect_client(module, url, inbox_prefix, None, None)
+            .await
     }
 
     pub(super) async fn client_with_pending_renewal(
@@ -339,9 +348,18 @@ impl Rig {
     ) -> (BusClient, Arc<RenewalGate>) {
         let gate = Arc::new(RenewalGate::default());
         let (client, _, _) = self
-            .connect_client(module, url, None, Some(gate.clone()))
+            .connect_client(module, url, None, Some(gate.clone()), None)
             .await;
         (client, gate)
+    }
+
+    async fn client_with_live_subscription(
+        &self,
+        module: &'static str,
+        subject: String,
+    ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
+        self.connect_client(module, &self.server.url, None, None, Some(subject))
+            .await
     }
 
     async fn connect_client(
@@ -350,12 +368,14 @@ impl Rig {
         url: &str,
         inbox_prefix: Option<String>,
         renewal_gate: Option<Arc<RenewalGate>>,
+        live_subscription: Option<String>,
     ) -> (BusClient, Arc<CredentialManager>, Arc<Issuer>) {
         let issuer = Arc::new(Issuer {
             url: url.into(),
             account: self.account.clone(),
             acct: self.acct,
             inbox_prefix,
+            live_subscription,
             trust: self.server.trust.clone(),
             module,
             keys: Mutex::new(vec![]),
@@ -378,6 +398,180 @@ async fn next(watch: &mut BucketWatch) -> BucketItem {
         .await
         .expect("watch timed out")
         .unwrap()
+}
+
+async fn create_push_delivery(attacker: &BusClient, bucket: &str, deliver_subject: &str) {
+    let stream = format!("KV_{bucket}");
+    let response = attacker
+        .connection()
+        .client()
+        .request(
+            format!("$JS.API.CONSUMER.CREATE.{stream}"),
+            serde_json::to_vec(&json!({
+                "stream_name": stream,
+                "config": {
+                    "deliver_subject": deliver_subject,
+                    "filter_subject": format!("$KV.{bucket}.>"),
+                    "deliver_policy": "all",
+                    "ack_policy": "none"
+                }
+            }))
+            .unwrap()
+            .into(),
+        )
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&response.payload).unwrap();
+    assert!(
+        body.get("error").is_none(),
+        "forged push consumer creation: {body}"
+    );
+}
+
+async fn wait_for_subject(subscription: &mut async_nats::Subscriber, subject: &str) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let message = subscription
+                .next()
+                .await
+                .expect("observer subscription closed");
+            if message.subject.as_str() == subject {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("observer did not receive {subject}"));
+}
+
+async fn watch_delivery_subject(rig: &Rig, bucket: &str) -> String {
+    let response = rig
+        .admin
+        .request(format!("$JS.API.CONSUMER.LIST.KV_{bucket}"), "{}".into())
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&response.payload).unwrap();
+    let consumers = body["consumers"].as_array().unwrap();
+    assert_eq!(consumers.len(), 1, "one genuine watch consumer: {body}");
+    consumers[0]["config"]["deliver_subject"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn live_hint_drops_forged_push_delivery() {
+    let Some(rig) = Rig::start().await else {
+        return;
+    };
+    let names = AccountNames::derive(rig.acct).unwrap();
+    let live_subject = names.live_subject("cerebellum", "refresh", 1).unwrap();
+    let (receiver, _manager, _) = rig
+        .client_with_live_subscription("occipital", live_subject.clone())
+        .await;
+    let (publisher, _) = rig.client("cerebellum").await;
+    let (attacker, _) = rig.client("aft").await;
+    let attack_bucket = names.module_bucket_name("aft", "views").unwrap();
+    let mut hints = receiver
+        .live_hints("cerebellum", "refresh", 1)
+        .await
+        .unwrap();
+    let mut observed = rig.admin.subscribe(live_subject.clone()).await.unwrap();
+    receiver.connection().client().flush().await.unwrap();
+    rig.admin.flush().await.unwrap();
+
+    create_push_delivery(&attacker, &attack_bucket, &live_subject).await;
+    attacker
+        .bucket("aft", "views")
+        .unwrap()
+        .put("forged", "not-a-hint")
+        .await
+        .unwrap();
+    let forged_subject = format!("$KV.{attack_bucket}.forged");
+    wait_for_subject(&mut observed, &forged_subject).await;
+    receiver.connection().client().flush().await.unwrap();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), hints.next())
+            .await
+            .is_err(),
+        "the forged bucket delivery must not become a live hint"
+    );
+    assert_eq!(receiver.forged_deliveries_dropped(), 1);
+
+    publisher
+        .live_hint("refresh", 1, "genuine-hint")
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), hints.next())
+            .await
+            .expect("genuine hint timed out")
+            .unwrap(),
+        "genuine-hint"
+    );
+    assert_eq!(receiver.forged_deliveries_dropped(), 1);
+}
+
+#[tokio::test]
+async fn bucket_watch_drops_forged_push_before_sequence_tracking() {
+    let Some(rig) = Rig::start().await else {
+        return;
+    };
+    let names = AccountNames::derive(rig.acct).unwrap();
+    let (attacker, _) = rig.client("aft").await;
+    let (reader, _manager) = rig.client("occipital").await;
+    let (owner, _) = rig.client("cerebellum").await;
+    let attack_bucket = names.module_bucket_name("aft", "views").unwrap();
+    let watch_bucket = names.module_bucket_name("cerebellum", "views").unwrap();
+    let mut watch = reader
+        .bucket("cerebellum", "views")
+        .unwrap()
+        .watch()
+        .await
+        .unwrap();
+    assert_eq!(next(&mut watch).await, BucketItem::CaughtUp);
+    let deliver_subject = watch_delivery_subject(&rig, &watch_bucket).await;
+    let mut observed = rig.admin.subscribe(deliver_subject.clone()).await.unwrap();
+    reader.connection().client().flush().await.unwrap();
+    rig.admin.flush().await.unwrap();
+
+    // Both buckets start empty. A foreign stream sequence of one must not become
+    // the empty watch's resume point and hide the genuine first write below.
+    create_push_delivery(&attacker, &attack_bucket, &deliver_subject).await;
+    attacker
+        .bucket("aft", "views")
+        .unwrap()
+        .put("forged", "not-a-bucket-change")
+        .await
+        .unwrap();
+    let forged_subject = format!("$KV.{attack_bucket}.forged");
+    wait_for_subject(&mut observed, &forged_subject).await;
+    reader.connection().client().flush().await.unwrap();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), watch.next())
+            .await
+            .is_err(),
+        "the forged delivery must be dropped rather than returned as an item or error"
+    );
+    assert_eq!(reader.forged_deliveries_dropped(), 1);
+
+    let revision = owner
+        .bucket("cerebellum", "views")
+        .unwrap()
+        .put("genuine", "bucket-value")
+        .await
+        .unwrap();
+    assert_eq!(
+        next(&mut watch).await,
+        BucketItem::Put {
+            key: "genuine".into(),
+            revision,
+            value: "bucket-value".into(),
+        }
+    );
+    assert_eq!(reader.forged_deliveries_dropped(), 1);
 }
 
 #[tokio::test]

@@ -5,14 +5,16 @@ mod buckets;
 mod credentials;
 mod events;
 mod hub;
+mod live;
 
 pub use buckets::{Bucket, BucketEntry, BucketItem, BucketWatch};
 pub use events::{EventDelivery, EventItem, EventReader, MalformedDelivery, MalformedReason};
 pub use hub::HubClient;
+pub use live::LiveHints;
 
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, RwLock,
     },
     time::Duration,
@@ -95,6 +97,7 @@ pub struct BusClient {
     managed: ManagedConnection,
     names: AccountNames,
     module: String,
+    forged_deliveries_dropped: Arc<AtomicU64>,
 }
 
 struct ManagedConnection {
@@ -128,6 +131,7 @@ impl BusClient {
             managed,
             names,
             module: opts.module,
+            forged_deliveries_dropped: Arc::new(AtomicU64::new(0)),
         })
     }
 }
@@ -324,6 +328,13 @@ impl BusClient {
         self.connection().inbox_prefix().to_owned()
     }
 
+    /// Counts deliveries dropped because their origin or subject did not match
+    /// the receiving subscription, preventing forged pushes from becoming hints
+    /// or bucket changes.
+    pub fn forged_deliveries_dropped(&self) -> u64 {
+        self.forged_deliveries_dropped.load(Ordering::Relaxed)
+    }
+
     /// Attaches to an existing EVENT durable owned by this module.
     ///
     /// ck-bus provisions durables; this method never creates or changes one.
@@ -427,6 +438,12 @@ impl BusClient {
             .publish(subject, body.into())
             .await
             .map_err(|error| Error::Nats(error.to_string()))
+    }
+
+    /// Subscribes to one exact live-hint subject and verifies every delivery's
+    /// subject before yielding it, so a JetStream push cannot inject bucket data.
+    pub async fn live_hints(&self, module: &str, name: &str, version: u32) -> Result<LiveHints> {
+        LiveHints::attach(self, module, name, version).await
     }
 }
 
