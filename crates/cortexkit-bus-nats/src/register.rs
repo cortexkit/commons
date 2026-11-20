@@ -11,6 +11,7 @@ use cortexkit_bus_trait::{
 use futures_util::StreamExt;
 
 use crate::error::map_operation_error;
+use crate::kv_watch::KvDeliveries;
 use crate::NatsConnection;
 
 const EMPTY_SNAPSHOT_QUIET_PERIOD: Duration = Duration::from_millis(50);
@@ -43,8 +44,7 @@ impl NatsRegister {
 }
 
 pub struct NatsRegisterWatch {
-    connection: NatsConnection,
-    watch: kv::Watch,
+    deliveries: KvDeliveries,
     first: Option<WatchEvent>,
     buffered: VecDeque<RegisterUpdate>,
     has_snapshot: bool,
@@ -104,32 +104,36 @@ impl Register for NatsRegister {
 
     async fn watch(&self, prefix: &str) -> BusResult<Self::Watch> {
         let mut events = self.connection.event_receiver();
-        let mut watch = if prefix.is_empty() {
-            self.store
-                .watch_many_with_history([">"])
+        // The same consumer filters async-nats's `watch_many_with_history`
+        // and `watch_with_history` create, delivering the latest revision of
+        // every matching key first.
+        let opened = if prefix.is_empty() {
+            KvDeliveries::open(self.connection.clone(), &self.store, ">".to_owned(), true)
                 .await
-                .map_err(|error| map_operation_error(&self.bucket, error, &mut events))?
+                .map_err(|error| map_operation_error(&self.bucket, error, &mut events))
         } else {
             let pattern = if prefix.ends_with('.') {
                 format!("{prefix}>")
             } else {
                 prefix.to_owned()
             };
-            self.store
-                .watch_with_history(pattern)
+            KvDeliveries::open(self.connection.clone(), &self.store, pattern, false)
                 .await
-                .map_err(|error| map_operation_error(prefix, error, &mut events))?
+                .map_err(|error| map_operation_error(prefix, error, &mut events))
         };
+        let mut watch = opened?;
 
         let mut snapshot = Vec::new();
         let mut buffered = VecDeque::new();
         let mut revision = 0;
         loop {
             let next = tokio::time::timeout(EMPTY_SNAPSHOT_QUIET_PERIOD, watch.next()).await;
-            let Some(entry) = next.unwrap_or_default() else {
+            let Ok(entry) = next else {
                 break;
             };
-            let entry = entry.map_err(|error| map_operation_error(prefix, error, &mut events))?;
+            let Some(entry) = entry? else {
+                break;
+            };
             revision = revision.max(entry.revision);
             let seen_current = entry.seen_current;
             match entry.operation {
@@ -151,8 +155,7 @@ impl Register for NatsRegister {
         }
 
         Ok(NatsRegisterWatch {
-            connection: self.connection.clone(),
-            watch,
+            deliveries: watch,
             first: Some(WatchEvent::Snapshot {
                 entries: snapshot,
                 revision: Revision(revision),
@@ -173,13 +176,11 @@ impl RegisterWatch for NatsRegisterWatch {
         if let Some(update) = self.buffered.pop_front() {
             return Ok(WatchEvent::Update(update));
         }
-        let mut events = self.connection.event_receiver();
         let entry = self
-            .watch
+            .deliveries
             .next()
-            .await
-            .ok_or_else(|| BusError::unavailable("register watch ended"))?
-            .map_err(|error| map_operation_error("register watch", error, &mut events))?;
+            .await?
+            .ok_or_else(|| BusError::unavailable("register watch ended"))?;
         let update = match entry.operation {
             Operation::Put => RegisterUpdate::Put(RegisterEntry {
                 key: entry.key,

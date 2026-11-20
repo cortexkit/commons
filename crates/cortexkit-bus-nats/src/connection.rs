@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::{Client, ConnectOptions, Event, Subscriber, ToServerAddrs};
@@ -73,6 +75,7 @@ pub struct NatsConnection {
     connection_state: watch::Sender<NatsConnectionState>,
     request_timeout: Duration,
     inbox_prefix: String,
+    forged_deliveries_dropped: Arc<AtomicU64>,
 }
 
 impl NatsConnection {
@@ -145,6 +148,7 @@ impl NatsConnection {
             connection_state,
             request_timeout: config.request_timeout,
             inbox_prefix,
+            forged_deliveries_dropped: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -169,6 +173,21 @@ impl NatsConnection {
     /// another operation is waiting for messages.
     pub fn connection_state(&self) -> watch::Receiver<NatsConnectionState> {
         self.connection_state.subscribe()
+    }
+
+    /// How many messages register watches on this connection have dropped
+    /// because they did not come from the watch's own consumer on its bucket.
+    ///
+    /// Anyone allowed to create a JetStream consumer can point its delivery
+    /// subject at a watch's inbox; such messages keep their original subject
+    /// and are dropped without being parsed. Shared by every clone.
+    pub fn forged_deliveries_dropped(&self) -> u64 {
+        self.forged_deliveries_dropped.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_forged_delivery(&self) {
+        self.forged_deliveries_dropped
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn permission_violations(&self) -> NatsPermissionViolations {

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.5
+
+- Register watches no longer panic on a delivery from outside the watched
+  bucket. Anyone allowed to create a JetStream consumer can point a push
+  consumer at a watch's delivery inbox; async-nats's KV watch panicked on such
+  a message's subject, and its ordered consumer could take the message's
+  sequence as the resume point and skip genuine updates. Watches now drive
+  their ordered push consumer directly and drop, without parsing, any message
+  that does not come from their own consumer on the watched bucket with a
+  valid key inside the watch's filter. Snapshot, update, tombstone and
+  revision semantics are unchanged.
+- Add `NatsConnection::forged_deliveries_dropped`, counting those dropped
+  messages. The first one each watch drops is logged at WARN with its subject.
+
 ## 0.5.4
 
 - Add `NatsConnection::connect_with_inbox_prefix` for validated custom inbox

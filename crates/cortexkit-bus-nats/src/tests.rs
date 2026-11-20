@@ -64,3 +64,24 @@ fn connection_boundary_taxonomy_matches_kick_drop_and_severed_write() {
             .as_denied();
     assert!(matches!(kicked_then_refused, BusError::Denied { .. }));
 }
+
+#[test]
+fn register_watch_accepts_only_valid_keys_inside_its_filter() {
+    use crate::kv_watch::{is_valid_key, key_matches};
+
+    assert!(key_matches(">", "module.a"));
+    assert!(key_matches("module.>", "module.a.b"));
+    assert!(!key_matches("module.>", "module"));
+    assert!(!key_matches("module.>", "other.a"));
+    assert!(key_matches("module.*", "module.a"));
+    assert!(!key_matches("module.*", "module.a.b"));
+    assert!(key_matches("module.a", "module.a"));
+    assert!(!key_matches("module.a", "module.ab"));
+
+    assert!(is_valid_key("module.a-b_c/d=e"));
+    assert!(!is_valid_key(""));
+    assert!(!is_valid_key(".module"));
+    assert!(!is_valid_key("module."));
+    assert!(!is_valid_key("module a"));
+    assert!(!is_valid_key("module.*"));
+}

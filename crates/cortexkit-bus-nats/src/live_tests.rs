@@ -534,6 +534,211 @@ async fn register_round_trips_absence_revisions_snapshot_and_updates() {
     ));
 }
 
+/// The watcher (`admin`, unrestricted) and a second user, `foreign`, who may
+/// only read its own `FOREIGN` bucket's stream, create consumers on it, and
+/// receive replies on its own inbox. It holds no grant on the watcher's
+/// bucket or inbox.
+fn foreign_consumer_config(port: u16, directory: &TempDir) -> String {
+    let store_path = directory.path().join("store");
+    let store = store_path.display();
+    format!(
+        r#"
+port: {port}
+jetstream {{ store_dir: "{store}" }}
+authorization {{
+  users: [
+    {{ user: "admin", password: "admin" }},
+    {{
+      user: "foreign",
+      password: "foreign",
+      permissions: {{
+        publish: {{ allow: [
+          "$JS.API.STREAM.INFO.KV_FOREIGN",
+          "$JS.API.CONSUMER.CREATE.KV_FOREIGN",
+          "$JS.API.CONSUMER.CREATE.KV_FOREIGN.>"
+        ] }},
+        subscribe: {{ allow: ["_INBOX.UFOREIGN.>"] }}
+      }}
+    }}
+  ]
+}}
+"#
+    )
+}
+
+/// Points a push consumer on the `FOREIGN` bucket, created by the `foreign`
+/// user, at the delivery subject of the one consumer the watch created on
+/// `KV_CK_WATCHED`, then drives the watch until it has dropped that delivery.
+/// The delivery keeps its own subject, `$KV.FOREIGN.<key>`, and the foreign
+/// stream's acknowledgement reply.
+async fn deliver_foreign_message_into(
+    server: &TestServer,
+    admin: &NatsConnection,
+    watch: &mut crate::NatsRegisterWatch,
+) {
+    use futures_util::StreamExt;
+
+    let foreign_bucket = admin
+        .jetstream()
+        .create_key_value(kv::Config {
+            bucket: "FOREIGN".into(),
+            history: 1,
+            ..Default::default()
+        })
+        .await
+        .expect("create foreign bucket");
+    foreign_bucket
+        .put("module.forged", Bytes::from_static(b"forged"))
+        .await
+        .expect("put foreign value");
+
+    // Read the delivery subject from the consumer info the watch created.
+    let watched = admin
+        .jetstream()
+        .get_stream("KV_CK_WATCHED")
+        .await
+        .expect("watched stream");
+    let consumers = watched
+        .consumers()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("list watch consumers");
+    assert_eq!(consumers.len(), 1, "the watch created one consumer");
+    let target = consumers[0]
+        .config
+        .deliver_subject
+        .clone()
+        .expect("the watch consumer pushes to an inbox");
+
+    let foreign = connect_user(&server.url, "foreign", "UFOREIGN").await;
+    foreign
+        .jetstream()
+        .create_consumer_on_stream(
+            async_nats::jetstream::consumer::push::Config {
+                deliver_subject: target,
+                filter_subject: "$KV.FOREIGN.>".into(),
+                ack_policy: AckPolicy::None,
+                ..Default::default()
+            },
+            "KV_FOREIGN",
+        )
+        .await
+        .expect("the server lets the foreign user deliver to any subject");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while admin.forged_deliveries_dropped() == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the watch never dropped the foreign delivery"
+        );
+        let yielded = tokio::time::timeout(Duration::from_millis(100), watch.next()).await;
+        assert!(
+            yielded.is_err(),
+            "the foreign delivery must yield nothing, got {yielded:?}"
+        );
+    }
+    assert_eq!(admin.forged_deliveries_dropped(), 1);
+}
+
+async fn create_watched_bucket(admin: &NatsConnection) -> crate::NatsRegister {
+    admin
+        .jetstream()
+        .create_key_value(kv::Config {
+            bucket: "CK_WATCHED".into(),
+            history: 1,
+            ..Default::default()
+        })
+        .await
+        .expect("create watched bucket");
+    admin
+        .register("CK_WATCHED")
+        .await
+        .expect("bind watched bucket")
+}
+
+async fn next_update(watch: &mut crate::NatsRegisterWatch) -> RegisterUpdate {
+    match tokio::time::timeout(Duration::from_secs(3), watch.next())
+        .await
+        .expect("watch update timeout")
+        .expect("watch update")
+    {
+        WatchEvent::Update(update) => update,
+        event => panic!("expected an update, got {event:?}"),
+    }
+}
+
+/// A push consumer on another bucket delivering into a register watch's
+/// inbox is dropped and counted, never parsed, and the watch carries on.
+#[tokio::test]
+async fn a_foreign_delivery_into_a_register_watch_is_dropped_and_counted() {
+    let Some(server) = TestServer::with_config(&foreign_consumer_config).await else {
+        return;
+    };
+    let admin = connect_admin(&server.url).await;
+    let register = create_watched_bucket(&admin).await;
+    let first = register
+        .put("module.a", b"one".to_vec())
+        .await
+        .expect("put watched value");
+    let mut watch = register.watch("module.").await.expect("watch prefix");
+    assert!(matches!(
+        watch.next().await.expect("initial snapshot"),
+        WatchEvent::Snapshot { entries, revision }
+            if entries.len() == 1 && entries[0].key == "module.a" && revision == first
+    ));
+
+    deliver_foreign_message_into(&server, &admin, &mut watch).await;
+
+    let second = register
+        .put("module.b", b"two".to_vec())
+        .await
+        .expect("put after the foreign delivery");
+    assert!(matches!(
+        next_update(&mut watch).await,
+        RegisterUpdate::Put(entry)
+            if entry.key == "module.b" && entry.value == b"two" && entry.revision == second
+    ));
+    let tombstone = register.delete("module.a").await.expect("delete value");
+    assert!(matches!(
+        next_update(&mut watch).await,
+        RegisterUpdate::Delete(deleted) if deleted == tombstone
+    ));
+}
+
+/// With nothing delivered yet, a foreign delivery must not become the
+/// watch's resume point: the genuine changes that follow arrive in order
+/// with none skipped.
+#[tokio::test]
+async fn a_foreign_delivery_into_an_empty_register_watch_keeps_its_resume_point() {
+    let Some(server) = TestServer::with_config(&foreign_consumer_config).await else {
+        return;
+    };
+    let admin = connect_admin(&server.url).await;
+    let register = create_watched_bucket(&admin).await;
+    let mut watch = register.watch("module.").await.expect("watch prefix");
+    assert!(matches!(
+        watch.next().await.expect("initial snapshot"),
+        WatchEvent::Snapshot { entries, .. } if entries.is_empty()
+    ));
+
+    deliver_foreign_message_into(&server, &admin, &mut watch).await;
+
+    for (key, value) in [("module.a", b"one"), ("module.b", b"two")] {
+        let revision = register
+            .put(key, value.to_vec())
+            .await
+            .expect("put after the foreign delivery");
+        assert!(matches!(
+            next_update(&mut watch).await,
+            RegisterUpdate::Put(entry)
+                if entry.key == key && entry.value == value && entry.revision == revision
+        ));
+    }
+    assert_eq!(admin.forged_deliveries_dropped(), 1);
+}
+
 #[tokio::test]
 async fn subscribe_ignores_another_operations_publish_denial() {
     use cortexkit_bus_trait::PermissionViolationSource;
