@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.7
+
+- Add two federation hub KV buckets for sealed shared logins and active vault
+  manifests. Each vault writes only its computer's records and can read both
+  buckets; the connectors module can read only active manifests. Shared-login
+  confidentiality comes from sealing each list to its recipient, not from the
+  hub read grant.
+- Let the identity-log module read the residence epoch from the stream leader
+  so sealed writes use the current epoch, even when a replica is behind.
+
 ## 0.5.6
 
 - Let the message-bus module pull and acknowledge outgoing hand-off frames on

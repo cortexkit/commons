@@ -231,6 +231,98 @@
       },
       "bucket": "residence",
       "history": 1
+    },
+    "vault_manifest_active_hosted": {
+      "backing_stream": {
+        "allow_direct": true,
+        "allow_rollup_hdrs": false,
+        "deny_delete": true,
+        "discard": "new",
+        "duplicate_window_seconds": null,
+        "kind": "kv_vault_manifest_active",
+        "max_age_seconds": 0,
+        "max_bytes": 16777216,
+        "max_message_size": 16384,
+        "max_msgs_per_subject": 1,
+        "name": "KV_vault-manifest-active",
+        "replicas": 3,
+        "storage": "file",
+        "subjects": [
+          "$KV.vault-manifest-active.>"
+        ],
+        "work_queue": false
+      },
+      "bucket": "vault-manifest-active",
+      "history": 1
+    },
+    "vault_manifest_active_self_hosted": {
+      "backing_stream": {
+        "allow_direct": true,
+        "allow_rollup_hdrs": false,
+        "deny_delete": true,
+        "discard": "new",
+        "duplicate_window_seconds": null,
+        "kind": "kv_vault_manifest_active",
+        "max_age_seconds": 0,
+        "max_bytes": 16777216,
+        "max_message_size": 16384,
+        "max_msgs_per_subject": 1,
+        "name": "KV_vault-manifest-active",
+        "replicas": 1,
+        "storage": "file",
+        "subjects": [
+          "$KV.vault-manifest-active.>"
+        ],
+        "work_queue": false
+      },
+      "bucket": "vault-manifest-active",
+      "history": 1
+    },
+    "vault_shared_logins_hosted": {
+      "backing_stream": {
+        "allow_direct": true,
+        "allow_rollup_hdrs": false,
+        "deny_delete": true,
+        "discard": "new",
+        "duplicate_window_seconds": null,
+        "kind": "kv_vault_shared_logins",
+        "max_age_seconds": 0,
+        "max_bytes": 67108864,
+        "max_message_size": 262144,
+        "max_msgs_per_subject": 1,
+        "name": "KV_vault-shared-logins",
+        "replicas": 3,
+        "storage": "file",
+        "subjects": [
+          "$KV.vault-shared-logins.>"
+        ],
+        "work_queue": false
+      },
+      "bucket": "vault-shared-logins",
+      "history": 1
+    },
+    "vault_shared_logins_self_hosted": {
+      "backing_stream": {
+        "allow_direct": true,
+        "allow_rollup_hdrs": false,
+        "deny_delete": true,
+        "discard": "new",
+        "duplicate_window_seconds": null,
+        "kind": "kv_vault_shared_logins",
+        "max_age_seconds": 0,
+        "max_bytes": 67108864,
+        "max_message_size": 262144,
+        "max_msgs_per_subject": 1,
+        "name": "KV_vault-shared-logins",
+        "replicas": 1,
+        "storage": "file",
+        "subjects": [
+          "$KV.vault-shared-logins.>"
+        ],
+        "work_queue": false
+      },
+      "bucket": "vault-shared-logins",
+      "history": 1
     }
   }
 }

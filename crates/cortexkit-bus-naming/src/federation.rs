@@ -36,21 +36,33 @@ pub const FEDOUT_SUBJECT: &str = "fedout.>";
 pub const IDLOG_SUBJECT: &str = "ck.fleet.idlog";
 pub const RESIDENCE_BUCKET: &str = "residence";
 pub const RESIDENCE_STREAM: &str = "KV_residence";
+pub const VAULT_SHARED_LOGINS_BUCKET: &str = "vault-shared-logins";
+pub const VAULT_SHARED_LOGINS_STREAM: &str = "KV_vault-shared-logins";
+pub const VAULT_MANIFEST_ACTIVE_BUCKET: &str = "vault-manifest-active";
+pub const VAULT_MANIFEST_ACTIVE_STREAM: &str = "KV_vault-manifest-active";
 pub const CUTS_BUCKET: &str = "cuts";
 pub const CUTS_STREAM: &str = "OBJ_cuts";
+
+const VAULT_SHARED_LOGINS_MAX_MESSAGE_SIZE: i32 = 256 * 1024;
 
 const HUB_MEMORY_MODULE: &str = "magic-context";
 const HUB_ROOMS_MODULE: &str = "prefrontal";
 const HUB_ROOMS_MODULE_LEGACY: &str = "prefrontal-core";
 const HUB_IDLOG_MODULE: &str = "entorhinal";
 const HUB_CUTS_MODULE: &str = "engram";
+const HUB_VAULT_MODULE: &str = "claustrum";
+const HUB_MANIFEST_READER_MODULE: &str = "plexus";
 
 /// Canonical module IDs with direct hub access. Use [`is_hub_module`] to also check the legacy ID.
-pub const HUB_MODULES: [&str; 4] = [
+/// The vault module uses [`VAULT_SHARED_LOGINS_STREAM`] and [`VAULT_MANIFEST_ACTIVE_STREAM`];
+/// the manifest reader uses only [`VAULT_MANIFEST_ACTIVE_STREAM`].
+pub const HUB_MODULES: [&str; 6] = [
     HUB_MEMORY_MODULE,
     HUB_ROOMS_MODULE,
     HUB_IDLOG_MODULE,
     HUB_CUTS_MODULE,
+    HUB_VAULT_MODULE,
+    HUB_MANIFEST_READER_MODULE,
 ];
 
 /// Whether the caller's module ID is eligible for a hub credential.
@@ -264,25 +276,66 @@ pub fn hub_memory_stream() -> HubStreamSpec {
 }
 
 pub fn residence_bucket(hub: HubKind) -> KvBucketSpec {
-    let mut stream = StreamSpec::new(
+    let mut spec = hub_kv_bucket(
+        hub,
         StreamKind::KvResidence,
-        RESIDENCE_STREAM.to_owned(),
-        vec![format!("$KV.{RESIDENCE_BUCKET}.>")],
+        RESIDENCE_BUCKET,
+        RESIDENCE_STREAM,
+        16 * 1024,
+        64 * MIB,
     );
+    // Residence uses KV purge markers, which require subject rollup.
+    spec.backing_stream.allow_rollup_hdrs = true;
+    spec
+}
+
+/// Stores sealed shared logins under `{home}.{member}`, both canonical [`BoxId`]s.
+pub fn vault_shared_logins_bucket(hub: HubKind) -> KvBucketSpec {
+    hub_kv_bucket(
+        hub,
+        StreamKind::KvVaultSharedLogins,
+        VAULT_SHARED_LOGINS_BUCKET,
+        VAULT_SHARED_LOGINS_STREAM,
+        VAULT_SHARED_LOGINS_MAX_MESSAGE_SIZE,
+        64 * MIB,
+    )
+}
+
+/// Stores each computer's active vault manifest under its canonical [`BoxId`].
+pub fn vault_manifest_active_bucket(hub: HubKind) -> KvBucketSpec {
+    hub_kv_bucket(
+        hub,
+        StreamKind::KvVaultManifestActive,
+        VAULT_MANIFEST_ACTIVE_BUCKET,
+        VAULT_MANIFEST_ACTIVE_STREAM,
+        16 * 1024,
+        16 * MIB,
+    )
+}
+
+fn hub_kv_bucket(
+    hub: HubKind,
+    kind: StreamKind,
+    bucket: &str,
+    stream: &str,
+    max_message_size: i32,
+    max_bytes: u64,
+) -> KvBucketSpec {
+    let mut stream = StreamSpec::new(kind, stream.to_owned(), vec![format!("$KV.{bucket}.>")]);
     stream.max_msgs_per_subject = Some(1);
-    stream.max_message_size = Some(16 * 1024);
-    stream.max_bytes = 64 * MIB;
+    stream.max_message_size = Some(max_message_size);
+    stream.max_bytes = max_bytes;
     stream.discard = DiscardPolicy::New;
     let mut backing_stream = HubStreamSpec::new(stream);
-    // Provisioning must agree with async-nats 0.50.0's KV creation settings.
-    backing_stream.allow_rollup_hdrs = true;
+    // Leave rollup off by default: a stream-wide rollup would let a writer
+    // remove records outside its own key prefix.
     backing_stream.allow_direct = true;
     backing_stream.deny_delete = true;
     backing_stream.replicas = Some(match hub {
         HubKind::SelfHosted => 1,
         HubKind::Hosted => 3,
     });
-    KvBucketSpec::new(RESIDENCE_BUCKET.to_owned(), 1, backing_stream)
+    KvBucketSpec::new(bucket.to_owned(), 1, backing_stream)
 }
 
 pub fn cuts_object_store() -> HubStreamSpec {
@@ -314,6 +367,8 @@ pub fn hub_streams(box_id: &BoxId, hub: HubKind) -> Vec<HubStreamSpec> {
         hub_memory_stream(),
         residence_bucket(hub).backing_stream,
         cuts_object_store(),
+        vault_shared_logins_bucket(hub).backing_stream,
+        vault_manifest_active_bucket(hub).backing_stream,
     ]
 }
 
@@ -435,6 +490,9 @@ pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant>
             vec![
                 IDLOG_SUBJECT.to_owned(),
                 format!("{HUB_API_PREFIX}.$KV.{RESIDENCE_BUCKET}.>"),
+                // Read the residence epoch from the leader before sealed writes:
+                // a direct get can return a stale epoch from a lagging replica.
+                format!("{HUB_API_PREFIX}.STREAM.MSG.GET.{RESIDENCE_STREAM}"),
                 format!("$JS.FC.{HUB_IDLOG_STREAM}.*.*"),
                 format!("$JS.FC.{RESIDENCE_STREAM}.*.*"),
             ],
@@ -447,6 +505,21 @@ pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant>
                 format!("{HUB_API_PREFIX}.STREAM.PURGE.{CUTS_STREAM}"),
                 format!("$JS.FC.{CUTS_STREAM}.*.*"),
             ],
+        ),
+        HUB_VAULT_MODULE => (
+            &[VAULT_SHARED_LOGINS_STREAM, VAULT_MANIFEST_ACTIVE_STREAM],
+            vec![
+                format!("$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
+                format!("{HUB_API_PREFIX}.$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
+                format!("{HUB_API_PREFIX}.$KV.{VAULT_MANIFEST_ACTIVE_BUCKET}.{box_id}"),
+                format!("{HUB_API_PREFIX}.STREAM.MSG.GET.{VAULT_SHARED_LOGINS_STREAM}"),
+                format!("$JS.FC.{VAULT_SHARED_LOGINS_STREAM}.*.*"),
+                format!("$JS.FC.{VAULT_MANIFEST_ACTIVE_STREAM}.*.*"),
+            ],
+        ),
+        HUB_MANIFEST_READER_MODULE => (
+            &[VAULT_MANIFEST_ACTIVE_STREAM],
+            vec![format!("$JS.FC.{VAULT_MANIFEST_ACTIVE_STREAM}.*.*")],
         ),
         _ => return None,
     };
@@ -487,15 +560,34 @@ mod tests {
     use super::*;
 
     const SAMPLE_BOX: &str = "0123456789abcdef0123456789abcdef";
+    const OTHER_BOX: &str = "fedcba9876543210fedcba9876543210";
 
     #[test]
-    fn federation_hub_module_grants_do_not_overlap() {
+    fn federation_hub_module_grants_overlap_only_for_shared_manifest_reads() {
+        // The two manifest readers share read APIs and flow control, not KV writes or inboxes.
+        let shared = [
+            "$JS.hub.API.STREAM.INFO.KV_vault-manifest-active",
+            "$JS.hub.API.DIRECT.GET.KV_vault-manifest-active",
+            "$JS.hub.API.DIRECT.GET.KV_vault-manifest-active.>",
+            "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active",
+            "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active.>",
+            "$JS.hub.API.CONSUMER.INFO.KV_vault-manifest-active.>",
+            "$JS.hub.API.CONSUMER.DELETE.KV_vault-manifest-active.>",
+            "$JS.FC.KV_vault-manifest-active.*.*",
+        ];
         let box_id = BoxId::parse(SAMPLE_BOX).unwrap();
         let grants = HUB_MODULES.map(|module| (module, hub_module_grant(&box_id, module).unwrap()));
         for (i, (module, grant)) in grants.iter().enumerate() {
             for subject in grant.publish.iter().chain(&grant.subscribe) {
                 for (other, foreign) in &grants[i + 1..] {
                     for foreign_subject in foreign.publish.iter().chain(&foreign.subscribe) {
+                        if [HUB_VAULT_MODULE, HUB_MANIFEST_READER_MODULE].contains(module)
+                            && [HUB_VAULT_MODULE, HUB_MANIFEST_READER_MODULE].contains(other)
+                            && subject == foreign_subject
+                            && shared.contains(&subject.as_str())
+                        {
+                            continue;
+                        }
                         assert!(
                             !subject_filters_overlap(subject, foreign_subject).unwrap(),
                             "{module}: {subject} overlaps {other}: {foreign_subject}"
@@ -509,6 +601,94 @@ mod tests {
                         deny.subject
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn federation_vault_grant_can_put_or_delete_only_its_own_box_keys() {
+        for (home, foreign) in [(SAMPLE_BOX, OTHER_BOX), (OTHER_BOX, SAMPLE_BOX)] {
+            let box_id = BoxId::parse(home).unwrap();
+            let grant = hub_module_grant(&box_id, HUB_VAULT_MODULE).unwrap();
+            let may_publish = |subject: &str| {
+                grant
+                    .publish
+                    .iter()
+                    .any(|allow| subject_filters_overlap(allow, subject).unwrap())
+            };
+            // A put and a delete marker publish to the same key subject.
+            for bucket in [
+                "$KV.vault-shared-logins",
+                "$JS.hub.API.$KV.vault-shared-logins",
+            ] {
+                let own_key = format!("{bucket}.{home}.{foreign}");
+                let foreign_key = format!("{bucket}.{foreign}.{home}");
+                assert!(may_publish(&own_key), "missing write to {own_key}");
+                assert!(
+                    !may_publish(&foreign_key),
+                    "unexpected write to {foreign_key}"
+                );
+                assert!(
+                    !may_publish(&format!("{bucket}.{home}")),
+                    "allowed key without member token"
+                );
+            }
+            assert!(may_publish(&format!(
+                "$JS.hub.API.$KV.vault-manifest-active.{home}"
+            )));
+            for subject in [
+                format!("$JS.hub.API.$KV.vault-manifest-active.{foreign}"),
+                format!("$JS.hub.API.$KV.vault-manifest-active.{home}.extra"),
+            ] {
+                assert!(!may_publish(&subject), "unexpected write to {subject}");
+            }
+            assert!(!may_publish(
+                "$JS.hub.API.STREAM.PURGE.KV_vault-shared-logins"
+            ));
+        }
+    }
+
+    #[test]
+    fn federation_only_vault_modules_can_read_shared_logins() {
+        let box_id = BoxId::parse(SAMPLE_BOX).unwrap();
+        let key = format!("$KV.vault-shared-logins.{SAMPLE_BOX}.{OTHER_BOX}");
+        let read_subjects = [
+            "$JS.hub.API.STREAM.MSG.GET.KV_vault-shared-logins".to_owned(),
+            "$JS.hub.API.DIRECT.GET.KV_vault-shared-logins".to_owned(),
+            format!("$JS.hub.API.DIRECT.GET.KV_vault-shared-logins.{key}"),
+            "$JS.hub.API.CONSUMER.CREATE.KV_vault-shared-logins".to_owned(),
+            format!("$JS.hub.API.CONSUMER.CREATE.KV_vault-shared-logins.watch.{key}"),
+        ];
+        for module in HUB_MODULES.into_iter().chain([HUB_ROOMS_MODULE_LEGACY]) {
+            let grant = hub_module_grant(&box_id, module).unwrap();
+            for subject in &read_subjects {
+                let allowed = grant
+                    .publish
+                    .iter()
+                    .any(|allow| subject_filters_overlap(allow, subject).unwrap());
+                assert_eq!(allowed, module == HUB_VAULT_MODULE, "{module}: {subject}");
+            }
+            if module != HUB_VAULT_MODULE {
+                for allow in &grant.subscribe {
+                    assert!(
+                        !subject_filters_overlap(allow, "$KV.vault-shared-logins.>").unwrap(),
+                        "{module}: unexpected shared-login subscription {allow}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn federation_manifest_reader_grant_has_no_kv_writes() {
+        let box_id = BoxId::parse(SAMPLE_BOX).unwrap();
+        let grant = hub_module_grant(&box_id, HUB_MANIFEST_READER_MODULE).unwrap();
+        for allow in grant.publish {
+            for kv_writes in ["$KV.>", "$JS.hub.API.$KV.>"] {
+                assert!(
+                    !subject_filters_overlap(&allow, kv_writes).unwrap(),
+                    "unexpected KV write permission: {allow}"
+                );
             }
         }
     }

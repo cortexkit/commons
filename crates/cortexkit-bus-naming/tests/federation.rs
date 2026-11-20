@@ -5,9 +5,9 @@ use cortexkit_bus_naming::federation::*;
 use cortexkit_bus_naming::{
     box_account_denies, bus_permissions, delivery_authority_permissions, federation_consumer_specs,
     flow_engine_permissions, participant_permissions, shipped_streams, system_permissions,
-    validate_consumer, validate_streams, AccountNames, ConsumerSpec, DiscardPolicy, Operation,
-    StorageType, StreamKind, StreamSpec, TokenKind, EVENT_CONSUMERS, GIB, HOUR, LIVE_HINT_READERS,
-    MIB, MODULE_BUCKETS,
+    validate_consumer, validate_streams, AccountNames, ConsumerSpec, DiscardPolicy, LimitError,
+    Operation, StorageType, StreamKind, StreamSpec, TokenKind, EVENT_CONSUMERS, GIB, HOUR,
+    LIVE_HINT_READERS, MIB, MODULE_BUCKETS,
 };
 use serde_json::{json, Value};
 
@@ -50,10 +50,12 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
     let local = shipped_streams(&AccountNames::derive("box_example").unwrap());
     for hub in [HubKind::SelfHosted, HubKind::Hosted] {
         let specs = hub_streams(&box_id, hub);
-        assert_eq!(specs.len(), 6);
-        assert!(specs.contains(&hub_memory_stream()));
         let streams: Vec<_> = specs.iter().map(|spec| spec.stream.clone()).collect();
         validate_streams(&streams).unwrap();
+        assert_eq!(specs.len(), 8);
+        assert!(specs.contains(&hub_memory_stream()));
+        assert!(specs.contains(&vault_shared_logins_bucket(hub).backing_stream));
+        assert!(specs.contains(&vault_manifest_active_bucket(hub).backing_stream));
         for spec in &specs {
             assert!(!local
                 .iter()
@@ -69,6 +71,8 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
             | StreamKind::HubRooms
             | StreamKind::HubMemory
             | StreamKind::KvResidence
+            | StreamKind::KvVaultSharedLogins
+            | StreamKind::KvVaultManifestActive
             | StreamKind::ObjCuts
             | StreamKind::Fedout
     )));
@@ -84,18 +88,51 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
     assert!(idlog.allow_direct);
 
     for (hub, replicas) in [(HubKind::SelfHosted, 1), (HubKind::Hosted, 3)] {
-        let kv = residence_bucket(hub);
-        assert_eq!(kv.history, 1);
-        assert_eq!(kv.backing_stream.replicas, Some(replicas));
-        let stream = kv.backing_stream.stream;
-        assert_eq!(stream.max_msgs_per_subject, Some(1));
-        assert_eq!(stream.max_message_size, Some(16 * 1024));
-        assert_eq!(stream.max_bytes, 64 * MIB);
-        assert_eq!(stream.max_age, Duration::ZERO);
-        assert_eq!(stream.discard, DiscardPolicy::New);
-        assert!(kv.backing_stream.allow_rollup_hdrs);
-        assert!(kv.backing_stream.allow_direct);
-        assert!(kv.backing_stream.deny_delete);
+        for (kv, bucket, stream_name, max_message_size, max_bytes, allow_rollup_hdrs) in [
+            (
+                residence_bucket(hub),
+                "residence",
+                "KV_residence",
+                16 * 1024,
+                64 * MIB,
+                true,
+            ),
+            (
+                vault_shared_logins_bucket(hub),
+                "vault-shared-logins",
+                "KV_vault-shared-logins",
+                262_144,
+                64 * MIB,
+                false,
+            ),
+            (
+                vault_manifest_active_bucket(hub),
+                "vault-manifest-active",
+                "KV_vault-manifest-active",
+                16 * 1024,
+                16 * MIB,
+                false,
+            ),
+        ] {
+            assert_eq!(kv.bucket, bucket);
+            assert_eq!(kv.history, 1);
+            assert_eq!(kv.backing_stream.replicas, Some(replicas));
+            let stream = kv.backing_stream.stream;
+            assert_eq!(stream.name, stream_name);
+            assert_eq!(stream.subjects, [format!("$KV.{bucket}.>")]);
+            assert_eq!(stream.storage, StorageType::File);
+            assert_eq!(stream.max_msgs_per_subject, Some(1));
+            assert_eq!(stream.max_message_size, Some(max_message_size));
+            assert_eq!(stream.max_bytes, max_bytes);
+            assert_eq!(stream.max_age, Duration::ZERO);
+            assert_eq!(stream.discard, DiscardPolicy::New);
+            assert_eq!(
+                kv.backing_stream.allow_rollup_hdrs, allow_rollup_hdrs,
+                "{bucket}"
+            );
+            assert!(kv.backing_stream.allow_direct);
+            assert!(kv.backing_stream.deny_delete);
+        }
     }
     let cuts = cuts_object_store();
     assert_eq!(cuts.stream.max_bytes, 4 * GIB);
@@ -103,6 +140,19 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
     assert_eq!(cuts.stream.discard, DiscardPolicy::New);
     assert!(cuts.allow_rollup_hdrs);
     assert!(cuts.allow_direct);
+}
+
+#[test]
+fn federation_vault_streams_reject_overlapping_subjects() {
+    let hub = HubKind::SelfHosted;
+    let logins = vault_shared_logins_bucket(hub).backing_stream.stream;
+    let mut manifests = vault_manifest_active_bucket(hub).backing_stream.stream;
+    manifests.subjects.clone_from(&logins.subjects);
+    assert!(matches!(
+        validate_streams(&[logins, manifests]),
+        Err(LimitError::OverlappingStreamFilters { left_stream, right_stream, .. })
+            if left_stream == VAULT_SHARED_LOGINS_STREAM && right_stream == VAULT_MANIFEST_ACTIVE_STREAM
+    ));
 }
 
 fn subject_matches(pattern: &str, subject: &str) -> bool {
@@ -289,6 +339,8 @@ fn base_stream_json(stream: &StreamSpec) -> Value {
             StreamKind::HubRooms => "hub_rooms",
             StreamKind::HubMemory => "hub_memory",
             StreamKind::KvResidence => "kv_residence",
+            StreamKind::KvVaultSharedLogins => "kv_vault_shared_logins",
+            StreamKind::KvVaultManifestActive => "kv_vault_manifest_active",
             StreamKind::ObjCuts => "obj_cuts",
             _ => panic!("not a hub stream"),
         },
@@ -315,8 +367,7 @@ fn stream_json(spec: &HubStreamSpec) -> Value {
     document
 }
 
-fn residence_json(hub: HubKind) -> Value {
-    let bucket = residence_bucket(hub);
+fn bucket_json(bucket: KvBucketSpec) -> Value {
     json!({
         "bucket": bucket.bucket,
         "history": bucket.history,
@@ -347,9 +398,13 @@ fn federation_golden_matches_bytes() {
             "hub_idlog": stream_json(&hub_idlog_stream()),
             "hub_rooms": stream_json(&hub_rooms_stream()),
             "hub_memory": stream_json(&hub_memory_stream()),
-            "residence_self_hosted": residence_json(HubKind::SelfHosted),
-            "residence_hosted": residence_json(HubKind::Hosted),
+            "residence_self_hosted": bucket_json(residence_bucket(HubKind::SelfHosted)),
+            "residence_hosted": bucket_json(residence_bucket(HubKind::Hosted)),
             "cuts": stream_json(&cuts_object_store()),
+            "vault_shared_logins_self_hosted": bucket_json(vault_shared_logins_bucket(HubKind::SelfHosted)),
+            "vault_shared_logins_hosted": bucket_json(vault_shared_logins_bucket(HubKind::Hosted)),
+            "vault_manifest_active_self_hosted": bucket_json(vault_manifest_active_bucket(HubKind::SelfHosted)),
+            "vault_manifest_active_hosted": bucket_json(vault_manifest_active_bucket(HubKind::Hosted)),
         },
     });
     assert_golden(
@@ -390,6 +445,27 @@ fn federation_hub_module_refuses_other_ids() {
     for module in ["example-module", "Prefrontal", "prefrontal.core", "", "*"] {
         assert!(!is_hub_module(module), "{module:?}");
         assert_eq!(hub_module_grant(&box_id, module), None, "{module:?}");
+    }
+}
+
+#[test]
+fn federation_only_identity_log_module_can_read_residence_from_the_leader() {
+    let box_id = sample_box();
+    let subject = "$JS.hub.API.STREAM.MSG.GET.KV_residence";
+    let grant = hub_module_grant(&box_id, "entorhinal").unwrap();
+    assert!(grant.publish.iter().any(|allow| allow == subject));
+
+    for module in HUB_MODULES.into_iter().chain(["prefrontal-core"]) {
+        if module != "entorhinal" {
+            let grant = hub_module_grant(&box_id, module).unwrap();
+            assert!(
+                !grant
+                    .publish
+                    .iter()
+                    .any(|allow| subject_matches(allow, subject)),
+                "{module} can publish to {subject}"
+            );
+        }
     }
 }
 

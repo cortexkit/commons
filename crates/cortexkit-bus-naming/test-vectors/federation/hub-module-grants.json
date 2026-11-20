@@ -1,6 +1,59 @@
 {
   "box_id": "0123456789abcdef0123456789abcdef",
   "grants": {
+    "claustrum": {
+      "denies": [
+        {
+          "operation": "publish",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedsend.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedsend.>"
+        }
+      ],
+      "publish": [
+        "$JS.hub.API.STREAM.INFO.KV_vault-shared-logins",
+        "$JS.hub.API.DIRECT.GET.KV_vault-shared-logins",
+        "$JS.hub.API.DIRECT.GET.KV_vault-shared-logins.>",
+        "$JS.hub.API.CONSUMER.CREATE.KV_vault-shared-logins",
+        "$JS.hub.API.CONSUMER.CREATE.KV_vault-shared-logins.>",
+        "$JS.hub.API.CONSUMER.INFO.KV_vault-shared-logins.>",
+        "$JS.hub.API.CONSUMER.DELETE.KV_vault-shared-logins.>",
+        "$JS.hub.API.STREAM.INFO.KV_vault-manifest-active",
+        "$JS.hub.API.DIRECT.GET.KV_vault-manifest-active",
+        "$JS.hub.API.DIRECT.GET.KV_vault-manifest-active.>",
+        "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active",
+        "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active.>",
+        "$JS.hub.API.CONSUMER.INFO.KV_vault-manifest-active.>",
+        "$JS.hub.API.CONSUMER.DELETE.KV_vault-manifest-active.>",
+        "$KV.vault-shared-logins.0123456789abcdef0123456789abcdef.>",
+        "$JS.hub.API.$KV.vault-shared-logins.0123456789abcdef0123456789abcdef.>",
+        "$JS.hub.API.$KV.vault-manifest-active.0123456789abcdef0123456789abcdef",
+        "$JS.hub.API.STREAM.MSG.GET.KV_vault-shared-logins",
+        "$JS.FC.KV_vault-shared-logins.*.*",
+        "$JS.FC.KV_vault-manifest-active.*.*"
+      ],
+      "subscribe": [
+        "ckdel.0123456789abcdef0123456789abcdef.claustrum.>"
+      ]
+    },
     "engram": {
       "denies": [
         {
@@ -89,6 +142,7 @@
         "$JS.hub.API.CONSUMER.DELETE.KV_residence.>",
         "ck.fleet.idlog",
         "$JS.hub.API.$KV.residence.>",
+        "$JS.hub.API.STREAM.MSG.GET.KV_residence",
         "$JS.FC.HUB_IDLOG.*.*",
         "$JS.FC.KV_residence.*.*"
       ],
@@ -137,6 +191,47 @@
       ],
       "subscribe": [
         "ckdel.0123456789abcdef0123456789abcdef.magic-context.>"
+      ]
+    },
+    "plexus": {
+      "denies": [
+        {
+          "operation": "publish",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "publish",
+          "subject": "fedsend.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedlocal.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedout.>"
+        },
+        {
+          "operation": "subscribe",
+          "subject": "fedsend.>"
+        }
+      ],
+      "publish": [
+        "$JS.hub.API.STREAM.INFO.KV_vault-manifest-active",
+        "$JS.hub.API.DIRECT.GET.KV_vault-manifest-active",
+        "$JS.hub.API.DIRECT.GET.KV_vault-manifest-active.>",
+        "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active",
+        "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active.>",
+        "$JS.hub.API.CONSUMER.INFO.KV_vault-manifest-active.>",
+        "$JS.hub.API.CONSUMER.DELETE.KV_vault-manifest-active.>",
+        "$JS.FC.KV_vault-manifest-active.*.*"
+      ],
+      "subscribe": [
+        "ckdel.0123456789abcdef0123456789abcdef.plexus.>"
       ]
     },
     "prefrontal": {

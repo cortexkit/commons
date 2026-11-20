@@ -43,6 +43,8 @@ pub enum StreamKind {
     HubRooms,
     HubMemory,
     KvResidence,
+    KvVaultSharedLogins,
+    KvVaultManifestActive,
     ObjCuts,
 }
 

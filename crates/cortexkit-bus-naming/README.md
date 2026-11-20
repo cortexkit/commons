@@ -114,5 +114,11 @@ refuses new writes once it reaches 1 GiB. It caps each message at 64 KiB. Leaf
 users have the same read and consumer APIs as for `HUB_ROOMS`, not purge or
 deletion access to stored changes.
 
+The vault module can read and watch all of `vault-shared-logins`, but can write
+only lists whose key starts with its own box ID. Shared-login confidentiality
+comes from sealing each list to its recipient, not from the hub read grant.
+Both vault buckets disable rollup headers: a stream-wide rollup from any
+writer could otherwise remove records outside its own keys.
+
 The bus module owns the box-account import/export rows; they are not described
 by this crate.
