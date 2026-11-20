@@ -532,6 +532,17 @@ pub fn bus_permissions(
         }
     }
 
+    // ck-bus pulls and acks outgoing hand-off frames on FEDSEND through its
+    // one durable; creating that durable is covered by the loop above.
+    let fedsend = &account.streams().fedsend;
+    let fedsend_durable = crate::federation::FEDSEND_DURABLE;
+    for subject in [
+        format!("$JS.API.CONSUMER.MSG.NEXT.{fedsend}.{fedsend_durable}"),
+        format!("$JS.ACK.{fedsend}.{fedsend_durable}.>"),
+    ] {
+        add(&mut entries, Principal::Bus, Operation::Publish, subject);
+    }
+
     // Agent durable lifecycle: listing the durables, and purging an agent's
     // subject when its durable is deleted (a consumer delete alone leaves its
     // messages in the stream for a later bind to redeliver). The purge filter

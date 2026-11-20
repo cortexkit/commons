@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6
+
+- Let the message-bus module pull and acknowledge outgoing hand-off frames on
+  `FEDSEND` through its durable `c_ckbus_fedsend` (`federation::FEDSEND_DURABLE`).
+
 ## 0.5.5
 
 - Allow the memory and rooms modules to reply to flow-control requests from

@@ -28,6 +28,9 @@ pub const MEMORY_KINDS: [&str; 5] = [
     MEMORY_KIND_OBSERVATION,
     MEMORY_KIND_PRIMER,
 ];
+/// ck-bus's one durable on the box account's FEDSEND stream: it reads each
+/// outgoing hand-off frame once, seals it and stores it in FEDOUT.
+pub const FEDSEND_DURABLE: &str = "c_ckbus_fedsend";
 pub const FEDOUT_STREAM: &str = "FEDOUT";
 pub const FEDOUT_SUBJECT: &str = "fedout.>";
 pub const IDLOG_SUBJECT: &str = "ck.fleet.idlog";

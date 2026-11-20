@@ -91,6 +91,7 @@ allow delivery-authority subscribe _INBOX.prefrontal.>
 allow delivery-authority subscribe ck.box_goldenfixture.room.room_gold_bound.>
 allow bus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_DELIVERY_DEAD.c_ckbus_dead.>
 allow bus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.c_ckbus_dead.>
+allow bus publish $JS.ACK.CK_BOX_GOLDENFIXTURE_FEDSEND.c_ckbus_fedsend.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_CORE_WORK.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_DELIVERY_DEAD.>
 allow bus publish $JS.API.CONSUMER.CREATE.CK_BOX_GOLDENFIXTURE_EFFECT.>
@@ -143,6 +144,7 @@ allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_ROOM.>
 allow bus publish $JS.API.CONSUMER.INFO.CK_BOX_GOLDENFIXTURE_WAKE.>
 allow bus publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_DELIVERY_DEAD.c_ckbus_dead
 allow bus publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_EFFECT_DEAD.c_ckbus_dead
+allow bus publish $JS.API.CONSUMER.MSG.NEXT.CK_BOX_GOLDENFIXTURE_FEDSEND.c_ckbus_fedsend
 allow bus publish $JS.API.CONSUMER.NAMES.CK_BOX_GOLDENFIXTURE_EFFECT
 allow bus publish $JS.API.CONSUMER.NAMES.CK_BOX_GOLDENFIXTURE_PEER
 allow bus publish $JS.API.CONSUMER.NAMES.CK_BOX_GOLDENFIXTURE_WAKE
