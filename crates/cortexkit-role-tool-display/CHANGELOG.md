@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- Add immutable, attested `notice` writes and opt-in notice records on transcript
+  reads. Writers and display servers negotiate notice-record capability tokens.
+
 ## 0.1.12
 
 - Add `text_lines`, a completion-only field for up to three bounded lines

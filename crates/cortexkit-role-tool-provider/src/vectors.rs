@@ -154,6 +154,9 @@ pub const VIEW_REVISIONS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/view-revisions.json");
 /// Pinned tool definitions that match, mismatch, or are absent on legacy views.
 pub const VIEW_TOOLS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/view-tools.json");
+/// Mixed tool and notice views, bucket keys and invalid notice entries.
+pub const NOTICE_VIEWS_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/notice-views.json");
 /// The vectors' `README.md`.
 pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.md");
 
@@ -204,6 +207,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("view-halves.json", VIEW_HALVES_JSON),
     ("view-revisions.json", VIEW_REVISIONS_JSON),
     ("view-tools.json", VIEW_TOOLS_JSON),
+    ("notice-views.json", NOTICE_VIEWS_JSON),
     ("model-visible-size.json", MODEL_VISIBLE_SIZE_JSON),
     ("README.md", README),
     ("reply-custody.json", REPLY_CUSTODY_JSON),

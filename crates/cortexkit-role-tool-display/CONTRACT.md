@@ -50,8 +50,8 @@ ASCII (`0x21`–`0x7e`); values are compared byte for byte, without interpretati
 - `call_key` is the runner's key, obeying subc-protocol's opaque-field rule.
   For a relayed call it is `origin.call_key`.
 - `kind` is `record`, `detail`, `completion` or `message` for these params.
-  The same operation accepts `wake` with the separate envelope in §8. Readers
-  preserve an unknown kind as a string; the server refuses it as
+  The same operation accepts `wake` and `notice` with separate envelopes (§8
+  and §10). Readers preserve an unknown kind as a string; the server refuses it as
   `invalid_params {field: "kind"}`.
 - `schema_pin` is the pin the provider says it served and obeys the opaque-field
   rule. For a relayed call it is `origin.schema_pin`, defined by subc-protocol
@@ -106,10 +106,11 @@ mapped to `invalid_params` naming the field by the serving implementation.
 1. **Op.** A provider serves the named request
    `{name: "display.read", arguments: {record_id}}` on its management surface
    (`DISPLAY_READ`, `DisplayRead`). The provider chooses `record_id`, which
-   follows the opaque-field rule in §2. The reply is the exact `DisplayWrite`
-   params it would have sent to `display.write` for that record: `runner`,
-   `call_key`, `kind`, `schema_pin` and `body`, not a new envelope. The same
-   validation and size caps apply; `validate_write` must accept the reply.
+   follows the opaque-field rule in §2. The reply is the exact params it would
+   have sent to `display.write` for that record, not a new envelope. For tool
+   records these are `DisplayWrite` params; for `wake` and `notice` they are
+   `WakeWrite` (§8) and `NoticeWrite` (§10) params respectively. Route the
+   reply by `kind` and apply the same validation and size caps as for pushes.
    `DisplayRead::validate` checks the identifier; structural decode failures
    must be mapped to `invalid_params` naming the field by the provider.
 2. **Caller.** A provider answers only the single live module declaring
@@ -125,9 +126,9 @@ mapped to `invalid_params` naming the field by the serving implementation.
 4. **Writer on the display server.** The display server stores a pulled record
    with writer `Principal::Reserved` naming the module it called, and only when
    the daemon's catalog lists that module as daemon-verified. The storage key
-   and idempotency rules are the same as `display.write` in §2: a record arriving
-   by both paths is stored once (`already_stored`), and different canonical body
-   bytes at that key are still `display_write_conflict` for provider display data.
+   and idempotency rules are the same as `display.write` for that kind: a record
+   arriving by both paths is stored once (`already_stored`), and different
+   canonical body bytes at that key are still `display_write_conflict`.
    `message` uses the push path in §9.
 5. **Wake event.** After a record commits, the provider publishes one bus event
    per record on subject `event.<provider>.display_record_ready.v1`: event name
@@ -562,3 +563,84 @@ structural decode failures must also be mapped to `invalid_params`.
   member rules; `validate_write` also checks the envelope and canonical size.
   The writer is responsible for verifying the quote and resolving artifacts;
   structural envelope decode failures must also be mapped to `invalid_params`.
+
+## 10. Notice records
+
+A notice record supplies structured display data for a module's own notice; the
+notice text sent to the agent is unchanged. The writer declares
+`notice-record-writer/v1` (`NOTICE_RECORD_WRITER_CAPABILITY`); the display server
+declares `notice-record-display/v1` (`NOTICE_RECORD_DISPLAY_CAPABILITY`). Neither
+side writes or serves notice records until the other has declared its token.
+
+### 10.1 Writes
+
+The request is `{name: "display.write", arguments: {kind: "notice", runner,
+session, send_id, body}}` (`NoticeWrite`). `runner`, `session` and `send_id` have
+the same meaning and rules as in §8.1. The sender is exclusively the
+daemon-verified module on the write route. For pull through
+`display_record_ready.v1` and `display.read`, it is the verified module the
+display server called. A claimed
+`sender` in the envelope or body is malformed (`invalid_params`); a direct or
+unverified writer is refused as `display_writer_unverified`.
+
+- The body is `{view, key?, data}` (`NoticeBody`). `view` is `<name>:<version>`,
+  where `name` matches `[a-z0-9_]{1,64}` and `version` is decimal from 1 through
+  9007199254740991 (2^53 − 1), with no sign or leading zeroes. The writer bumps
+  the version when the shape of `data` changes.
+- An optional `key` is a fold key: 1–128 bytes, each printable non-space ASCII
+  as in the opaque-field rule (§2). It is compared byte for byte.
+- `data` is a JSON object. Free text in it is plain text, never Markdown. The
+  writer bounds long text and records any truncation in its own data members.
+- The canonical JCS body is at most 16 KiB. A larger body is refused as
+  `display_too_large` with `{kind: "notice", max_bytes: 16384}`. The display
+  server never cuts the body and does not check `data` against the view at
+  write time; the view may arrive later.
+
+The immutable key is `(session, attested sender, send_id)`. The display server
+stores the canonical JCS body bytes atomically and keeps them for 180 days.
+A first write answers `stored`, an identical retry `already_stored`, and a retry
+with different bytes `display_write_conflict`. The runner is provenance, not a
+key component. Writers write before sending with their own short deadline. A
+missed write never holds back or fails the send; the app draws the folded notice.
+
+`NoticeWrite::check` validates attestation, the envelope and the body and
+returns the canonical bytes. The serving implementation maps structural decode
+failures to `invalid_params` naming the field. `notice_idempotency_key` encodes
+the key as JCS; `write_outcome` compares canonical bytes without storing them.
+
+### 10.2 Join and reads
+
+For a notice sent as its own message, the display server takes `(sender,
+send_id)` from the runner's `send_ids` for that row, not from notice text.
+For a notice delivered with a tool result rather than as its own message, it
+uses the sender and send id on that `session.notices` entry. A record with the
+pair in the same session joins. For a row moved from another session, a unique
+record for the pair across sessions joins; two or more are ambiguous and none
+joins.
+
+The record joins only if its own writer serves its view. The display server
+constructs `nv1:<sender>:<name>:<version>` with the attested sender, never a
+sender named in record text. It keeps notice views under `(writer, key)` and
+serves a notice key from `display.views {pins}` only from the writer the key
+names. It leaves out views that fail validation and serves accepted templates
+unchanged through `display.template {digest}`. See the
+[tool-provider contract](../cortexkit-role-tool-provider/CONTRACT.md) for view
+publication and the evaluation context.
+
+The served `NoticeRecord` is `{sender, view, key?, data}`, with the qualified key
+in `view`. Apps treat that key as an opaque pin. The display server's app
+protocol has two opt-in reads:
+
+- `session.wake_records {messageIds, acceptNoticeRecords: true}` adds
+  `notices: {<messageId>: NoticeRecord}` alongside the existing wake records.
+- A `session.notices` request with `acceptNoticeRecords: true` adds
+  `noticeRecord` to each entry with a matching record.
+
+Without the opt-in, replies are byte for byte unchanged. Apps fetch the record
+before inserting its row. A missing record, a missing or refused view, or a
+template that fails evaluation draws the existing folded notice. A later
+record never replaces an inserted folded card; there is no watch for it.
+
+The display server serves `key` without folding. Within a chat, apps show only
+the latest notice for a matching sender and key, at the place where it arrived.
+A notice without a key never folds.

@@ -133,8 +133,12 @@ catalog and describe wire shapes are unchanged.
 Each pin must pass subc-protocol's opaque-field rule: 1–256 printable non-space
 ASCII bytes (`0x21`–`0x7e`), compared byte for byte. An invalid request is
 `invalid_request {field}`, naming `pins` or `pins[i]`. Empty requests are valid.
-Its bare answer is `{views: {<pin>: <ViewManifest> | "unknown"}}`, with exactly
-the requested keys (repeated pins share one key). A known view is
+Its bare answer is `{views: {<pin>: <ViewManifest> | <NoticeView> | "unknown"}}`,
+with exactly the requested keys (repeated pins share one key).
+
+#### Tool views
+
+A known tool view is
 `{record_schema: {name, revision, fields}, reads: [{op, ...}], template, tool?, half_of?}`.
 `revision` is a u64 integer. `fields` declares provider extension fields only,
 using the kinds in [`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
@@ -240,6 +244,57 @@ the app server opened as a scope carrier, the provider
 admits only the reads its views declare. The full identity, field, limit,
 idempotency and join requirements are in
 [`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
+
+#### Notice views
+
+A module may serve views for its own notice records alongside its tool views.
+The pin is `nv1:<writer module id>:<name>:<version>`, where `name` matches
+`[a-z0-9_]{1,64}` and `version` is decimal from 1 through 9007199254740991
+(2^53 − 1), with no sign or leading zeroes. The display server
+builds the pin from the daemon-attested sender of the record, never from a
+claimed sender in the record. It accepts and serves a notice view only from
+the writer named by its key. Apps treat the pin as opaque.
+
+The entry is `{notice: {name, version, data_schema}, template: {row, page},
+template_revision}`. `notice.name` and `notice.version` match the pin, and
+`data_schema` uses the same JSON Schema subset as tool input schemas. A change
+to the shape of the notice data requires a new version. The writer also puts
+the same entry beside tool views in its `<module>.views` bus bucket, under the
+lowercase hex encoding of the pin's UTF-8 bytes.
+
+`views::NoticeView` models the entry. `ViewsReply::validate_for` checks its
+name and version against the pin and checks that the schema is flat.
+`NoticeView::check_pin` also checks the attested publisher, regardless of
+whether the entry came from `tool.views` or the bucket. The display server
+checks the full schema subset and the templates before serving them; this crate
+does not interpret templates.
+
+The notice template uses the existing `tool_row` and `tool_page` profiles.
+`input` is the record's `data` typed by `data_schema`. The fixed `view` context
+is:
+
+```json
+{
+  "call": {
+    "phase": "answered",
+    "startedAtMs": null,
+    "finishedAtMs": null,
+    "isError": null,
+    "outputBytes": null,
+    "unanswered": null
+  },
+  "record": null,
+  "completion": null
+}
+```
+
+On a page `view` also has `detail: null` and `output: null`. There is no call;
+the templates read only `input`. The row needs no `Slot` (a space reserved for
+later display data): its height follows from `input` and width, both known
+before insertion. The app draws the card's frame around the template. A
+missing record or view, a refused view, or a template that fails evaluation
+falls back to the existing folded notice (see
+[tool-display §10](../cortexkit-role-tool-display/CONTRACT.md#10-notice-records)).
 
 ### 2.2. Session notices: `session-notices/v1`
 

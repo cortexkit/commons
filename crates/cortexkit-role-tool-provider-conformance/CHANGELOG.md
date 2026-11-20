@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.16
+
+- Pin tool-provider `=0.15.15`.
+
 ## 0.15.15
 
 - Follows tool-provider 0.15.14; no new checks.

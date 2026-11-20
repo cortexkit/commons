@@ -33,6 +33,11 @@ existing spelling. Lookup examples describe server behavior, not an app read op.
 - `view-tools.json`: copied byte for byte from the same provider-owned vector
   directory. Pins matching and mismatching tool definitions, and a legacy view
   whose missing `tool` keeps its serialized bytes and requires a catalog check.
+- `notices.json`: notice writes and their served shapes, including finished,
+  failed, still-running and watch notices and a folded pair. A capped write
+  reaches the name, version, key, send id and body limits. Refusals modify the
+  first write unless they name the capped write; an `append` adds bytes to the
+  string at the given JSON pointer. `malformed` cases fail structural decoding.
 
 `SHA256SUMS` covers every JSON file and this README. Tests read every JSON file;
 `scripts/gate.sh fast` at the repository root verifies every checksum.

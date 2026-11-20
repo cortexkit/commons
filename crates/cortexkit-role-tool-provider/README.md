@@ -30,6 +30,11 @@ the selector's exact `{provider, model}` shape.
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-tool-provider-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 
+Providers can serve [notice views](CONTRACT.md#notice-views) beside tool views in
+`tool.views` and their views bucket. Notice views use `nv1:` pins qualified by
+the writer's module id and draw attested notice data in the existing tool row
+and page profiles.
+
 Consumers opt into `tool-result/v1` on the route bind. Understanding held first
 replies additionally requires `held-reply/v1`; providers use
 `consumer_reads_held_reply_v1` to check both declarations. `ToolResult::held()`

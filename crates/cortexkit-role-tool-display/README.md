@@ -30,8 +30,15 @@ kinds, including the completion-only `text_lines` kind for bounded step-log text
 `canonical_body`, `idempotency_key`, `validate_write` and `write_outcome` are
 pure helpers. They do not route, persist, fetch views or authorize joins.
 `DisplayRead` names a provider-stored record to pull over its management surface;
-the reply reuses `DisplayWrite`. `DisplayRecordReady` is the strict, identifier-only
-bus event body published after a record commits. Both validate opaque record ids.
+the reply reuses the params for that write kind. `DisplayRecordReady` is the
+strict, identifier-only bus event body published after a record commits. Both
+validate opaque record ids.
+
+Modules can also write immutable notice records for their own sends. The
+display server joins them by attested sender and send id and serves `NoticeRecord`
+only on opt-in reads. A notice without an accepted view keeps the existing
+folded card. See [notice records](CONTRACT.md#10-notice-records) for capability
+negotiation, writes, and joins.
 
 `test-vectors/tool-display-v1/` ships with the package and is pinned by
 `SHA256SUMS`. Tests read every JSON vector. The optional `tool.views` operation

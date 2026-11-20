@@ -1,0 +1,327 @@
+{
+  "publisher": "example-writer",
+  "sample_pin": "nv1:example-writer:finished:1",
+  "request": {
+    "pins": [
+      "pin:ordinary:1",
+      "nv1:example-writer:finished:1",
+      "nv1:example-writer:still_running:1",
+      "nv1:example-writer:watch:1",
+      "nv1:example-writer:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:9007199254740991",
+      "nv1:example-writer:absent:1"
+    ]
+  },
+  "reply": {
+    "views": {
+      "pin:ordinary:1": {
+        "record_schema": {
+          "name": "ordinary",
+          "revision": 1,
+          "fields": {}
+        },
+        "reads": [],
+        "template": {
+          "registry": "ordinary-row"
+        }
+      },
+      "nv1:example-writer:finished:1": {
+        "notice": {
+          "name": "finished",
+          "version": 1,
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "exit_code": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "finished",
+                  "failed"
+                ]
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "exit_code",
+              "status",
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "template": {
+          "row": {
+            "registry": "finished-row"
+          },
+          "page": {
+            "registry": "finished-page"
+          }
+        },
+        "template_revision": 1
+      },
+      "nv1:example-writer:still_running:1": {
+        "notice": {
+          "name": "still_running",
+          "version": 1,
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "elapsed_seconds": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "elapsed_seconds",
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "template": {
+          "row": {
+            "registry": "still_running-row"
+          },
+          "page": {
+            "registry": "still_running-page"
+          }
+        },
+        "template_revision": 1
+      },
+      "nv1:example-writer:watch:1": {
+        "notice": {
+          "name": "watch",
+          "version": 1,
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "matched_text": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "matched_text",
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "template": {
+          "row": {
+            "registry": "watch-row"
+          },
+          "page": {
+            "registry": "watch-page"
+          }
+        },
+        "template_revision": 1
+      },
+      "nv1:example-writer:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:9007199254740991": {
+        "notice": {
+          "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "version": 9007199254740991,
+          "data_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "template": {
+          "row": {
+            "registry": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn-row"
+          },
+          "page": {
+            "registry": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn-page"
+          }
+        },
+        "template_revision": 1
+      },
+      "nv1:example-writer:absent:1": "unknown"
+    }
+  },
+  "bucket_keys": {
+    "nv1:example-writer:finished:1": "6e76313a6578616d706c652d7772697465723a66696e69736865643a31",
+    "nv1:example-writer:still_running:1": "6e76313a6578616d706c652d7772697465723a7374696c6c5f72756e6e696e673a31",
+    "nv1:example-writer:watch:1": "6e76313a6578616d706c652d7772697465723a77617463683a31",
+    "nv1:example-writer:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:9007199254740991": "6e76313a6578616d706c652d7772697465723a6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e3a39303037313939323534373430393931"
+  },
+  "notice_cases": {
+    "finished": "nv1:example-writer:finished:1",
+    "failed": "nv1:example-writer:finished:1",
+    "still_running": "nv1:example-writer:still_running:1",
+    "fold_earlier": "nv1:example-writer:still_running:1",
+    "fold_later": "nv1:example-writer:finished:1",
+    "watch": "nv1:example-writer:watch:1"
+  },
+  "refusals": [
+    {
+      "tag": "empty_name",
+      "pin": "nv1:example-writer::1",
+      "field": "views.nv1:example-writer::1"
+    },
+    {
+      "tag": "long_name",
+      "pin": "nv1:example-writer:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:1",
+      "field": "views.nv1:example-writer:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:1"
+    },
+    {
+      "tag": "name_characters",
+      "pin": "nv1:example-writer:Finished-1:1",
+      "field": "views.nv1:example-writer:Finished-1:1"
+    },
+    {
+      "tag": "zero_version",
+      "pin": "nv1:example-writer:finished:0",
+      "field": "views.nv1:example-writer:finished:0"
+    },
+    {
+      "tag": "leading_zero",
+      "pin": "nv1:example-writer:finished:01",
+      "field": "views.nv1:example-writer:finished:01"
+    },
+    {
+      "tag": "positive_sign",
+      "pin": "nv1:example-writer:finished:+1",
+      "field": "views.nv1:example-writer:finished:+1"
+    },
+    {
+      "tag": "negative_sign",
+      "pin": "nv1:example-writer:finished:-1",
+      "field": "views.nv1:example-writer:finished:-1"
+    },
+    {
+      "tag": "above_exact_range",
+      "pin": "nv1:example-writer:finished:9007199254740992",
+      "field": "views.nv1:example-writer:finished:9007199254740992"
+    },
+    {
+      "tag": "unqualified",
+      "pin": "finished:1",
+      "field": "views.finished:1"
+    },
+    {
+      "tag": "empty_writer",
+      "pin": "nv1::finished:1",
+      "field": "views.nv1::finished:1"
+    },
+    {
+      "tag": "wrong_name",
+      "member": "/notice/name",
+      "value": "other",
+      "field": "views.nv1:example-writer:finished:1.notice.name"
+    },
+    {
+      "tag": "wrong_version",
+      "member": "/notice/version",
+      "value": 2,
+      "field": "views.nv1:example-writer:finished:1.notice.version"
+    },
+    {
+      "tag": "definition_version_zero",
+      "member": "/notice/version",
+      "value": 0,
+      "field": "views.nv1:example-writer:finished:1.notice.version"
+    },
+    {
+      "tag": "definition_version_above_range",
+      "member": "/notice/version",
+      "value": 9007199254740992,
+      "field": "views.nv1:example-writer:finished:1.notice.version"
+    },
+    {
+      "tag": "schema_not_object",
+      "member": "/notice/data_schema",
+      "value": false,
+      "field": "views.nv1:example-writer:finished:1.notice.data_schema"
+    },
+    {
+      "tag": "schema_root_anyOf",
+      "member": "/notice/data_schema",
+      "value": {
+        "anyOf": []
+      },
+      "field": "views.nv1:example-writer:finished:1.notice.data_schema"
+    },
+    {
+      "tag": "schema_root_allOf",
+      "member": "/notice/data_schema",
+      "value": {
+        "allOf": []
+      },
+      "field": "views.nv1:example-writer:finished:1.notice.data_schema"
+    },
+    {
+      "tag": "schema_root_oneOf",
+      "member": "/notice/data_schema",
+      "value": {
+        "oneOf": []
+      },
+      "field": "views.nv1:example-writer:finished:1.notice.data_schema"
+    },
+    {
+      "tag": "schema_root_type_array",
+      "member": "/notice/data_schema",
+      "value": {
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "field": "views.nv1:example-writer:finished:1.notice.data_schema"
+    },
+    {
+      "tag": "wrong_publisher",
+      "publisher": "other-writer",
+      "field": "views.nv1:example-writer:finished:1"
+    }
+  ],
+  "malformed": [
+    {
+      "tag": "no_revision",
+      "remove": "/template_revision"
+    },
+    {
+      "tag": "no_row",
+      "remove": "/template/row"
+    },
+    {
+      "tag": "no_page",
+      "remove": "/template/page"
+    },
+    {
+      "tag": "no_schema",
+      "remove": "/notice/data_schema"
+    },
+    {
+      "tag": "negative_version",
+      "member": "/notice/version",
+      "value": -1
+    },
+    {
+      "tag": "non_integer_version",
+      "member": "/notice/version",
+      "value": 1.5
+    },
+    {
+      "tag": "string_version",
+      "member": "/notice/version",
+      "value": "1"
+    }
+  ]
+}

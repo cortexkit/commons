@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.15
+
+- Add notice views to `tool.views` and the module's views bucket. Notice views
+  use writer-qualified pins and the existing tool row and page profiles.
+
 ## 0.15.14
 
 - No API or wire change. `ViewEntry` allows Clippy's large-variant lint: the record

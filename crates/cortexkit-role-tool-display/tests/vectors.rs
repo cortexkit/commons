@@ -44,6 +44,7 @@ fn every_json_vector_is_exercised() {
         "view-tools.json",
         "wakes.json",
         "messages.json",
+        "notices.json",
     ]
     .into_iter()
     .map(str::to_owned)

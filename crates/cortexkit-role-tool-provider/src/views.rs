@@ -1,6 +1,8 @@
 //! Optional display views, fetched by the display server off the write path.
-//! For a pin, a view's record schema and reads never change; its template can
+//! For a tool pin, the record schema and reads never change; its template can
 //! be replaced with a higher `template_revision` (CONTRACT §2.1).
+
+mod notice;
 
 use std::collections::BTreeMap;
 
@@ -9,6 +11,7 @@ use serde_json::{Map, Value};
 use subc_protocol::ErrorBody;
 
 pub use cortexkit_role_tool_display::{FieldKind, RecordSchema};
+pub use notice::{NoticeView, NoticeViewDefinition, NoticeViewTemplates};
 
 use crate::{
     call::{validate_call_key, validate_schema_pin, SchemaPin},
@@ -252,7 +255,7 @@ impl ViewManifest {
     }
 }
 
-/// A view or the exact string `unknown`; no interpretation of template JSON.
+/// A tool view, notice view, or the exact string `unknown`.
 // Almost every entry is a manifest and `Unknown` carries nothing, so boxing
 // the manifest would only add an allocation per entry and change the public
 // pattern `ViewEntry::Manifest(manifest)`.
@@ -261,6 +264,7 @@ impl ViewManifest {
 #[non_exhaustive]
 pub enum ViewEntry {
     Manifest(ViewManifest),
+    Notice(NoticeView),
     Unknown,
 }
 
@@ -268,6 +272,7 @@ impl Serialize for ViewEntry {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Manifest(view) => view.serialize(serializer),
+            Self::Notice(view) => view.serialize(serializer),
             Self::Unknown => serializer.serialize_str("unknown"),
         }
     }
@@ -278,6 +283,15 @@ impl<'de> Deserialize<'de> for ViewEntry {
         let value = Value::deserialize(deserializer)?;
         if value.as_str() == Some("unknown") {
             return Ok(Self::Unknown);
+        }
+        // Tool manifests have always ignored additional members. A `notice`
+        // member cannot change how a manifest with its required members decodes.
+        if value.get("notice").is_some()
+            && !(value.get("record_schema").is_some() && value.get("reads").is_some())
+        {
+            return serde_json::from_value(value)
+                .map(Self::Notice)
+                .map_err(serde::de::Error::custom);
         }
         serde_json::from_value(value)
             .map(Self::Manifest)
@@ -298,7 +312,8 @@ impl ViewsReply {
     }
 
     /// Check pin coverage, schemas and paired wake markers, accepting unknown
-    /// wake kinds so the display server can pass them on to apps.
+    /// wake kinds. Check notice entries against their pins; use
+    /// [`NoticeView::check_pin`] to also verify the publisher's attested id.
     pub fn validate_for(&self, request: &ViewsRequest) -> Result<(), ErrorBody> {
         self.validate_with(request, ViewHalfOf::check)
     }
@@ -324,7 +339,16 @@ impl ViewsReply {
             ));
         }
         for (pin, entry) in &self.views {
+            if let ViewEntry::Notice(view) = entry {
+                view.check_entry(pin)?;
+            }
             if let ViewEntry::Manifest(view) = entry {
+                if cortexkit_role_tool_display::parse_notice_view_key(pin).is_some() {
+                    return Err(errors::invalid_request(
+                        &format!("views.{pin}"),
+                        "a notice pin requires a notice view",
+                    ));
+                }
                 view.record_schema.validate().map_err(|problem| {
                     errors::invalid_request(
                         &format!("views.{pin}.{}", problem.field),

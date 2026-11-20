@@ -5,6 +5,8 @@ pub const VIEWS_JSON: &str = include_str!("../test-vectors/tool-display-v1/views
 /// Provider-owned view manifests with a matching tool definition, a mismatched
 /// one, or none (an older provider's view).
 pub const VIEW_TOOLS_JSON: &str = include_str!("../test-vectors/tool-display-v1/view-tools.json");
+/// Notice writes, served records, fold pairs and refusals.
+pub const NOTICES_JSON: &str = include_str!("../test-vectors/tool-display-v1/notices.json");
 
 /// Every vector and its README, in checksum-manifest order.
 pub const FILES: &[(&str, &str)] = &[
@@ -42,6 +44,7 @@ pub const FILES: &[(&str, &str)] = &[
         "messages.json",
         include_str!("../test-vectors/tool-display-v1/messages.json"),
     ),
+    ("notices.json", NOTICES_JSON),
     (
         "README.md",
         include_str!("../test-vectors/tool-display-v1/README.md"),

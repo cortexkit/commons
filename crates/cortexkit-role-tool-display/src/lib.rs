@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod message;
+pub mod notice;
 pub mod schema;
 #[cfg(feature = "test-vectors")]
 pub mod vectors;
@@ -19,6 +20,7 @@ use subc_protocol::{
 };
 
 pub use message::*;
+pub use notice::*;
 pub use schema::{FieldKind, RecordSchema};
 pub use subc_protocol::Principal;
 pub use wake::*;
