@@ -406,6 +406,10 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
     }
     publish.extend([
         format!("{HUB_API_PREFIX}.$KV.{RESIDENCE_BUCKET}.>"),
+        // Vault writes must stay under the leaf's own box ID.
+        format!("$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
+        format!("{HUB_API_PREFIX}.$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
+        format!("{HUB_API_PREFIX}.$KV.{VAULT_MANIFEST_ACTIVE_BUCKET}.{box_id}"),
         format!("$O.{CUTS_BUCKET}.>"),
         IDLOG_SUBJECT.to_owned(),
         HUB_ROOMS_SUBJECT.to_owned(),
@@ -417,10 +421,15 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
         HUB_MEMORY_STREAM,
         RESIDENCE_STREAM,
         CUTS_STREAM,
+        VAULT_SHARED_LOGINS_STREAM,
+        VAULT_MANIFEST_ACTIVE_STREAM,
     ] {
+        publish.push(format!("{HUB_API_PREFIX}.STREAM.INFO.{stream}"));
+        // The active manifest readers use direct gets, not STREAM.MSG.GET.
+        if stream != VAULT_MANIFEST_ACTIVE_STREAM {
+            publish.push(format!("{HUB_API_PREFIX}.STREAM.MSG.GET.{stream}"));
+        }
         for suffix in [
-            format!("STREAM.INFO.{stream}"),
-            format!("STREAM.MSG.GET.{stream}"),
             format!("DIRECT.GET.{stream}"),
             format!("DIRECT.GET.{stream}.>"),
             format!("CONSUMER.CREATE.{stream}"),
@@ -555,12 +564,37 @@ pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant>
 
 #[cfg(test)]
 mod tests {
-    use crate::limits::subject_filters_overlap;
+    use crate::limits::{subject_filter_is_subset, subject_filters_overlap};
 
     use super::*;
 
     const SAMPLE_BOX: &str = "0123456789abcdef0123456789abcdef";
     const OTHER_BOX: &str = "fedcba9876543210fedcba9876543210";
+
+    #[test]
+    fn federation_leaf_grant_covers_every_hub_module_grant() {
+        for id in [SAMPLE_BOX, OTHER_BOX] {
+            let box_id = BoxId::parse(id).unwrap();
+            let leaf = leaf_user_grant(&box_id);
+            for module in HUB_MODULES.into_iter().chain([HUB_ROOMS_MODULE_LEGACY]) {
+                let grant = hub_module_grant(&box_id, module).unwrap();
+                for (operation, module_allows, leaf_allows) in [
+                    (Operation::Publish, &grant.publish, &leaf.publish),
+                    (Operation::Subscribe, &grant.subscribe, &leaf.subscribe),
+                ] {
+                    for subject in module_allows {
+                        assert!(
+                            leaf_allows
+                                .iter()
+                                .any(|allow| subject_filter_is_subset(subject, allow).unwrap()),
+                            "leaf for {box_id} does not allow {module} to {} {subject}",
+                            operation.as_str(),
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn federation_hub_module_grants_overlap_only_for_shared_manifest_reads() {

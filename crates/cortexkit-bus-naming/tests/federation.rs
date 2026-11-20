@@ -217,7 +217,7 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
     for box_text in [SAMPLE_BOX, "fedcba9876543210fedcba9876543210"] {
         let box_id = BoxId::parse(box_text).unwrap();
         let grant = leaf_user_grant(&box_id);
-        assert_eq!(grant.publish.len(), 59);
+        assert_eq!(grant.publish.len(), 77);
         assert_eq!(grant.subscribe.len(), 5);
         for entries in [&grant.publish, &grant.subscribe] {
             assert_eq!(entries.iter().collect::<BTreeSet<_>>().len(), entries.len());
@@ -274,6 +274,8 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
             HUB_MEMORY_STREAM,
             RESIDENCE_STREAM,
             CUTS_STREAM,
+            VAULT_SHARED_LOGINS_STREAM,
+            VAULT_MANIFEST_ACTIVE_STREAM,
         ] {
             assert!(may_publish(&format!(
                 "$JS.hub.API.CONSUMER.CREATE.{stream}"
@@ -290,6 +292,20 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
         )));
         assert!(!may_publish("$KV.residence.key"));
         assert!(!may_publish("$JS.hub.API.$KV.other.key"));
+        for prefix in [
+            "$KV.vault-shared-logins",
+            "$JS.hub.API.$KV.vault-shared-logins",
+        ] {
+            assert!(may_publish(&format!("{prefix}.{box_id}.{foreign}")));
+            assert!(!may_publish(&format!("{prefix}.{foreign}.{box_id}")));
+        }
+        let manifest = "$JS.hub.API.$KV.vault-manifest-active";
+        assert!(may_publish(&format!("{manifest}.{box_id}")));
+        assert!(!may_publish(&format!("{manifest}.{foreign}")));
+        assert!(!may_publish(&format!("{manifest}.{box_id}.extra")));
+        assert!(!may_publish(
+            "$JS.hub.API.STREAM.MSG.GET.KV_vault-manifest-active"
+        ));
         assert!(!may_publish("$O.other.C.chunk"));
         assert!(may_publish("ck.fleet.room.room_a"));
         assert!(may_publish("ck.fleet.memory.project.pj-example"));

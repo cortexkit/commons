@@ -511,6 +511,11 @@ pub(crate) fn subject_filters_overlap(left: &str, right: &str) -> Result<bool, L
     Ok(SubjectPattern::parse(left)?.overlaps(&SubjectPattern::parse(right)?))
 }
 
+#[cfg(test)]
+pub(crate) fn subject_filter_is_subset(candidate: &str, binding: &str) -> Result<bool, LimitError> {
+    Ok(SubjectPattern::parse(candidate)?.is_subset_of(&SubjectPattern::parse(binding)?))
+}
+
 /// Enforces that the owning store keeps a body at least as long as its stream.
 ///
 /// A module declaring a `resolved` event calls this against the event stream:

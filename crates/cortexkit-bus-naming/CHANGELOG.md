@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.8
+
+- Include both vault KV buckets in the machine leaf grant while keeping writes
+  scoped to that computer's keys. A new test ensures the leaf grant remains a
+  superset of every module's hub grant.
+
 ## 0.5.7
 
 - Add two federation hub KV buckets for sealed shared logins and active vault
