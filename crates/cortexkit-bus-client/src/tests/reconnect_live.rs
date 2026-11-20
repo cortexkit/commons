@@ -16,6 +16,7 @@ use std::{
 
 use async_nats::jetstream::{self, consumer::pull};
 use cortexkit_bus_naming::AccountNames;
+use cortexkit_bus_nats::NatsConnectionState;
 use tokio::{
     net::{TcpListener, TcpStream},
     task::AbortHandle,
@@ -202,6 +203,105 @@ async fn revoked_connection_closes_promptly_and_the_waiting_reader_resumes() {
     );
     client.connection().client().flush().await.unwrap();
     assert!(!changes.has_changed().unwrap());
+}
+
+#[tokio::test]
+async fn retired_connection_logs_expected_refusals_at_debug_and_live_auth_failure_stays_error() {
+    let Some(rig) = Rig::start().await else {
+        return;
+    };
+
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let writer_output = output.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(move || Capture(writer_output.clone()))
+        .finish();
+    // Tokio's current-thread runtime keeps spawned reconnect and maintenance
+    // tasks on the thread with this test's subscriber.
+    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let proxy = Proxy::start(rig.server.port).await;
+    let (client, _, issuer) = rig.client_via("reader", &proxy.url).await;
+    let mut changes = client.connection_changes();
+    changes.borrow_and_update();
+    let old = client.connection();
+    let old_key = old.inbox_prefix().strip_prefix("_INBOX.").unwrap();
+    rig.revoke(&issuer, old_key).await;
+    tokio::time::timeout(Duration::from_secs(5), changes.changed())
+        .await
+        .expect("revoking the active credential prompts replacement")
+        .unwrap();
+    let live = client.connection();
+    assert_ne!(live.inbox_prefix(), old.inbox_prefix());
+
+    // Refuse one nonce on the new, still-current connection. It must log the
+    // error and then reconnect without replacing the credential.
+    let mut state = live.connection_state();
+    proxy.down();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        state.wait_for(|state| *state == NatsConnectionState::Disconnected),
+    )
+    .await
+    .expect("the live session disconnects")
+    .unwrap();
+    issuer.refuse_next_sign.store(true, Ordering::SeqCst);
+    proxy.up();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        state.wait_for(|state| *state == NatsConnectionState::Connected),
+    )
+    .await
+    .expect("the live session reconnects after one signing refusal")
+    .unwrap();
+    assert!(!changes.has_changed().unwrap());
+
+    let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    let retirements: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("retiring bus connection for replacement"))
+        .collect();
+    assert_eq!(retirements.len(), 1, "expected one retirement record");
+    let retirement = retirements[0];
+    assert!(retirement.trim_start().starts_with("INFO "), "{retirement}");
+    assert!(retirement.contains("errors for it are expected"));
+    assert!(retirement.contains(&format!("server={}", proxy.url)));
+    let retired_id = retirement
+        .split_whitespace()
+        .find(|field| field.starts_with("connection_id="))
+        .expect("the retirement record identifies the old connection");
+
+    let client_refusals: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("retired bus connection refused authentication"))
+        .collect();
+    assert!(
+        !client_refusals.is_empty(),
+        "expected a retired auth refusal"
+    );
+    for refusal in client_refusals {
+        assert!(refusal.starts_with("DEBUG "), "{refusal}");
+        assert!(refusal.split_whitespace().any(|field| field == retired_id));
+    }
+    assert!(logs.lines().any(|line| {
+        line.starts_with("ERROR ")
+            && line.contains("auth callback failed")
+            && line.contains("test_sign_refused")
+    }));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

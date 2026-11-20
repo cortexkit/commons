@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
@@ -51,6 +51,7 @@ pub(super) struct Issuer {
     keys: Mutex<Vec<KeyPair>>,
     /// Keys whose nonce signing is refused as revoked, as after a ck-bus restart.
     pub(super) revoked: Mutex<Vec<String>>,
+    pub(super) refuse_next_sign: AtomicBool,
     signing: tokio::sync::Mutex<()>,
     sign_calls: AtomicUsize,
     renewal_gate: Option<Arc<RenewalGate>>,
@@ -155,6 +156,9 @@ impl CredentialTransport for Issuer {
                 let public = params["credential_public"].as_str().unwrap();
                 if self.revoked.lock().unwrap().iter().any(|key| key == public) {
                     return Err(Error::Refused("ckbus_credential_revoked".into()));
+                }
+                if self.refuse_next_sign.swap(false, Ordering::SeqCst) {
+                    return Err(Error::Refused("test_sign_refused".into()));
                 }
                 let key = keys.iter().find(|key| key.public_key() == public).unwrap();
                 let nonce = STANDARD
@@ -380,6 +384,7 @@ impl Rig {
             module,
             keys: Mutex::new(vec![]),
             revoked: Mutex::new(vec![]),
+            refuse_next_sign: AtomicBool::new(false),
             signing: tokio::sync::Mutex::new(()),
             sign_calls: AtomicUsize::new(0),
             renewal_gate,

@@ -78,6 +78,23 @@ maintenance task ends and drops its sender. A terminal renewal refusal also
 logs one warning containing only its refusal code, not the credential. Reconnect
 with `BusClient::connect` or report the module as degraded when this happens.
 
+### Troubleshooting connection replacement
+
+The bus client logs `retiring bus connection for replacement` once at INFO,
+with the server address and a process-local connection ID. After a credential
+replacement, async-nats 0.50 may briefly log these errors for the old connection:
+
+- `auth callback failed` with `connection credential was replaced`
+- `max reconnection attempts reached`
+- `expected INFO, got nothing`
+
+The old connection can no longer sign with its credential. It skips reconnect
+delays, but async-nats cannot cancel a reconnect already in progress and can
+still log errors as the remaining attempts run out. These errors are harmless
+for the retired connection; they do not mean the replacement failed. If
+`connection_changes()` does not advance to a ready connection, or the live
+connection reports authentication errors, investigate those separately.
+
 ## Hub connection
 
 Use `HubClient::connect(subc, opts)` with the same daemon consumer and module

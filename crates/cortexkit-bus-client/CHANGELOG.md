@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Report a NATS connection's retirement once at INFO and log the bus client's
+  own remaining diagnostics for the retired connection at DEBUG. The INFO
+  line explains the brief, expected errors that async-nats 0.50 can still log
+  while the old connection stops retrying. Live connection log levels are unchanged.
+
 ## 0.1.10
 
 - Drop forged JetStream push deliveries before live hints or bucket watches

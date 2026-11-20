@@ -243,14 +243,26 @@ async fn replace_connections(
     timeout: Duration,
 ) {
     loop {
-        tokio::select! {
+        let credential_changed = tokio::select! {
             result = revisions.changed() => {
                 if result.is_err() || manager.check_hub_refusal().is_err() { return; }
-                lifetime.retire(&snapshot(connection)).await;
+                true
             }
             _ = &mut lifetime.ended => {
-                tracing::warn!("bus connection closed for good; replacing it");
+                if !lifetime.diagnostics.stale.load(Ordering::Relaxed) {
+                    tracing::warn!("bus connection closed for good; replacing it");
+                }
+                false
             }
+        };
+        // Only a superseded connection gets the "errors are expected" line. A
+        // connection that ended on its own (an outage that exhausted its
+        // reconnects) already logged a warning, and its errors are real.
+        if credential_changed || lifetime.diagnostics.stale.load(Ordering::Relaxed) {
+            lifetime.log_retirement();
+        }
+        if credential_changed {
+            lifetime.retire(&snapshot(connection)).await;
         }
 
         let mut backoff = Duration::from_millis(250);
@@ -455,14 +467,40 @@ impl BusClient {
 /// a ck-bus restart of about 30 s rides through on the same connection.
 const MAX_RECONNECTS: usize = 20;
 
+static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
+
+struct ConnectionDiagnostics {
+    stale: AtomicBool,
+    id: u64,
+    server_url: String,
+}
+
+impl ConnectionDiagnostics {
+    fn log_stale_auth_refusal(&self) {
+        tracing::debug!(
+            connection_id = self.id,
+            server = %self.server_url,
+            "retired bus connection refused authentication"
+        );
+    }
+}
+
 struct ConnectionLifetime {
-    stale: Arc<AtomicBool>,
+    diagnostics: Arc<ConnectionDiagnostics>,
     ended: oneshot::Receiver<()>,
 }
 
 impl ConnectionLifetime {
+    fn log_retirement(&self) {
+        tracing::info!(
+            connection_id = self.diagnostics.id,
+            server = %self.diagnostics.server_url,
+            "retiring bus connection for replacement; brief async-nats reconnect and auth errors for it are expected"
+        );
+    }
+
     async fn retire(&mut self, connection: &NatsConnection) {
-        self.stale.store(true, Ordering::Relaxed);
+        self.diagnostics.stale.store(true, Ordering::Relaxed);
         // A connected handler can drain; a reconnecting one can't read that
         // command. It skips further backoff now that its key can never sign.
         let closed = tokio::time::timeout(Duration::from_secs(2), async {
@@ -471,7 +509,11 @@ impl ConnectionLifetime {
         })
         .await;
         if closed.is_err() {
-            tracing::warn!("old bus connection did not close in time; replacing it anyway");
+            tracing::debug!(
+                connection_id = self.diagnostics.id,
+                server = %self.diagnostics.server_url,
+                "retired bus connection did not close in time; replacing it anyway"
+            );
         }
     }
 }
@@ -482,23 +524,30 @@ async fn connect_current(
     timeout: Duration,
 ) -> Result<(NatsConnection, ConnectionLifetime)> {
     let public = credential.credential_public.clone();
-    let stale = Arc::new(AtomicBool::new(false));
-    let auth_stale = stale.clone();
-    let delay_stale = stale.clone();
+    let diagnostics = Arc::new(ConnectionDiagnostics {
+        stale: AtomicBool::new(false),
+        id: NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed),
+        server_url: credential.server_url.clone(),
+    });
+    let auth_diagnostics = diagnostics.clone();
+    let delay_diagnostics = diagnostics.clone();
     let (handler, ended) = oneshot::channel();
     let options = async_nats::ConnectOptions::with_auth_callback(move |nonce| {
         let manager = manager.clone();
         let public = public.clone();
-        let stale = auth_stale.clone();
+        let diagnostics = auth_diagnostics.clone();
         async move {
-            if stale.load(Ordering::Relaxed) {
+            if diagnostics.stale.load(Ordering::Relaxed) {
+                diagnostics.log_stale_auth_refusal();
                 return Err(async_nats::AuthError::new(Error::Reply(
                     REPLACED_CREDENTIAL,
                 )));
             }
             // The spawned nonce-signing request future only needs to be Send;
             // async-nats also requires the callback future to be Sync.
+            let signing_diagnostics = diagnostics.clone();
             let task = tokio::spawn(async move {
+                let stale = &signing_diagnostics.stale;
                 let credential = manager.credential().await;
                 if credential.credential_public != public {
                     stale.store(true, Ordering::Relaxed);
@@ -517,16 +566,21 @@ async fn connect_current(
                 auth.signature = Some(signature);
                 Ok(auth)
             });
-            task.await
-                .map_err(async_nats::AuthError::new)?
+            let result = task
+                .await
                 .map_err(async_nats::AuthError::new)
+                .and_then(|result| result.map_err(async_nats::AuthError::new));
+            if result.is_err() && diagnostics.stale.load(Ordering::Relaxed) {
+                diagnostics.log_stale_auth_refusal();
+            }
+            result
         }
     })
     .reconnect_delay_callback(move |attempts| {
         // The handler owns this callback, so dropping it wakes the supervisor
         // even when async-nats exits without emitting Closed (MaxReconnects).
         let _handler = &handler;
-        if delay_stale.load(Ordering::Relaxed) || attempts <= 1 {
+        if delay_diagnostics.stale.load(Ordering::Relaxed) || attempts <= 1 {
             Duration::ZERO
         } else {
             // Match async-nats 0.50's default delay for a current credential.
@@ -550,7 +604,7 @@ async fn connect_current(
         .await
     }
     .map_err(Error::from)?;
-    Ok((connection, ConnectionLifetime { stale, ended }))
+    Ok((connection, ConnectionLifetime { diagnostics, ended }))
 }
 
 #[cfg(test)]
