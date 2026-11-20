@@ -14,7 +14,7 @@ mod work_queue;
 pub use connection::{
     CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionState, NatsPermissionViolations,
 };
-pub use register::{NatsRegister, NatsRegisterWatch};
+pub use register::{NatsRegister, NatsRegisterWatch, NatsRegisterWatchChange};
 pub use stream::{NatsStream, NatsStreamCursor};
 pub use work_queue::NatsWorkQueue;
 

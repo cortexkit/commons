@@ -107,6 +107,9 @@ connection never requests a hub credential. The hub credential must name domain
 `HubClient::jetstream()` returns a JetStream context in domain `hub`;
 `HubClient::client()` returns a raw NATS client for core publishes. Both are
 snapshots; watch `connection_changes()` and get fresh handles after a replacement.
+`hub.watch_bucket(name).await?` instead returns a `BucketWatch` for a named
+bucket in that domain. It follows credential replacements, checks every delivery
+against its own consumer and bucket, and reports bucket resets as described below.
 The hub connection renews independently, with the same bounded NATS reconnect
 behavior as the box connection.
 
@@ -198,16 +201,22 @@ already have provisioned the bucket and grants; this client never provisions it.
   before sending. Delete writes a retained tombstone; it does not purge history.
 - `bucket.watch().await?` returns a `BucketWatch`. Its `next().await?` yields
   `BucketItem::Put { key, revision, value }`, `Delete { key, revision }`, or
-  `CaughtUp`. Current entries come first, followed by exactly one `CaughtUp`
-  (also for an empty bucket), then live changes. No durable name is accepted.
+  `CaughtUp`. Each snapshot's current entries come first, followed by exactly
+  one `CaughtUp` (also for an empty bucket), then live changes. No durable name
+  is accepted.
 
-After reconnecting, the watch resumes after its last delivered revision and
+After reconnecting to the same bucket, the watch resumes after its last delivered revision and
 never repeats a delivered revision. With history 1, overwritten intermediate
 values cannot be recovered; every key's latest retained value or delete is
 delivered instead. Use an event stream if every intermediate change matters.
 Owners must use delete, not purge: a removed tombstone cannot inform readers of
 a deletion. Keep the `BusClient` alive; terminal credential maintenance failure
 returns the same `Error::Transport` as the event reader.
+
+An already-open watch logs once while its bucket is missing and retries with
+backoff. If the bucket is replaced, `next()` returns `Error::BucketReset` before
+delivering any entries from the replacement. Clear your cached entries and
+revisions, then continue reading the same watch for a new snapshot and `CaughtUp`.
 
 `Error::WatchCapacity` means the bucket's shared consumer slots are full. On
 NATS 2.15.0 this maps code 400, JetStream error 10026, `maximum consumers limit

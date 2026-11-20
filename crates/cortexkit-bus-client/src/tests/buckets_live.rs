@@ -689,6 +689,86 @@ async fn inbox_prefix_live_deliver_request_and_kv_watch() {
 }
 
 #[tokio::test]
+async fn bucket_live_reset_replays_only_the_replacement_snapshot() {
+    let Some(rig) = Rig::start().await else {
+        return;
+    };
+    let (owner, _) = rig.client("aft").await;
+    let (reader, _) = rig.client("occipital").await;
+    let bucket = owner.bucket("aft", "views").unwrap();
+    let name = AccountNames::derive(rig.acct)
+        .unwrap()
+        .module_bucket_name("aft", "views")
+        .unwrap();
+    for key in ["one", "two", "three"] {
+        bucket.put(key, "old").await.unwrap();
+    }
+    let mut watch = reader
+        .bucket("aft", "views")
+        .unwrap()
+        .watch()
+        .await
+        .unwrap();
+    for key in ["one", "two", "three"] {
+        assert!(matches!(next(&mut watch).await, BucketItem::Put { key: old, .. } if old == key));
+    }
+    assert_eq!(next(&mut watch).await, BucketItem::CaughtUp);
+
+    let context = async_nats::jetstream::new(rig.admin.clone());
+    let mut attempts = rig
+        .admin
+        .subscribe(format!("$JS.API.STREAM.INFO.KV_{name}"))
+        .await
+        .unwrap();
+    rig.admin.flush().await.unwrap();
+    context.delete_key_value(&name).await.unwrap();
+    tokio::select! {
+        biased;
+        change = watch.next() => panic!("missing bucket must wait, got {change:?}"),
+        () = async {
+            tokio::time::timeout(Duration::from_secs(20), attempts.next())
+                .await.expect("watch did not check for the missing bucket").unwrap();
+            assert!(tokio::time::timeout(Duration::from_millis(250), attempts.next()).await.is_err(),
+                "watch sent another request without backing off");
+        } => {}
+    }
+    context
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: name.clone(),
+            history: 1,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(bucket.put("new", "replacement").await.unwrap(), 1);
+    let reset = tokio::time::timeout(Duration::from_secs(20), watch.next())
+        .await
+        .expect("watch should signal bucket reset before delivering its entries");
+    assert!(
+        matches!(&reset, Err(Error::BucketReset { bucket }) if bucket == &name),
+        "{reset:?}"
+    );
+    assert_eq!(
+        next(&mut watch).await,
+        BucketItem::Put {
+            key: "new".into(),
+            revision: 1,
+            value: "replacement".into(),
+        }
+    );
+    assert_eq!(next(&mut watch).await, BucketItem::CaughtUp);
+    let revision = bucket.put("live", "after reset").await.unwrap();
+    assert_eq!(
+        next(&mut watch).await,
+        BucketItem::Put {
+            key: "live".into(),
+            revision,
+            value: "after reset".into(),
+        }
+    );
+}
+
+#[tokio::test]
 async fn bucket_live_snapshot_changes_reissue_and_terminal_renewal() {
     let Some(rig) = Rig::start().await else {
         return;

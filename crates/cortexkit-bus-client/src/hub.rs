@@ -5,8 +5,9 @@ use subc_client_rs::SubcConsumer;
 use tokio::sync::watch;
 
 use crate::{
+    binding::ConnectionBinding,
     credentials::{self, CredentialManager, HUB_DOMAIN},
-    BusClientOptions, Error, ManagedConnection, Result,
+    BucketWatch, BusClientOptions, Error, ManagedConnection, Result,
 };
 
 /// A module's separate federation-account connection to the hub.
@@ -52,6 +53,22 @@ impl HubClient {
     /// domain. Like [`Self::client`], it must be reopened after replacement.
     pub fn jetstream(&self) -> Result<jetstream::Context> {
         Ok(jetstream::with_domain(self.client()?, HUB_DOMAIN))
+    }
+
+    /// Watches an existing named KV bucket in the `hub` JetStream domain.
+    /// Delivers its current entries, then a [`crate::BucketItem::CaughtUp`]
+    /// boundary and live changes. A replacement bucket yields
+    /// [`Error::BucketReset`] before its new snapshot. The hub credential must
+    /// allow stream info and consumer creation for this bucket. Keep the hub
+    /// client alive for credential upkeep and automatic rebinding.
+    pub async fn watch_bucket(&self, bucket: &str) -> Result<BucketWatch> {
+        self.client()?;
+        BucketWatch::open(
+            ConnectionBinding::from_managed(&self.managed),
+            bucket.to_owned(),
+            Some(HUB_DOMAIN),
+        )
+        .await
     }
 
     /// Notifies after a replacement connection is ready. The receiver closes

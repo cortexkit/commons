@@ -11,7 +11,7 @@ use cortexkit_bus_trait::{
 use futures_util::StreamExt;
 
 use crate::error::map_operation_error;
-use crate::kv_watch::KvDeliveries;
+use crate::kv_watch::{KvChange, KvDeliveries};
 use crate::NatsConnection;
 
 const EMPTY_SNAPSHOT_QUIET_PERIOD: Duration = Duration::from_millis(50);
@@ -43,11 +43,30 @@ impl NatsRegister {
     }
 }
 
+/// A JetStream register watch. Use [`Self::next_change`] to distinguish a
+/// replacement bucket from a transient outage. [`RegisterWatch::next`] reports
+/// a reset as unavailable with the reason `register watch bucket {bucket} reset`.
 pub struct NatsRegisterWatch {
     deliveries: KvDeliveries,
     first: Option<WatchEvent>,
     buffered: VecDeque<RegisterUpdate>,
     has_snapshot: bool,
+}
+
+/// An entry or snapshot from a register watch, or notice of a new bucket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NatsRegisterWatchChange {
+    Event(WatchEvent),
+    /// Discard previously held entries and revisions. The following updates
+    /// start with the replacement bucket's current entries, then live changes.
+    BucketReset {
+        bucket: String,
+    },
+}
+
+fn reset_unavailable(bucket: &str) -> BusError {
+    BusError::unavailable(format!("register watch bucket {bucket} reset"))
 }
 
 #[async_trait]
@@ -131,8 +150,10 @@ impl Register for NatsRegister {
             let Ok(entry) = next else {
                 break;
             };
-            let Some(entry) = entry? else {
-                break;
+            let entry = match entry? {
+                Some(KvChange::Entry(entry)) => entry,
+                Some(KvChange::BucketReset { bucket }) => return Err(reset_unavailable(&bucket)),
+                None => break,
             };
             revision = revision.max(entry.revision);
             let seen_current = entry.seen_current;
@@ -166,21 +187,24 @@ impl Register for NatsRegister {
     }
 }
 
-#[async_trait]
-impl RegisterWatch for NatsRegisterWatch {
-    async fn next(&mut self) -> BusResult<WatchEvent> {
+impl NatsRegisterWatch {
+    /// Reads the next snapshot, update or reset without ending the watch on
+    /// reset. Resume reading on the same watch after clearing the old state.
+    pub async fn next_change(&mut self) -> BusResult<NatsRegisterWatchChange> {
         if let Some(first) = self.first.take() {
             self.has_snapshot = true;
-            return Ok(first);
+            return Ok(NatsRegisterWatchChange::Event(first));
         }
         if let Some(update) = self.buffered.pop_front() {
-            return Ok(WatchEvent::Update(update));
+            return Ok(NatsRegisterWatchChange::Event(WatchEvent::Update(update)));
         }
-        let entry = self
-            .deliveries
-            .next()
-            .await?
-            .ok_or_else(|| BusError::unavailable("register watch ended"))?;
+        let entry = match self.deliveries.next().await? {
+            Some(KvChange::Entry(entry)) => entry,
+            Some(KvChange::BucketReset { bucket }) => {
+                return Ok(NatsRegisterWatchChange::BucketReset { bucket });
+            }
+            None => return Err(BusError::unavailable("register watch ended")),
+        };
         let update = match entry.operation {
             Operation::Put => RegisterUpdate::Put(RegisterEntry {
                 key: entry.key,
@@ -192,7 +216,17 @@ impl RegisterWatch for NatsRegisterWatch {
                 revision: Revision(entry.revision),
             }),
         };
-        Ok(WatchEvent::Update(update))
+        Ok(NatsRegisterWatchChange::Event(WatchEvent::Update(update)))
+    }
+}
+
+#[async_trait]
+impl RegisterWatch for NatsRegisterWatch {
+    async fn next(&mut self) -> BusResult<WatchEvent> {
+        match self.next_change().await? {
+            NatsRegisterWatchChange::Event(event) => Ok(event),
+            NatsRegisterWatchChange::BucketReset { bucket } => Err(reset_unavailable(&bucket)),
+        }
     }
 
     fn has_snapshot(&self) -> bool {

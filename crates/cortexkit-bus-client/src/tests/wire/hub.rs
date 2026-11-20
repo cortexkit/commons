@@ -29,6 +29,7 @@ struct HubIssuer {
     sign_refusal: Mutex<Option<&'static str>>,
     renew_fields: Vec<(&'static str, Value)>,
     renew_now: bool,
+    server_nonce: Option<&'static str>,
 }
 
 #[async_trait]
@@ -79,7 +80,8 @@ impl CredentialTransport for HubIssuer {
             "ckbus.nonce_sign" => {
                 assert_eq!(
                     params,
-                    json!({"credential_public": format!("UHUB{}", issued - 1), "nonce_b64": STANDARD.encode(b"server-nonce")})
+                    json!({"credential_public": format!("UHUB{}", issued - 1),
+                        "nonce_b64": STANDARD.encode(self.server_nonce.unwrap_or("server-nonce"))})
                 );
                 if let Some(code) = *self.sign_refusal.lock().unwrap() {
                     return Err(Error::Refused(code.to_owned()));
@@ -89,6 +91,167 @@ impl CredentialTransport for HubIssuer {
             _ => panic!("unexpected method {method}"),
         }
     }
+}
+
+#[tokio::test]
+async fn hub_bucket_watch_live_history_origin_and_reset() {
+    use async_nats::jetstream::{self, consumer::push, kv};
+    use futures_util::StreamExt;
+    use std::process::{Child, Command, Stdio};
+
+    let Some(binary) = std::env::var_os("CK_NATS_SERVER_BIN") else {
+        assert_ne!(
+            std::env::var("CK_REQUIRE_NATS_SERVER").as_deref(),
+            Ok("1"),
+            "NATS binary required"
+        );
+        eprintln!("nats-server-absent: hub bucket live test skipped");
+        return;
+    };
+    struct Broker(Child);
+    impl Drop for Broker {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("hub.conf");
+    // The live module rig does not configure a domain. This local server
+    // exercises the hub-domain API; the issuer supplies no real credentials.
+    std::fs::write(&config, format!(
+        "listen: \"127.0.0.1:-1\"\nports_file_dir: {}\njetstream {{ domain: hub, store_dir: {} }}\n",
+        json!(directory.path()), json!(directory.path().join("store")),
+    )).unwrap();
+    let mut broker = Broker(
+        Command::new(binary)
+            .arg("-c")
+            .arg(config)
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let url = tokio::time::timeout(TIMEOUT, async {
+        let suffix = format!("_{}.ports", broker.0.id());
+        loop {
+            for entry in std::fs::read_dir(directory.path()).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_name().to_string_lossy().ends_with(&suffix) {
+                    if let Ok(ports) =
+                        serde_json::from_slice::<Value>(&std::fs::read(entry.path()).unwrap())
+                    {
+                        return ports["nats"][0].as_str().unwrap().to_owned();
+                    }
+                }
+            }
+            assert!(
+                broker.0.try_wait().unwrap().is_none(),
+                "hub broker exited before listening"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("hub broker did not listen");
+    let manager = CredentialManager::start_hub(
+        Arc::new(HubIssuer {
+            url: url.clone(),
+            server_nonce: Some(""),
+            ..Default::default()
+        }),
+        MODULE,
+    )
+    .await
+    .unwrap();
+    let hub = HubClient::connect_manager(manager, TIMEOUT).await.unwrap();
+    let admin = async_nats::connect(url).await.unwrap();
+    let context = jetstream::with_domain(admin.clone(), "hub");
+    let config = kv::Config {
+        bucket: "hub-fixture".into(),
+        history: 1,
+        ..Default::default()
+    };
+    let bucket = context.create_key_value(config.clone()).await.unwrap();
+    bucket.put("old", "overwritten".into()).await.unwrap();
+    assert_eq!(bucket.put("old", "latest old".into()).await.unwrap(), 2);
+    let mut watch = hub.watch_bucket(&config.bucket).await.unwrap();
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, watch.next())
+            .await
+            .unwrap()
+            .unwrap(),
+        crate::BucketItem::Put {
+            key: "old".into(),
+            revision: 2,
+            value: "latest old".into(),
+        }
+    );
+    assert_eq!(watch.next().await.unwrap(), crate::BucketItem::CaughtUp);
+
+    let stream = context.get_stream(&bucket.stream_name).await.unwrap();
+    let consumer = stream.consumers().next().await.unwrap().unwrap();
+    let inbox = consumer.config.deliver_subject.unwrap();
+    let mut observed = admin.subscribe(inbox.clone()).await.unwrap();
+    let foreign = context
+        .create_key_value(kv::Config {
+            bucket: "foreign-fixture".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    context
+        .create_consumer_on_stream(
+            push::Config {
+                deliver_subject: inbox,
+                ack_policy: jetstream::consumer::AckPolicy::None,
+                ..Default::default()
+            },
+            &foreign.stream_name,
+        )
+        .await
+        .unwrap();
+    foreign
+        .put("unrelated", "foreign value".into())
+        .await
+        .unwrap();
+    tokio::time::timeout(TIMEOUT, async {
+        while observed.next().await.unwrap().subject.as_str() != "$KV.foreign-fixture.unrelated" {}
+    })
+    .await
+    .expect("expected a foreign delivery on the watch inbox");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), watch.next())
+            .await
+            .is_err(),
+        "the hub watch must discard foreign subjects"
+    );
+
+    context.delete_key_value(&config.bucket).await.unwrap();
+    let name = config.bucket.clone();
+    let new_bucket = context.create_key_value(config).await.unwrap();
+    new_bucket.put("new", "overwritten".into()).await.unwrap();
+    // The replacement reaches the same revision, so only the creation time
+    // distinguishes it from the original stream.
+    assert_eq!(new_bucket.put("new", "latest new".into()).await.unwrap(), 2);
+    let reset = tokio::time::timeout(Duration::from_secs(20), watch.next())
+        .await
+        .expect("hub watch should signal the bucket reset");
+    assert!(
+        matches!(&reset, Err(Error::BucketReset { bucket }) if bucket == &name),
+        "{reset:?}"
+    );
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, watch.next())
+            .await
+            .unwrap()
+            .unwrap(),
+        crate::BucketItem::Put {
+            key: "new".into(),
+            revision: 2,
+            value: "latest new".into(),
+        }
+    );
+    assert_eq!(watch.next().await.unwrap(), crate::BucketItem::CaughtUp);
 }
 
 #[tokio::test]

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.12
+
+- Bucket watches warn once and retry with backoff while the bucket is missing.
+  A replacement bucket yields `Error::BucketReset`, then its current entries
+  and a fresh `CaughtUp` marker instead of resuming from the old revision.
+- Add `HubClient::watch_bucket` for named buckets in the hub JetStream domain.
+  It uses the same snapshot, reset, and delivery checks as module bucket watches.
+
 ## 0.1.11
 
 - Report a NATS connection's retirement once at INFO and log the bus client's

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.6
+
+- Register watches warn once while a bucket is missing and retry with backoff.
+  If the bucket was replaced, they read its current entries instead of resuming
+  at the old revision. `NatsRegisterWatch::next_change` reports a typed bucket
+  reset; the `RegisterWatch` trait reports it as unavailable.
+
 ## 0.5.5
 
 - Register watches no longer panic on a delivery from outside the watched

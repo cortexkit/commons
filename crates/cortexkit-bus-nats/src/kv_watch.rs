@@ -22,13 +22,16 @@
 //! sequence, a consumer-sequence gap, a reconnect, and two missed heartbeat
 //! intervals each recreate the consumer from the last delivered stream
 //! sequence on a fresh inbox (`recreate_ephemeral_consumer`, lines 871-905),
-//! and flow-control requests are answered with an empty reply.
+//! and flow-control requests are answered with an empty reply. A replacement
+//! bucket gets a new snapshot instead of resuming from the old sequence.
 
 use std::time::Duration;
 
 use async_nats::jetstream::consumer::push::OrderedConfig;
 use async_nats::jetstream::consumer::DeliverPolicy;
+use async_nats::jetstream::context::GetStreamErrorKind;
 use async_nats::jetstream::kv::Operation;
+use async_nats::jetstream::ErrorCode;
 use async_nats::{Message, StatusCode, Subscriber};
 use bytes::Bytes;
 use cortexkit_bus_trait::{BusError, BusResult};
@@ -58,6 +61,17 @@ pub(crate) struct KvEntry {
     pub(crate) seen_current: bool,
 }
 
+pub(crate) enum KvChange {
+    Entry(KvEntry),
+    BucketReset { bucket: String },
+}
+
+enum Recreated {
+    Resumed,
+    BucketReset,
+    Closed,
+}
+
 /// What became of one data message read from the delivery inbox.
 enum Delivery {
     Accepted(KvEntry),
@@ -79,6 +93,7 @@ pub(crate) struct KvDeliveries {
     config: OrderedConfig,
     consumer_name: String,
     subscriber: Option<Subscriber>,
+    stream_created_at: i128,
     stream_sequence: u64,
     consumer_sequence: u64,
     heartbeat_deadline: Option<Instant>,
@@ -86,6 +101,8 @@ pub(crate) struct KvDeliveries {
     last_state: NatsConnectionState,
     seen_current: bool,
     warned_foreign: bool,
+    warned_missing: bool,
+    retry: Option<(Instant, u32)>,
 }
 
 impl KvDeliveries {
@@ -114,8 +131,10 @@ impl KvDeliveries {
         }
         let connection_state = connection.connection_state();
         let last_state = *connection_state.borrow();
+        let jetstream = connection.jetstream();
+        let stream = jetstream.get_stream(&store.stream_name).await?;
         let mut deliveries = Self {
-            jetstream: connection.jetstream(),
+            jetstream,
             connection,
             bucket: store.name.clone(),
             stream_name: store.stream_name.clone(),
@@ -124,6 +143,7 @@ impl KvDeliveries {
             config,
             consumer_name: String::new(),
             subscriber: None,
+            stream_created_at: stream.cached_info().created.unix_timestamp_nanos(),
             stream_sequence: 0,
             consumer_sequence: 0,
             heartbeat_deadline: None,
@@ -131,10 +151,10 @@ impl KvDeliveries {
             last_state,
             seen_current: false,
             warned_foreign: false,
+            warned_missing: false,
+            retry: None,
         };
-        let num_pending = deliveries
-            .create(DeliverPolicy::LastPerSubject, None)
-            .await?;
+        let num_pending = deliveries.create(DeliverPolicy::LastPerSubject).await?;
         deliveries.seen_current = num_pending == 0;
         Ok(deliveries)
     }
@@ -142,11 +162,7 @@ impl KvDeliveries {
     /// Subscribes to a fresh inbox, then creates the consumer delivering to
     /// it, and returns the consumer's pending count at creation. Subscribing
     /// first means no delivery can arrive before the subscription exists.
-    async fn create(
-        &mut self,
-        deliver_policy: DeliverPolicy,
-        timeout: Option<Duration>,
-    ) -> Result<u64, async_nats::Error> {
+    async fn create(&mut self, deliver_policy: DeliverPolicy) -> Result<u64, async_nats::Error> {
         let client = self.connection.client();
         let deliver_subject = client.new_inbox();
         let subscriber = client.subscribe(deliver_subject.clone()).await?;
@@ -155,13 +171,10 @@ impl KvDeliveries {
             deliver_policy,
             ..self.config.clone()
         };
-        let create = self
+        let consumer = self
             .jetstream
-            .create_consumer_on_stream(config, &self.stream_name);
-        let consumer = match timeout {
-            Some(limit) => tokio::time::timeout(limit, create).await??,
-            None => create.await?,
-        };
+            .create_consumer_on_stream(config, &self.stream_name)
+            .await?;
         let info = consumer.cached_info();
         self.consumer_name = info.name.clone();
         self.subscriber = Some(subscriber);
@@ -170,36 +183,72 @@ impl KvDeliveries {
         Ok(info.num_pending)
     }
 
-    /// Recreates the consumer after the last delivered stream sequence,
-    /// retrying with async-nats's ordered-consumer backoff until it succeeds.
-    /// Returns false, without recreating, once the connection has closed for
-    /// good.
-    async fn recreate(&mut self) -> bool {
-        // Before anything is delivered there is no resume point, so the
-        // original request (the latest revision of every key) is repeated.
-        let deliver_policy = if self.stream_sequence == 0 {
-            self.config.deliver_policy
+    async fn try_recreate(&mut self) -> Result<Recreated, async_nats::Error> {
+        let stream = match self.jetstream.get_stream(&self.stream_name).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                if !self.warned_missing
+                    && matches!(error.kind(), GetStreamErrorKind::JetStream(server)
+                        if server.error_code() == ErrorCode::STREAM_NOT_FOUND)
+                {
+                    self.warned_missing = true;
+                    tracing::warn!(bucket = %self.bucket, "register watch bucket is missing; waiting for it to return");
+                }
+                return Err(error.into());
+            }
+        };
+        let info = stream.cached_info();
+        let created_at = info.created.unix_timestamp_nanos();
+        let reset =
+            created_at != self.stream_created_at || info.state.last_sequence < self.stream_sequence;
+        let policy = if reset || self.stream_sequence == 0 {
+            DeliverPolicy::LastPerSubject
         } else {
             DeliverPolicy::ByStartSequence {
                 start_sequence: self.stream_sequence + 1,
             }
         };
-        let mut attempt = 0u32;
+        let pending = self.create(policy).await?;
+        self.warned_missing = false;
+        if reset {
+            self.stream_created_at = created_at;
+            self.stream_sequence = 0;
+            self.seen_current = pending == 0;
+            Ok(Recreated::BucketReset)
+        } else {
+            Ok(Recreated::Resumed)
+        }
+    }
+
+    /// Inspects the stream before opening a resume consumer, retrying with
+    /// increasing delays until the watch can resume or the connection ends.
+    async fn recreate(&mut self) -> Recreated {
         loop {
+            let attempt = if let Some((deadline, attempt)) = self.retry {
+                tokio::time::sleep_until(deadline).await;
+                attempt + 1
+            } else {
+                1
+            };
             if !self.wait_until_connected().await {
-                return false;
+                return Recreated::Closed;
             }
-            match self.create(deliver_policy, Some(RECREATE_TIMEOUT)).await {
-                Ok(_) => return true,
+            let result = tokio::time::timeout(RECREATE_TIMEOUT, self.try_recreate())
+                .await
+                .unwrap_or_else(|error| Err(error.into()));
+            match result {
+                Ok(recreated) => {
+                    self.retry = None;
+                    return recreated;
+                }
                 Err(error) => {
-                    attempt += 1;
                     tracing::debug!(bucket = %self.bucket, %error, attempt, "register watch consumer recreation failed");
                     let delay = if attempt < 5 {
                         Duration::from_millis(500 * u64::from(attempt))
                     } else {
                         Duration::from_secs(10)
                     };
-                    tokio::time::sleep(delay).await;
+                    self.retry = Some((Instant::now() + delay, attempt));
                 }
             }
         }
@@ -241,17 +290,22 @@ impl KvDeliveries {
         self.last_state = state;
     }
 
-    /// Returns the next accepted change, or `None` once the delivery
+    /// Returns the next accepted change or bucket reset, or `None` once the delivery
     /// subscription or the connection has ended. Cancelling this future loses
     /// no accepted message: a message is only taken off the subscription once
     /// it can be handled without waiting.
-    pub(crate) async fn next(&mut self) -> BusResult<Option<KvEntry>> {
+    pub(crate) async fn next(&mut self) -> BusResult<Option<KvChange>> {
         loop {
             if self.subscriber.is_none() {
-                if !self.recreate().await {
-                    return Ok(None);
+                match self.recreate().await {
+                    Recreated::Closed => return Ok(None),
+                    Recreated::BucketReset => {
+                        return Ok(Some(KvChange::BucketReset {
+                            bucket: self.bucket.clone(),
+                        }));
+                    }
+                    Recreated::Resumed => continue,
                 }
-                continue;
             }
             let deadline = *self
                 .heartbeat_deadline
@@ -297,7 +351,7 @@ impl KvDeliveries {
                 None => {}
             }
             match self.classify(message) {
-                Delivery::Accepted(entry) => return Ok(Some(entry)),
+                Delivery::Accepted(entry) => return Ok(Some(KvChange::Entry(entry))),
                 Delivery::Gap => self.reset(),
                 Delivery::Foreign(subject) => self.drop_foreign(subject),
             }

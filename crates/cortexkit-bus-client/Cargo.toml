@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-bus-client"
-version = "0.1.11"
+version = "0.1.12"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -13,7 +13,7 @@ async-trait = "0.1"
 base64 = "0.22"
 bytes = "1"
 cortexkit-bus-naming = { version = ">=0.4.5, <0.6", path = "../cortexkit-bus-naming" }
-cortexkit-bus-nats = { version = "0.5.4", path = "../cortexkit-bus-nats" }
+cortexkit-bus-nats = { version = "0.5.6", path = "../cortexkit-bus-nats" }
 cortexkit-bus-trait = { version = "0.3.1", path = "../cortexkit-bus-trait" }
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }

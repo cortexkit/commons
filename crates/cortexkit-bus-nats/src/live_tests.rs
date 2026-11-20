@@ -669,6 +669,160 @@ async fn next_update(watch: &mut crate::NatsRegisterWatch) -> RegisterUpdate {
     }
 }
 
+async fn open_watch_before_bucket_reset(admin: &NatsConnection) -> crate::NatsRegisterWatch {
+    let register = create_watched_bucket(admin).await;
+    for key in ["module.old_a", "module.old_b", "module.old_c"] {
+        register.put(key, b"old".to_vec()).await.unwrap();
+    }
+    let mut watch = register.watch("module.").await.unwrap();
+    assert!(matches!(
+        watch.next().await.unwrap(),
+        WatchEvent::Snapshot { entries, .. } if entries.len() == 3
+    ));
+    watch
+}
+
+async fn expect_bucket_heartbeat_loss(watch: &mut crate::NatsRegisterWatch) {
+    let error = tokio::time::timeout(Duration::from_secs(20), watch.next_change())
+        .await
+        .expect("deleted consumer should stop sending heartbeats")
+        .unwrap_err();
+    assert!(
+        matches!(error, BusError::Unavailable { reason, .. } if reason.contains("idle heartbeats"))
+    );
+}
+
+async fn expect_replacement_bucket_entries(
+    admin: &NatsConnection,
+    watch: &mut crate::NatsRegisterWatch,
+) {
+    use crate::NatsRegisterWatchChange;
+
+    let change = tokio::time::timeout(Duration::from_secs(6), watch.next_change())
+        .await
+        .expect("watch should signal bucket reset before delivering its entries")
+        .unwrap();
+    assert_eq!(
+        change,
+        NatsRegisterWatchChange::BucketReset {
+            bucket: "CK_WATCHED".into(),
+        }
+    );
+    assert!(matches!(
+        next_update(watch).await,
+        RegisterUpdate::Put(entry)
+            if entry.key == "module.new" && entry.value == b"replacement" && entry.revision.0 == 1
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), watch.next_change())
+            .await
+            .is_err(),
+        "no other entries in the new bucket"
+    );
+    let register = admin.register("CK_WATCHED").await.unwrap();
+    let revision = register.put("module.live", b"live".to_vec()).await.unwrap();
+    assert!(matches!(
+        next_update(watch).await,
+        RegisterUpdate::Put(entry) if entry.key == "module.live" && entry.revision == revision
+    ));
+}
+
+#[tokio::test]
+async fn register_bucket_reset_delivers_replacement_entries() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let mut watch = open_watch_before_bucket_reset(&admin).await;
+    admin
+        .jetstream()
+        .delete_key_value("CK_WATCHED")
+        .await
+        .unwrap();
+    let replacement = create_watched_bucket(&admin).await;
+    replacement
+        .put("module.new", b"replacement".to_vec())
+        .await
+        .unwrap();
+    expect_bucket_heartbeat_loss(&mut watch).await;
+    expect_replacement_bucket_entries(&admin, &mut watch).await;
+}
+
+#[tokio::test]
+async fn register_bucket_reset_warns_once_and_backs_off_while_missing() {
+    use futures_util::StreamExt;
+    use std::sync::{Arc, Mutex};
+
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let mut watch = open_watch_before_bucket_reset(&admin).await;
+    let observer = async_nats::connect(&server.url).await.unwrap();
+    let mut requests = observer
+        .subscribe("$JS.API.STREAM.INFO.KV_CK_WATCHED")
+        .await
+        .unwrap();
+    observer.flush().await.unwrap();
+    admin
+        .jetstream()
+        .delete_key_value("CK_WATCHED")
+        .await
+        .unwrap();
+    expect_bucket_heartbeat_loss(&mut watch).await;
+
+    let output = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let writer_output = output.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(move || Capture(writer_output.clone()))
+        .finish();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
+    for _ in 0..3 {
+        tokio::select! {
+            biased;
+            change = watch.next_change() => panic!("missing bucket must wait, got {change:?}"),
+            () = async {
+                tokio::time::timeout(Duration::from_secs(3), requests.next())
+                    .await.expect("watch did not retry stream info").unwrap();
+                assert!(tokio::time::timeout(Duration::from_millis(250), requests.next()).await.is_err(),
+                    "watch sent another request without backing off");
+            } => {}
+        }
+    }
+    let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    assert_eq!(
+        logs.lines().count(),
+        1,
+        "expected one outage warning: {logs}"
+    );
+    assert!(
+        logs.contains("WARN") && logs.contains("bucket=CK_WATCHED"),
+        "{logs}"
+    );
+
+    let replacement = create_watched_bucket(&admin).await;
+    replacement
+        .put("module.new", b"replacement".to_vec())
+        .await
+        .unwrap();
+    expect_replacement_bucket_entries(&admin, &mut watch).await;
+}
+
 /// A push consumer on another bucket delivering into a register watch's
 /// inbox is dropped and counted, never parsed, and the watch carries on.
 #[tokio::test]

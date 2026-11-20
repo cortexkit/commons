@@ -10,7 +10,7 @@ use std::{
 use cortexkit_bus_nats::NatsConnection;
 use tokio::sync::watch;
 
-use crate::{BusClient, Error, Result};
+use crate::{BusClient, Error, ManagedConnection, Result};
 
 /// Shared connection-generation handling for long-lived readers.
 #[derive(Clone)]
@@ -27,11 +27,15 @@ pub(crate) struct ConnectionBinding {
 
 impl ConnectionBinding {
     pub(crate) fn new(client: &BusClient) -> Self {
+        Self::from_managed(&client.managed)
+    }
+
+    pub(crate) fn from_managed(managed: &ManagedConnection) -> Self {
         Self {
-            connection: client.managed.connection.clone(),
-            changes: client.connection_changes(),
+            connection: managed.connection.clone(),
+            changes: managed.changes.clone(),
             bound: None,
-            forged_deliveries_dropped: client.forged_deliveries_dropped.clone(),
+            forged_deliveries_dropped: managed.forged_deliveries_dropped.clone(),
             #[cfg(test)]
             bucket_watch_capacity_warnings: 0,
         }

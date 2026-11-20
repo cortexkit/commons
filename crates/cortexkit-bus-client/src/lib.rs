@@ -69,6 +69,10 @@ pub enum Error {
     BucketValueTooLarge { size: usize, cap: u32 },
     #[error("bucket {bucket} has no watch consumer slots available")]
     WatchCapacity { bucket: String },
+    /// The watch has switched to a replacement bucket. Clear the old entries
+    /// and revisions, then read the new snapshot on the same watch.
+    #[error("bucket {bucket} was reset")]
+    BucketReset { bucket: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -97,13 +101,13 @@ pub struct BusClient {
     managed: ManagedConnection,
     names: AccountNames,
     module: String,
-    forged_deliveries_dropped: Arc<AtomicU64>,
 }
 
 struct ManagedConnection {
     connection: Arc<RwLock<NatsConnection>>,
     changes: watch::Receiver<u64>,
     task: tokio::task::JoinHandle<()>,
+    forged_deliveries_dropped: Arc<AtomicU64>,
 }
 
 impl Drop for ManagedConnection {
@@ -131,7 +135,6 @@ impl BusClient {
             managed,
             names,
             module: opts.module,
-            forged_deliveries_dropped: Arc::new(AtomicU64::new(0)),
         })
     }
 }
@@ -177,6 +180,7 @@ impl ManagedConnection {
             connection,
             changes: receiver,
             task,
+            forged_deliveries_dropped: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -344,7 +348,9 @@ impl BusClient {
     /// the receiving subscription, preventing forged pushes from becoming hints
     /// or bucket changes.
     pub fn forged_deliveries_dropped(&self) -> u64 {
-        self.forged_deliveries_dropped.load(Ordering::Relaxed)
+        self.managed
+            .forged_deliveries_dropped
+            .load(Ordering::Relaxed)
     }
 
     /// Attaches to an existing EVENT durable owned by this module.
