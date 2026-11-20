@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.16
+
+- Clarify the notice views-bucket value wording and add a pinned sample; no wire change.
+
 ## 0.15.15
 
 - Add notice views to `tool.views` and the module's views bucket. Notice views

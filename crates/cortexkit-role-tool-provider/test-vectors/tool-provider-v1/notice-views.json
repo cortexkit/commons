@@ -1,6 +1,34 @@
 {
   "publisher": "example-writer",
   "sample_pin": "nv1:example-writer:finished:1",
+  "bucket_sample": {
+    "key": "6e76313a6578616d706c652d7772697465723a66696e69736865643a31",
+    "value": {
+      "views": {
+        "nv1:example-writer:finished:1": {
+          "notice": {
+            "name": "finished",
+            "version": 1,
+            "data_schema": {
+              "type": "object",
+              "properties": {
+                "exit_code": {"type": "integer"},
+                "status": {"type": "string", "enum": ["finished", "failed"]},
+                "title": {"type": "string"}
+              },
+              "required": ["exit_code", "status", "title"],
+              "additionalProperties": false
+            }
+          },
+          "template": {
+            "row": {"registry": "finished-row"},
+            "page": {"registry": "finished-page"}
+          },
+          "template_revision": 1
+        }
+      }
+    }
+  },
   "request": {
     "pins": [
       "pin:ordinary:1",

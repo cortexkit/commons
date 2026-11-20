@@ -9,6 +9,31 @@ fn fixture() -> Value {
 }
 
 #[test]
+fn notice_views_bucket_sample_is_one_pin_reply() {
+    let fixture = fixture();
+    let pin = fixture["sample_pin"].as_str().unwrap();
+    let sample = &fixture["bucket_sample"];
+    let expected_key: String = pin
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(sample["key"], expected_key);
+
+    let reply: ViewsReply = serde_json::from_value(sample["value"].clone()).unwrap();
+    assert_eq!(reply.views.len(), 1);
+    assert!(matches!(reply.views[pin], ViewEntry::Notice(_)));
+    reply
+        .validate_for(&ViewsRequest::new(vec![pin.into()]))
+        .unwrap();
+    assert_eq!(
+        sample["value"]["views"][pin],
+        fixture["reply"]["views"][pin]
+    );
+    assert_eq!(serde_json::to_value(reply).unwrap(), sample["value"]);
+}
+
+#[test]
 fn notice_views_round_trip_with_tool_views_and_bucket_keys() {
     let fixture = fixture();
     let request: ViewsRequest = serde_json::from_value(fixture["request"].clone()).unwrap();

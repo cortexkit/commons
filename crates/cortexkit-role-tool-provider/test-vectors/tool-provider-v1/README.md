@@ -75,7 +75,8 @@ bytes. It uses the digest of `{"type":"object"}` from `schema-digest.json`.
 The provider owns these bytes; tool-display carries an identical copy.
 
 `notice-views.json` pins notice entries alongside tool views, plus their
-views-bucket keys, version boundaries and invalid entries. Its `notice_cases`
+views-bucket keys and a one-pin `tool.views` reply as a bucket value, version
+boundaries and invalid entries. Its `notice_cases`
 map refers to the finished, failed, still-running, watch and fold-pair cases in
 tool-display's `notices.json`. The template values are opaque wire examples,
 not renderable templates.

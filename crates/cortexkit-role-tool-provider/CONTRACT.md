@@ -258,14 +258,15 @@ the writer named by its key. Apps treat the pin as opaque.
 The entry is `{notice: {name, version, data_schema}, template: {row, page},
 template_revision}`. `notice.name` and `notice.version` match the pin, and
 `data_schema` uses the same JSON Schema subset as tool input schemas. A change
-to the shape of the notice data requires a new version. The writer also puts
-the same entry beside tool views in its `<module>.views` bus bucket, under the
-lowercase hex encoding of the pin's UTF-8 bytes.
+to the shape of the notice data requires a new version. As for tool views, the
+writer puts the one-pin `tool.views` reply in its `<module>.views` bus bucket:
+`{"views": {"nv1:…": <entry>}}`, under the lowercase hex encoding of the
+pin's UTF-8 bytes. The bucket value is the whole reply, not the bare entry.
 
 `views::NoticeView` models the entry. `ViewsReply::validate_for` checks its
 name and version against the pin and checks that the schema is flat.
 `NoticeView::check_pin` also checks the attested publisher, regardless of
-whether the entry came from `tool.views` or the bucket. The display server
+whether the entry came from `tool.views` or a bucket reply. The display server
 checks the full schema subset and the templates before serving them; this crate
 does not interpret templates.
 

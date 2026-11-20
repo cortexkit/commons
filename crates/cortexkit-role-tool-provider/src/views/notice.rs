@@ -42,7 +42,9 @@ impl NoticeViewTemplates {
     }
 }
 
-/// The entry served both by `tool.views` and in the writer's views bucket.
+/// The entry served by `tool.views`. As for tool views, the writer's views
+/// bucket stores the one-pin `tool.views` reply, `{"views": {"nv1:…": <entry>}}`,
+/// under the lowercase hex of the pin's UTF-8 bytes, not the bare entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct NoticeView {
