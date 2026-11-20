@@ -8,6 +8,7 @@ mod decision_inputs;
 mod extensions;
 mod fork_of;
 mod gateway;
+mod harness_capabilities;
 mod harness_limits;
 mod head_turn;
 mod observe_success;
@@ -280,6 +281,13 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if name == "runner_requires_wire_api" {
             return self.requires_wire_api_check(name).await;
+        }
+        if matches!(
+            name,
+            "select_harness_capabilities_matched"
+                | "undeclared_select_harness_capabilities_refused"
+        ) {
+            return self.harness_capabilities_check(name).await;
         }
         if name.starts_with("harness_limits_") {
             return self.harness_limits_check(name).await;

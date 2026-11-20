@@ -19,9 +19,18 @@ open_set! {
 open_set! {
     /// Open list of per-harness task capabilities.
     pub enum HarnessCapability {
+        /// The runner can host a tool-free one-off session in this harness.
         OneOff => "one_off",
+        /// The runner can answer a fork in this harness.
         ForkAnswer => "fork_answer",
+        /// The runner can enforce the requested output cap in this harness.
         OutputCap => "output_cap",
+        /// The runner can submit the worker's result through a tool in this harness.
+        SubmitTool => "submit_tool",
+        /// The runner can return the worker's final text in this harness.
+        FinalText => "final_text",
+        /// The runner can run the worker's plans in this harness.
+        Plans => "plans",
     }
 }
 

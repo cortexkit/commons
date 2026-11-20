@@ -884,6 +884,8 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
                         .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_PRIORITY)
                 } else if key.as_str() == "workload" {
                     !workload_enabled
+                } else if key.as_str() == "harness_capabilities" {
+                    true
                 } else if extensions.contains(&key.as_str()) {
                     !extended
                 } else {
@@ -906,14 +908,16 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
         if demands.get("iq").is_none_or(Value::is_null) {
             demands.insert("iq".into(), json!(0));
         }
-        parse_requirements(Some(&Value::Object(demands)), workload_enabled).map_err(|refusal| {
-            let field = refusal
-                .detail
-                .get("field")
-                .and_then(Value::as_str)
-                .unwrap_or("requirements");
-            invalid(format!("{path}.{field}"))
-        })?;
+        parse_requirements(Some(&Value::Object(demands)), workload_enabled, false).map_err(
+            |refusal| {
+                let field = refusal
+                    .detail
+                    .get("field")
+                    .and_then(Value::as_str)
+                    .unwrap_or("requirements");
+                invalid(format!("{path}.{field}"))
+            },
+        )?;
         let decoded: DemandDefaults = serde_json::from_value(Value::Object(
             fields
                 .iter()

@@ -29,6 +29,8 @@ use cortexkit_role_routing::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 
+#[path = "vectors/harness_capabilities.rs"]
+mod harness_capabilities;
 #[path = "vectors/registration.rs"]
 mod registration;
 #[path = "vectors/workload.rs"]
@@ -65,6 +67,7 @@ const FILES: &[&str] = &[
     "route-select-available-routes.json",
     "route-select-engine.json",
     "route-select-exclude-providers.json",
+    "route-select-harness-capabilities.json",
     "route-select-harness.json",
     "route-select-hold-control.json",
     "route-select-panel.json",

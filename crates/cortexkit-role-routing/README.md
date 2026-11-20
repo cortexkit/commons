@@ -123,7 +123,7 @@ What the crate holds:
   `account_continue`, `select_panel`, `budget_quote`, `explain`,
   `account_status`, `head_choices`, `select_pin_slot`, `select_available_routes`,
   `select_prefer_prompt_cache`, `select_settings`, `observe_backoff`,
-  `observe_credential_refused`,
+  `observe_credential_refused`, `select_workload`, `select_harness_capabilities`,
    `report_outcomes`, `select_engine`, `engine_reports`, `engine_evals`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
@@ -171,7 +171,7 @@ their group.
 | `account_status` / `route.account_status` | `check_account_status`; echoed account identity and reset applicability |
 | `head_choices` / `route.head_choices` | `check_head_choices`; runner echo, sorted unique choices and valid default variants; optional `pin_only` and closed `billing::Billing` metadata |
 | `consumer_models` / `route.consumer_models` | `check_consumer_models`; consumer echo, sorted unique pairs, finite `f64` scores and closed billing; select's consumer admission |
-| `select` additions | `check_answer` now checks `available_routes`, slot-pin outcomes and `project_settings` presence; `SelectSettings::check_project_stamp` rejects mismatched trusted project stamps |
+| `select` additions | `check_answer` now checks `available_routes`, slot-pin outcomes and `project_settings` presence; `SelectSettings::check_project_stamp` rejects mismatched trusted project stamps; serving parsers gate harness-capability requirements and panel seats propagate them |
 | `report` additions | `parse_report_request_serving`, `Outcome::effect`; four group-gated outcomes with no availability penalty and the prior route preference (affinity) kept; optional `usage.run_id` with `report_usage_run_id` |
 | `observe` additions | `parse_account_observe_request_serving`, `check_observe_authorization` and `ObserveArm`; account-local backoff and admission-bound decision-owner wall observations |
 

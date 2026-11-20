@@ -42,8 +42,8 @@ use cortexkit_role_routing_conformance::{
             AccountReasonCode, Admission,
         },
         capabilities::{
-            SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER,
-            SELECT_TASK_REF,
+            SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HARNESS_CAPABILITIES,
+            SELECT_HOLD_CONTROL, SELECT_PREFER, SELECT_TASK_REF,
         },
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
@@ -483,6 +483,7 @@ pub struct FakeSubject {
     /// Declares select_hold_control.
     hold_control: bool,
     harness_control: bool,
+    harness_capabilities_control: bool,
     prefer_control: bool,
     exclude_providers_control: bool,
     task_ref_control: bool,
@@ -553,6 +554,7 @@ impl FakeSubject {
             defects,
             hold_control: true,
             harness_control: true,
+            harness_capabilities_control: true,
             prefer_control: true,
             exclude_providers_control: true,
             task_ref_control: true,
@@ -585,6 +587,14 @@ impl FakeSubject {
     pub fn without_harness_control(defects: Defects) -> Self {
         Self {
             harness_control: false,
+            ..Self::new(defects)
+        }
+    }
+
+    #[allow(dead_code)] // Used by unit checks, not every shared fake test target.
+    pub fn without_harness_capabilities_control(defects: Defects) -> Self {
+        Self {
+            harness_capabilities_control: false,
             ..Self::new(defects)
         }
     }
@@ -949,6 +959,7 @@ impl RoutingSubject for FakeSubject {
             defects: self.defects,
             hold_control: self.hold_control,
             harness_control: self.harness_control,
+            harness_capabilities_control: self.harness_capabilities_control,
             prefer_control: self.prefer_control,
             exclude_providers_control: self.exclude_providers_control,
             task_ref_control: self.task_ref_control,
@@ -973,6 +984,7 @@ pub struct FakeRoute {
     defects: Defects,
     hold_control: bool,
     harness_control: bool,
+    harness_capabilities_control: bool,
     prefer_control: bool,
     exclude_providers_control: bool,
     task_ref_control: bool,
@@ -1235,6 +1247,12 @@ impl FakeRoute {
         if self.harness_control {
             describe = describe.with_capability(SELECT_HARNESS);
         }
+        if self.harness_capabilities_control {
+            describe = describe.with_capability(SELECT_HARNESS_CAPABILITIES);
+            describe
+                .requirement_fields
+                .push("harness_capabilities".into());
+        }
         if self.prefer_control {
             describe = describe.with_capability(SELECT_PREFER);
         }
@@ -1489,12 +1507,23 @@ impl FakeRoute {
                 requirements.retain(|key, _| REQUIREMENT_FIELDS.contains(&key.as_str()));
             }
         }
+        if self.fault("select_harness_capabilities_unknown") {
+            if let Some(Value::Object(requirements)) = params.get_mut("requirements") {
+                requirements.insert("harness_capabilities".into(), json!([]));
+            }
+        }
         let mut capabilities = Vec::new();
         if self.hold_control {
             capabilities.push(SELECT_HOLD_CONTROL);
         }
         if self.harness_control || defects.accepts_undeclared_harness {
             capabilities.push(SELECT_HARNESS);
+        }
+        if self.harness_capabilities_control
+            || self.fault("select_harness_capabilities_unknown")
+            || self.fault("undeclared_select_harness_capabilities_refused")
+        {
+            capabilities.push(SELECT_HARNESS_CAPABILITIES);
         }
         if self.prefer_control || defects.accepts_undeclared_prefer {
             capabilities.push(SELECT_PREFER);
@@ -1602,6 +1631,50 @@ impl FakeRoute {
             .tool_capabilities
             .clone()
             .unwrap_or_default();
+        let explicit_harness_capabilities =
+            request
+                .requirements
+                .harness_capabilities
+                .as_ref()
+                .map(|capabilities| {
+                    capabilities
+                        .iter()
+                        .map(|capability| capability.as_str().to_owned())
+                        .collect::<Vec<_>>()
+                });
+        let missing_harness_capabilities = |runner: &CatalogRunner| {
+            let mut required = explicit_harness_capabilities.clone().unwrap_or_default();
+            if explicit_harness_capabilities.is_some()
+                && !self.fault("select_harness_capabilities_inferred")
+            {
+                if request.requirements.tools == Some(ToolsRequirement::None) {
+                    required.push("one_off".into());
+                }
+                if request.requirements.max_output_tokens.is_some() {
+                    required.push("output_cap".into());
+                }
+            }
+            if self.fault("select_harness_capabilities_matched") {
+                required.clear();
+            }
+            required.sort();
+            required.dedup();
+            let harness = self.resolved_harness(runner, request.harness.as_deref());
+            let declared = state
+                .runner_declarations
+                .get(&runner.module)
+                .and_then(|declaration| declaration.limits_for_harness(harness.as_deref()).ok())
+                .and_then(|limits| limits.capabilities)
+                .unwrap_or_default();
+            required
+                .into_iter()
+                .filter(|name| {
+                    !declared
+                        .iter()
+                        .any(|capability| capability.as_str() == name)
+                })
+                .collect::<Vec<_>>()
+        };
         let now = now_ms();
         let reset = |until: u64| (!defects.drops_reset_at_ms).then_some(until);
         let cooled = |key: &str| {
@@ -1649,9 +1722,49 @@ impl FakeRoute {
                             .as_ref()
                             .is_none_or(|listed| listed.contains(&runner.module))
                         && self.reaches(runner, &tags)
+                        && missing_harness_capabilities(runner).is_empty()
                 })
                 .map(|runner| runner.module.clone())
         };
+        if explicit_harness_capabilities.is_some() {
+            let candidates: Vec<_> = catalog
+                .runners
+                .iter()
+                .filter(|runner| {
+                    (runner.starts_sessions || defects.selects_gateway)
+                        && (defects.ignores_harness_filter
+                            || request.harness.as_ref().is_none_or(|harness| {
+                                runner
+                                    .harnesses
+                                    .as_ref()
+                                    .is_some_and(|values| values.contains(harness))
+                            }))
+                        && runners
+                            .as_ref()
+                            .is_none_or(|listed| listed.contains(&runner.module))
+                        && self.reaches(runner, &tags)
+                })
+                .collect();
+            let missing: BTreeMap<String, Vec<String>> = candidates
+                .iter()
+                .filter_map(|runner| {
+                    let names = missing_harness_capabilities(runner);
+                    (!names.is_empty()).then(|| {
+                        let harness = self
+                            .resolved_harness(runner, request.harness.as_deref())
+                            .unwrap_or_default();
+                        (format!("{}/{harness}", runner.module), names)
+                    })
+                })
+                .collect();
+            if !candidates.is_empty() && missing.len() == candidates.len() {
+                let mut refusal = Refusal::no_route(NoRouteReason::HarnessUnavailable, None);
+                if !self.fault("select_harness_capabilities_missing") {
+                    refusal.detail.insert("missing".into(), json!(missing));
+                }
+                return Err(refusal);
+            }
+        }
         let blocked = |model: &CatalogModel| {
             if model.priced_per_token {
                 None

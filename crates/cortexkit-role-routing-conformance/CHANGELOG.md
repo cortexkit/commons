@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.43
+
+- Pin routing `=0.7.38`. Check explicit and inferred harness-capability
+  matching, unknown-name and undeclared-group refusals, and
+  `harness_unavailable` diagnostics naming each pair's missing capabilities.
+- Named incorrect routers verify that the new checks reject ignored explicit
+  and inferred requirements, malformed diagnostics and accepted unknown names.
+
 ## 0.10.42
 
 - Pin routing `=0.7.37`, exposing its `select_workload` capability through `wire`.

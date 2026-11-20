@@ -469,6 +469,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
     subscription keep-free reserve exemption (§§5.1, 9.1).
   - `select_workload`: workload names in consumer declarations and
     `route.select` requirements (§§5.1, 16.1.2).
+  - `select_harness_capabilities`: explicit per-harness capability requirements
+    on `route.select` and every `route.select_panel` seat (§§5.1, 11.1).
   - `select_available_routes`: caller-reachable route restriction (§5.6).
   - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
   - `select_settings`: project and service-tier settings lookup (§5.6).
@@ -548,6 +550,33 @@ That group's additive defaults, attested namespace and selector rules are in §1
     A provider without the group refuses the member by name, even if null.
     With the group, null is absent; a malformed value is
     `invalid_requirements {field: "workload"}`.
+  - `harness_capabilities`: an optional array of per-harness capability names.
+    A caller sends it only to a provider advertising
+    `select_harness_capabilities`; without that group it is refused as an
+    unread requirement, `invalid_requirements {field: "harness_capabilities"}`,
+    even when null. With the group, null or omission adds no explicit names.
+    The defined names are `one_off`, `fork_answer`, `output_cap`, `submit_tool`,
+    `final_text` and `plans` (§16.2). A name the provider does not recognise is
+    `invalid_requirements {field: "harness_capabilities"}`; it is
+    never silently discarded from an explicit requirement.
+  - [pinned] When `harness_capabilities` is present, routing matches the union
+    of its explicit names and the capabilities it infers from the other
+    requirements. It infers `one_off` exactly when `tools` is `"none"`, and
+    `output_cap` whenever `max_output_tokens` is present, whatever its value.
+    Nothing else is inferred; in particular, select never infers `fork_answer`.
+    A runner and harness pair is eligible only when its routing/v1 declaration
+    lists every name in that union. A runner declaring no capabilities for a
+    harness does not satisfy an explicitly sent name. When no pair is eligible,
+    routing answers `no_route` with reason `harness_unavailable` and
+    `detail.missing`, an object mapping each `"runner/harness"` pair to its list
+    of missing names. This refusal carries no `reset_at_ms` unless the only
+    runner that would qualify is just temporarily down; that case uses the
+    existing down-runner timing. The successful select reply shape is unchanged.
+  - [pinned] Roll out this contract first, then declare the new names in runner
+    routing/v1 slots, then enable routing's reader. Callers send
+    `harness_capabilities` last, only after discovering
+    `select_harness_capabilities`. Until then, leaving it absent preserves the
+    existing request bytes and selection behaviour.
 - [pinned] A requirement member the provider does not read is refused
   `invalid_requirements {field}` naming it as sent; it is never ignored. A
   malformed requirement (a missing llm `iq`, a demand above 100, a `tools` or
@@ -1902,7 +1931,7 @@ New-panel params (`panel::SelectPanelRequest`):
 |---|---|
 | `class` | Required open string naming the kind of review, mapped to router policy. Named values: `audit`, `design_review`, `evaluate`, `diagnose`, `explain`, `spec`, `lab`; they fix the spelling, and each router's own policy says what a class selects. `role.describe` doesn't list the classes a router serves: one it has no policy for is `invalid_request {field: "class"}`. |
 | `consumer`, `runners?`, `available_routes?`, `exclude?`, `harness?`, `service_tier?`, `correlation_id?`, `task_ref?`, `settings?` | As on select, under the same groups, applying to every seat. |
-| `requirements?` | `PanelRequirements {context_window?, modalities?}`: each seat has a known window at least the floor and accepts every modality. No `iq`; class policy owns quality. |
+| `requirements?` | `PanelRequirements {context_window?, modalities?, harness_capabilities?}`: each seat has a known window at least the floor, accepts every modality, and uses a runner/harness pair meeting the capability union in §5.1. No `iq`; class policy owns quality. The capability member requires `select_harness_capabilities`; an unknown name is `invalid_requirements {field: "requirements.harness_capabilities"}`. |
 | `temperatures?` | At most 8 finite numbers in `0..=2`, indexed by slot; otherwise `invalid_request {field: "temperatures"}`. |
 | `package_tokens?` | Unsigned evidence-package size; every seated route's package ceiling (§11.2) must cover it. Absent means unconstrained. |
 | `seed?` | String of at most 256 bytes. Random draws depend only on seed and candidates, so identical seed and candidates give the same panel. |
@@ -2507,8 +2536,11 @@ breaking release, after callers have migrated to `route.select`.
   `starts_sessions?: bool`, `capabilities?: [token]`, `exclude?: [spec]`.
   Missing `starts_sessions` inherits the runner-level value; missing capabilities
   asserts no new task capability; missing exclusions adds no exclusion.
-  `capabilities` is open: defined names are `one_off` (tool-free one-off session),
-  `fork_answer`, and `output_cap` (can enforce the requested output cap).
+  `capabilities` is open: defined names are `one_off` (can host a tool-free
+  one-off session), `fork_answer` (can answer a fork), `output_cap` (can enforce
+  the requested output cap), `submit_tool` (can submit a worker's result through
+  a tool), `final_text` (can return a worker's final text), and `plans` (can run
+  a worker's plans).
   Unknown tokens are retained and confer no known capability.
 - [pinned] A harness with `starts_sessions: false` never hosts a new session.
   Exclusions reject catalog routes even though the catalog lists them. Per-harness

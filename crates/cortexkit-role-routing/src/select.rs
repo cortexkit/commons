@@ -25,11 +25,17 @@ pub const REQUIREMENT_FIELDS: &[&str] = &[
     "input_tokens",
     "max_cost_usd",
     "workload",
+    "harness_capabilities",
 ];
 
 /// Requirement members that older routers need not list in `requirement_fields`.
-pub const OPTIONAL_REQUIREMENT_FIELDS: &[&str] =
-    &["questions", "input_tokens", "max_cost_usd", "workload"];
+pub const OPTIONAL_REQUIREMENT_FIELDS: &[&str] = &[
+    "questions",
+    "input_tokens",
+    "max_cost_usd",
+    "workload",
+    "harness_capabilities",
+];
 
 /// Currently known model catalog `workload.<name>.*` keys, not a validation list.
 pub const KNOWN_WORKLOADS: &[&str] = &["code", "reason", "synthesize", "lookup", "quick"];
@@ -198,6 +204,10 @@ pub struct Requirements {
     /// Unknown names are retained on the wire but do not apply workload policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<String>,
+    /// Per-harness capabilities the selected runner must declare, sent only
+    /// with `select_harness_capabilities`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_capabilities: Option<Vec<crate::placement::HarnessCapability>>,
     /// Members this version does not define, kept so a provider can refuse
     /// them by name instead of losing them in a decode.
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -758,7 +768,8 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// and `select_settings`, respectively.
 /// `pin_origin` requires `select_pin_origin` and a `pin`. Enrollment is checked
 /// by the provider after parsing, never inferred from request members.
-/// `requirements.workload` requires `select_workload`.
+/// `requirements.workload` requires `select_workload`, and
+/// `requirements.harness_capabilities` requires `select_harness_capabilities`.
 /// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
@@ -836,6 +847,9 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         capabilities
             .iter()
             .any(|cap| cap.as_ref() == crate::capabilities::SELECT_WORKLOAD),
+        capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SELECT_HARNESS_CAPABILITIES),
     )?;
     let pin = members.optional_text("pin", None)?;
     let pin_origin: Option<PinOrigin> = members.optional("pin_origin")?;
@@ -1089,6 +1103,7 @@ pub(crate) fn parse_settings(value: Option<&Value>) -> Result<Option<SelectSetti
 pub(crate) fn parse_requirements(
     value: Option<&Value>,
     workload_enabled: bool,
+    harness_capabilities_enabled: bool,
 ) -> Result<Requirements, Refusal> {
     let Some(Value::Object(object)) = value else {
         return Err(Refusal::invalid_requirements(
@@ -1099,6 +1114,7 @@ pub(crate) fn parse_requirements(
     if let Some(unknown) = object.keys().find(|key| {
         !REQUIREMENT_FIELDS.contains(&key.as_str())
             || (!workload_enabled && key.as_str() == "workload")
+            || (!harness_capabilities_enabled && key.as_str() == "harness_capabilities")
     }) {
         return Err(Refusal::invalid_requirements(
             unknown.clone(),
@@ -1146,6 +1162,18 @@ pub(crate) fn parse_requirements(
             format!("{unknown} is not a modality this provider reads"),
         ));
     }
+    let harness_capabilities: Option<Vec<crate::placement::HarnessCapability>> =
+        members.optional("harness_capabilities")?;
+    if let Some(unknown) = harness_capabilities
+        .iter()
+        .flatten()
+        .find(|capability| !capability.is_known())
+    {
+        return Err(Refusal::invalid_requirements(
+            "harness_capabilities",
+            format!("{unknown} is not a harness capability this provider reads"),
+        ));
+    }
     let questions: Option<u64> = members.optional("questions")?;
     if questions == Some(0) {
         return Err(members.refuse("questions", "questions must be at least 1"));
@@ -1176,6 +1204,7 @@ pub(crate) fn parse_requirements(
         input_tokens,
         max_cost_usd,
         workload,
+        harness_capabilities,
         unknown: BTreeMap::new(),
     })
 }
@@ -1507,10 +1536,45 @@ mod tests {
     }
 
     #[test]
+    fn harness_capabilities_require_the_group_and_known_names() {
+        use crate::placement::HarnessCapability::{FinalText, Plans, SubmitTool};
+
+        let params = json!({"consumer": "flow", "requirements": {
+            "iq": 50,
+            "harness_capabilities": ["submit_tool", "final_text", "plans"]
+        }});
+        let parsed = parse_select_request_serving(
+            &params,
+            &[crate::capabilities::SELECT_HARNESS_CAPABILITIES],
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.requirements.harness_capabilities,
+            Some(vec![SubmitTool, FinalText, Plans])
+        );
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), params);
+
+        let refusal = parse_select_request(&params).unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::InvalidRequirements);
+        assert_eq!(field(&refusal), "harness_capabilities");
+
+        let unknown = json!({"consumer": "flow", "requirements": {
+            "iq": 50, "harness_capabilities": ["future_task"]
+        }});
+        let refusal = parse_select_request_serving(
+            &unknown,
+            &[crate::capabilities::SELECT_HARNESS_CAPABILITIES],
+        )
+        .unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::InvalidRequirements);
+        assert_eq!(field(&refusal), "harness_capabilities");
+    }
+
+    #[test]
     fn decision_input_requirements_validate_and_keep_unknowns() {
         let valid = serde_json::json!({"iq": 0, "questions": 3,
             "input_tokens": 1000, "max_cost_usd": 0.01});
-        let parsed = parse_requirements(Some(&valid), false).unwrap();
+        let parsed = parse_requirements(Some(&valid), false, false).unwrap();
         assert_eq!(parsed.questions, Some(3));
         assert_eq!(parsed.input_tokens, Some(1000));
         assert_eq!(
@@ -1538,7 +1602,7 @@ mod tests {
                 .unwrap()
                 .extend(addition.as_object().unwrap().clone());
             assert_eq!(
-                field(&parse_requirements(Some(&requirements), false).unwrap_err()),
+                field(&parse_requirements(Some(&requirements), false, false).unwrap_err()),
                 expected
             );
         }
@@ -1546,13 +1610,13 @@ mod tests {
             serde_json::json!({"iq":0}),
             serde_json::json!({"iq":0,"input_tokens":0}),
         ] {
-            assert!(parse_requirements(Some(&value), false).is_ok());
+            assert!(parse_requirements(Some(&value), false, false).is_ok());
         }
         let unknown = serde_json::json!({"iq":0,"future_requirement":1});
         let decoded: Requirements = serde_json::from_value(unknown.clone()).unwrap();
         assert_eq!(decoded.unknown["future_requirement"], 1);
         assert_eq!(
-            field(&parse_requirements(Some(&unknown), false).unwrap_err()),
+            field(&parse_requirements(Some(&unknown), false, false).unwrap_err()),
             "future_requirement"
         );
     }

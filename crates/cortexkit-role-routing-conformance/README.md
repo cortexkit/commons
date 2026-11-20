@@ -293,6 +293,7 @@ groups have no undeclared-op refusal case.
 
 | Group | Serving checks | Undeclared-member checks |
 |---|---|---|
+| `select_harness_capabilities` | `select_harness_capabilities_matched` | `undeclared_select_harness_capabilities_refused` |
 | `select_panel` | `panel_full`, `panel_shortfall`, `panel_family_and_route_unique`, `panel_temperatures_by_slot`, `panel_same_seed`, `panel_replacement_preserves_slot`, `panel_foreign_replacement_unknown`, `panel_replacement_invalid_slot` | none |
 | `budget_quote` | `budget_quote_matches_helper`, `budget_quote_foreign_unknown` | none |
 | `explain` | `explain_matches_selection`, `explain_foreign_unknown` | none |

@@ -56,6 +56,9 @@ pub const ROUTE_SELECT_HOLD_CONTROL_JSON: &str =
 /// Runner-wide program declarations and their field-path refusals.
 pub const RUNNER_DECLARATIONS_JSON: &str =
     include_str!("../test-vectors/routing-v1/runner-declarations.json");
+/// Explicit per-harness capability requirements, declarations and refusals.
+pub const ROUTE_SELECT_HARNESS_CAPABILITIES_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-harness-capabilities.json");
 /// The optional `select_harness` group, program answers and no-route refusals.
 pub const ROUTE_SELECT_HARNESS_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-select-harness.json");
@@ -175,6 +178,10 @@ pub const FILES: &[(&str, &str)] = &[
     (
         "route-select-exclude-providers.json",
         ROUTE_SELECT_EXCLUDE_PROVIDERS_JSON,
+    ),
+    (
+        "route-select-harness-capabilities.json",
+        ROUTE_SELECT_HARNESS_CAPABILITIES_JSON,
     ),
     ("route-select-harness.json", ROUTE_SELECT_HARNESS_JSON),
     (

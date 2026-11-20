@@ -124,7 +124,8 @@ open_set! {
     /// (`no_route`'s `detail.reason`).
     pub enum NoRouteReason {
         NoAvailableModel => "no_available_model",
-        /// No session-starting runner declares the requested harness.
+        /// No session-starting runner and harness pair meets the requested
+        /// harness or per-harness capabilities.
         HarnessUnavailable => "harness_unavailable",
         /// A requirement such as `tools`, `tool_capabilities`, `modalities`
         /// or `structured_output` is met by no route.
@@ -399,7 +400,9 @@ pub struct PinUnavailableDetail {
     pub reset_at_ms: Option<u64>,
 }
 
-/// The detail of `no_route`.
+/// The reason and timing of `no_route`. Diagnostic members such as `missing`
+/// are intentionally ignored; readers decide how to wait from `reason` and
+/// `reset_at_ms`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoRouteDetail {
     pub reason: NoRouteReason,

@@ -288,6 +288,8 @@ pub const CHECKS: &[CheckSpec] = &[
         "runner.harness is never invented for a runner that declared none, and is not dropped for one declaring a default",
     ),
     check("requested_harness_is_hosted_and_echoed", "select_harness: only a runner listing the requested program answers, echoing it; an unhosted program is no_route harness_unavailable"),
+    check("select_harness_capabilities_matched", "select_harness_capabilities: explicit names plus inferred one_off/output_cap are required on one runner/harness pair; unknown names refuse by path and no pair reports every missing name"),
+    check("undeclared_select_harness_capabilities_refused", "without select_harness_capabilities: harness_capabilities is invalid_requirements naming the requirement field"),
     check("harness_limits_pairs_narrow", "per-harness pairs narrow choices and selection; absent fields inherit the runner union"),
     check("harness_limits_providers_narrow", "per-harness provider allow-lists narrow choices and selection"),
     check("harness_limits_invalid_falls_back", "a refused harness_limits member leaves every harness selectable with runner-level values"),
@@ -388,7 +390,7 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
-    "placement_*: health-warning text, settings-file placement overrides, real one_off/fork_answer/output_cap execution, catalog context-tier resolution, pressure-derived pricing, and internal scoring/cooldown counters are not inspected. Attempt safety is observed through nondefault affinity; price fixtures supply list rates, not live catalog or billing data. Numeric iq-to-catalog mapping remains provider policy, so explicit-value precedence is pinned by contract helper tests rather than a required route at iq 100.",
+    "placement_*: health-warning text, settings-file placement overrides, real one_off/fork_answer/output_cap/submit_tool/final_text/plans execution, catalog context-tier resolution, pressure-derived pricing, and internal scoring/cooldown counters are not inspected. Attempt safety is observed through nondefault affinity; price fixtures supply list rates, not live catalog or billing data. Numeric iq-to-catalog mapping remains provider policy, so explicit-value precedence is pinned by contract helper tests rather than a required route at iq 100.",
     "Warm credential checks use candidates as one hard filter and observe resulting admissions and affinity. Internal rejection records, reserve counts, explicit-pin priority and other hard-filter or quota conditions are not inspected.",
     "Fork checks observe exact allocation, affinity, whole-account refusal-backed holds, principal privacy, exclusions and replay. The better-sibling case is NotApplicable if a fresh admission also chooses the busy parent's account, so it never passes without a scoring control. One-hour parent retention, expired/refused/other-provider parents, sign-in and pool-specific blocks, grant-list independence, reserve exemption and fork concurrency/head-turn accounting are not independently exercised.",
     "engine_reports: attested owner admission is checked, but rolling speed-window retention, latency inspection and realtime filtering are provider policy and are not observable through these hooks",
@@ -412,7 +414,7 @@ pub const NARROWINGS: &[&str] = &[
     "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",
     "Declaration precedence is checked with max_output_tokens only; the other demand fields are not independently checked for precedence.",
     "The consumer-declaration checks do not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
-    "requirements other than tool_capabilities, the declared max_output_tokens floor, questions and max_cost_usd are not checked against the catalog beyond what every check's answer must meet. The new input checks use supplied model facts, not real token estimation or billing.",
+    "requirements other than tool_capabilities, harness_capabilities, the declared max_output_tokens floor, questions and max_cost_usd are not checked against the catalog beyond what every check's answer must meet. The new input checks use supplied model facts, not real token estimation or billing.",
     "Holds are checked with whole-account blocks set through a hook, on ladders of two entries; the operator max_hold limit alone, variants as separate entries, the metered-fallback rule and pooled windows are not checked, and the hold_ok true path past every entry is checked only through hold_ok false.",
     "When account_for holds only within a decision's recorded cap, the kit checks that a wait beyond it is refused with some code other than account_hold; it does not check which.",
     "exclude_providers is checked on demand-mode selects with no pin and nothing cooling down: a pin on an excluded provider, its pin fallback, its interaction with prefer and ladders, and the no_route comparison with a timed cause are not checked.",

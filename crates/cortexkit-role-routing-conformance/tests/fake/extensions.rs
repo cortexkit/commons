@@ -41,6 +41,20 @@ impl FakeRoute {
     }
 
     pub(super) fn panel(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
+        if params.get("replace").is_none()
+            && params
+                .pointer("/requirements/harness_capabilities")
+                .is_some()
+        {
+            let groups = if self.harness_capabilities_control
+                || self.fault("undeclared_select_harness_capabilities_refused")
+            {
+                vec![SELECT_HARNESS_CAPABILITIES]
+            } else {
+                vec![]
+            };
+            panel::parse_select_panel_request_serving(params, &groups)?;
+        }
         if params.get("replace").is_some() {
             let replace: PanelReplacementRequest = serde_json::from_value(params.clone()).unwrap();
             let (owner, mut panel) = state

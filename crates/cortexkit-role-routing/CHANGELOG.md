@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.38
+
+- Add `select_harness_capabilities` and optional `harness_capabilities` on
+  `route.select` requirements and every panel seat. Runners may declare
+  `submit_tool`, `final_text` and `plans` beside the existing per-harness names;
+  the open declaration set remains readable by older readers.
+- Match the union of explicit names with `one_off` inferred from `tools: "none"`
+  and `output_cap` inferred from any present `max_output_tokens`. Unknown names
+  are `invalid_requirements` naming `harness_capabilities`. No
+  eligible pair is `no_route` / `harness_unavailable` with `detail.missing`.
+- **Upgrading:** ship this contract, then runner declarations, then routing's
+  reader. Callers send the member last, only after discovering the group.
+
 ## 0.7.37
 
 - Add optional `workload` to consumer declaration defaults and `route.select`

@@ -1,0 +1,73 @@
+{
+  "about": "select_harness_capabilities admits explicit per-harness requirements on select and every panel seat. Runner declarations use the existing routing/v1 harness_limits slot. Unknown names are malformed requirements; no eligible pair is harness_unavailable with diagnostic detail.missing.",
+  "capabilities": ["select_harness_capabilities"],
+  "declaration": {
+    "runner": {
+      "pairs": [{"wire_api": "messages", "auth_method": "api_key"}],
+      "harnesses": ["alpha", "beta"],
+      "default_harness": "alpha",
+      "harness_limits": {
+        "alpha": {"capabilities": ["submit_tool", "final_text", "plans"]},
+        "beta": {"capabilities": ["one_off", "fork_answer", "output_cap", "submit_tool", "final_text", "plans"]}
+      }
+    }
+  },
+  "requests": [
+    {
+      "name": "all_new_names",
+      "params": {"consumer": "example_summary", "requirements": {"iq": 50, "harness_capabilities": ["submit_tool", "final_text", "plans"]}}
+    },
+    {
+      "name": "null_is_absent",
+      "params": {"consumer": "example_summary", "requirements": {"iq": 50, "harness_capabilities": null}},
+      "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}
+    }
+  ],
+  "refused": [
+    {
+      "name": "unknown_name",
+      "params": {"consumer": "example_summary", "requirements": {"iq": 50, "harness_capabilities": ["submit_tool", "future_task"]}},
+      "refusal": {"code": "invalid_requirements", "detail": {"field": "harness_capabilities"}}
+    }
+  ],
+  "refused_without_group": [
+    {
+      "name": "known_names_still_require_group",
+      "params": {"consumer": "example_summary", "requirements": {"iq": 50, "harness_capabilities": ["submit_tool"]}},
+      "refusal": {"code": "invalid_requirements", "detail": {"field": "harness_capabilities"}}
+    }
+  ],
+  "panel": {
+    "params": {"class": "audit", "consumer": "example_summary", "requirements": {"harness_capabilities": ["submit_tool", "plans"]}},
+    "without_group_refusal": {"code": "invalid_request", "detail": {"field": "requirements.harness_capabilities"}}
+  },
+  "refusals": [
+    {
+      "name": "no_eligible_pair",
+      "body": {
+        "code": "no_route",
+        "message": "no runner and harness pair declares every required capability",
+        "detail": {
+          "reason": "harness_unavailable",
+          "missing": {
+            "runner-one/alpha": ["submit_tool", "plans"],
+            "runner-two/beta": ["final_text"]
+          }
+        }
+      }
+    },
+    {
+      "name": "only_qualifying_pair_temporarily_down",
+      "body": {
+        "code": "no_route",
+        "message": "the only qualifying runner and harness pair is temporarily down",
+        "detail": {
+          "reason": "harness_unavailable",
+          "reset_at_ms": 1767226200000,
+          "missing": {"runner-two/beta": ["plans"]}
+        }
+      }
+    }
+  ],
+  "answers": []
+}

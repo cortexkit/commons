@@ -63,6 +63,9 @@ pub struct PanelRequirements {
     pub context_window: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modalities: Option<Vec<Modality>>,
+    /// Per-harness capabilities every selected seat's runner must declare.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_capabilities: Option<Vec<crate::placement::HarnessCapability>>,
 }
 
 impl PanelRequirements {
@@ -140,6 +143,7 @@ impl SelectPanelRequest {
         if let Some(panel) = &self.requirements {
             requirements.context_window = panel.context_window;
             requirements.modalities = panel.modalities.clone();
+            requirements.harness_capabilities = panel.harness_capabilities.clone();
         }
         let mut request = SelectRequest::new(&self.consumer, requirements);
         request.runners = self.runners.clone();
@@ -591,7 +595,12 @@ pub fn parse_select_panel_request_serving<C: AsRef<str>>(
         return Err(members.refuse("estimate", "select_panel_estimate is not declared"));
     }
     let class = PanelClass::parse(&members.text("class", None)?);
-    let requirements = parse_panel_requirements(members.object.get("requirements"))?;
+    let requirements = parse_panel_requirements(
+        members.object.get("requirements"),
+        capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SELECT_HARNESS_CAPABILITIES),
+    )?;
     // Reuse select's validation and group checks only for shared members. Panel
     // requirements have a different unknown-member refusal and no quality demand.
     let mut select_params: serde_json::Map<String, Value> = members
@@ -634,7 +643,10 @@ pub fn parse_select_panel_request_serving<C: AsRef<str>>(
     })
 }
 
-fn parse_panel_requirements(value: Option<&Value>) -> Result<Option<PanelRequirements>, Refusal> {
+fn parse_panel_requirements(
+    value: Option<&Value>,
+    harness_capabilities_enabled: bool,
+) -> Result<Option<PanelRequirements>, Refusal> {
     let object = match value {
         None | Some(Value::Null) => return Ok(None),
         Some(Value::Object(object)) => object,
@@ -646,7 +658,11 @@ fn parse_panel_requirements(value: Option<&Value>) -> Result<Option<PanelRequire
         }
     };
     for field in object.keys() {
-        if !matches!(field.as_str(), "context_window" | "modalities") {
+        if !matches!(
+            field.as_str(),
+            "context_window" | "modalities" | "harness_capabilities"
+        ) || (field.as_str() == "harness_capabilities" && !harness_capabilities_enabled)
+        {
             return Err(Refusal::invalid_request(
                 format!("requirements.{field}"),
                 "unknown panel requirement",
@@ -666,9 +682,22 @@ fn parse_panel_requirements(value: Option<&Value>) -> Result<Option<PanelRequire
     {
         return Err(members.refuse("modalities", "undefined input modality"));
     }
+    let harness_capabilities: Option<Vec<crate::placement::HarnessCapability>> =
+        members.optional("harness_capabilities")?;
+    if let Some(unknown) = harness_capabilities
+        .iter()
+        .flatten()
+        .find(|capability| !capability.is_known())
+    {
+        return Err(Refusal::invalid_requirements(
+            "requirements.harness_capabilities",
+            format!("{unknown} is not a harness capability this provider reads"),
+        ));
+    }
     Ok(Some(PanelRequirements {
         context_window,
         modalities,
+        harness_capabilities,
     }))
 }
 
@@ -977,6 +1006,7 @@ mod tests {
         request.requirements = Some(PanelRequirements {
             context_window: Some(50_000),
             modalities: Some(vec![Modality::Image]),
+            harness_capabilities: None,
         });
         request.temperatures = Some(vec![0.4]);
         request.package_tokens = Some(10_000);
@@ -1171,6 +1201,7 @@ mod tests {
         assert_eq!(derived.requirements.iq, 0);
         assert_eq!(derived.requirements.context_window, Some(50_000));
         assert_eq!(derived.requirements.modalities, Some(vec![Modality::Image]));
+        assert_eq!(derived.requirements.harness_capabilities, None);
         assert_eq!(derived.runners, request.runners);
         assert_eq!(derived.available_routes, request.available_routes);
         assert_eq!(derived.exclude, Some(vec!["p/old".into(), "p/new".into()]));

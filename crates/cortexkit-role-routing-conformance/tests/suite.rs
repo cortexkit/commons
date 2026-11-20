@@ -792,6 +792,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
         "fork_of_undeclared_refused",
         "continue_signed_out_undeclared_refuses_window",
         "continue_undeclared_group_refuses_mode",
+        "undeclared_select_harness_capabilities_refused",
         "undeclared_harness_group_refuses_member",
     ];
     not_applicable.extend_from_slice(HOLD_CHECKS);
@@ -1016,9 +1017,27 @@ async fn without_harness_group_requests_are_refused() {
             "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
+            "undeclared_select_harness_capabilities_refused",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member"
         ]
+    );
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test]
+async fn without_harness_capabilities_group_checks_follow_declaration() {
+    let report = run_suite(&FakeSubject::without_harness_capabilities_control(
+        Defects::default(),
+    ))
+    .await;
+    assert!(matches!(
+        report.outcome("select_harness_capabilities_matched"),
+        Some(CheckOutcome::NotApplicable { reason }) if reason.contains("select_harness_capabilities")
+    ));
+    assert_eq!(
+        report.outcome("undeclared_select_harness_capabilities_refused"),
+        Some(&CheckOutcome::Passed)
     );
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 }
@@ -1249,6 +1268,7 @@ async fn passes_every_check(subject: &FakeSubject) {
             "account_for_tier_undeclared",
             "warm_credential_undeclared_refused",
             "fork_of_undeclared_refused",
+            "undeclared_select_harness_capabilities_refused",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member",
@@ -1365,6 +1385,7 @@ async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
         "account_for_tier_undeclared",
         "warm_credential_undeclared_refused",
         "fork_of_undeclared_refused",
+        "undeclared_select_harness_capabilities_refused",
         "undeclared_harness_group_refuses_member",
         "undeclared_prefer_group_refuses_member",
         "undeclared_exclude_providers_group_refuses_member",
@@ -1993,6 +2014,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
             "fork_of_undeclared_refused",
             "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
+            "undeclared_select_harness_capabilities_refused",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "exclude_providers_answers_another_provider",
