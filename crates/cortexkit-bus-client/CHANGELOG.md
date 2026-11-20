@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- Add `HubClient::box_id` to read the computer's box id from its hub credential
+  without opening a separate box connection.
+
 ## 0.1.12
 
 - Bucket watches warn once and retry with backoff while the bucket is missing.

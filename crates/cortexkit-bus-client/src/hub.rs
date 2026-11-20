@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use async_nats::jetstream;
+use cortexkit_bus_naming::federation::BoxId;
 use subc_client_rs::SubcConsumer;
 use tokio::sync::watch;
 
@@ -18,6 +19,7 @@ use crate::{
 pub struct HubClient {
     managed: ManagedConnection,
     manager: Arc<CredentialManager>,
+    box_id: Option<BoxId>,
 }
 
 impl HubClient {
@@ -34,8 +36,22 @@ impl HubClient {
         manager: Arc<CredentialManager>,
         timeout: Duration,
     ) -> Result<Self> {
+        let box_id = manager.credential().await.box_id();
         let managed = ManagedConnection::connect(manager.clone(), timeout).await?;
-        Ok(Self { managed, manager })
+        Ok(Self {
+            managed,
+            manager,
+            box_id,
+        })
+    }
+
+    /// Returns the computer's box id as supplied by the hub credential.
+    ///
+    /// Modules must never derive this id themselves. A valid hub credential
+    /// always supplies a canonical box id, and renewal and reissue cannot
+    /// change it.
+    pub fn box_id(&self) -> Option<BoxId> {
+        self.box_id.clone()
     }
 
     /// Returns the current raw NATS client for core publishes. A held snapshot

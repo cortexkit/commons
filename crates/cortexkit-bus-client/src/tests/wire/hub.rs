@@ -268,6 +268,7 @@ async fn hub_obtains_connects_and_renews_with_hub_domain_and_inbox() {
     let hub = HubClient::connect_manager(manager.clone(), TIMEOUT)
         .await
         .unwrap();
+    assert_eq!(hub.box_id().as_ref().map(|id| id.as_str()), Some(BOX));
     let raw = hub.client().unwrap();
     let context = hub.jetstream().unwrap();
     assert!(raw.new_inbox().starts_with(&format!("{PREFIX}.")));
@@ -308,6 +309,7 @@ async fn hub_obtains_connects_and_renews_with_hub_domain_and_inbox() {
         server.observed.lock().unwrap().auth[1]["jwt"],
         "hub-renewed-jwt"
     );
+    assert_eq!(hub.box_id().as_ref().map(|id| id.as_str()), Some(BOX));
     assert!(!hub.connection_changes().has_changed().unwrap());
 }
 
@@ -450,11 +452,6 @@ async fn hub_renewal_refuses_changed_metadata_but_accepts_matching_echoes() {
             "renewal changed the hub credential domain",
         ),
         (
-            "box_id",
-            json!("fedcba9876543210fedcba9876543210"),
-            "renewal changed the hub credential box id",
-        ),
-        (
             "inbox_prefix",
             json!("ckdel.0123456789abcdef0123456789abcdef.other_module"),
             "renewal changed the inbox prefix",
@@ -489,6 +486,27 @@ async fn hub_renewal_refuses_changed_metadata_but_accepts_matching_echoes() {
     let manager = CredentialManager::start_hub(issuer, MODULE).await.unwrap();
     manager.renew().await.unwrap();
     assert_eq!(manager.credential().await.jwt, "hub-renewed-jwt");
+}
+
+#[tokio::test]
+async fn hub_box_id_is_unchanged_when_renewal_refuses_a_different_box() {
+    let server = Server::start().await;
+    let issuer = Arc::new(HubIssuer {
+        url: server.url.clone(),
+        renew_fields: vec![("box_id", json!("fedcba9876543210fedcba9876543210"))],
+        ..Default::default()
+    });
+    let manager = CredentialManager::start_hub(issuer, MODULE).await.unwrap();
+    let hub = HubClient::connect_manager(manager.clone(), TIMEOUT)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        manager.renew().await,
+        Err(Error::Reply("renewal changed the hub credential box id"))
+    ));
+    assert_eq!(manager.credential().await.jwt, "hub-jwt-0");
+    assert_eq!(hub.box_id().as_ref().map(|id| id.as_str()), Some(BOX));
 }
 
 #[tokio::test]
@@ -533,6 +551,7 @@ async fn hub_and_box_replacements_are_independent() {
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(hub.box_id().as_ref().map(|id| id.as_str()), Some(BOX));
     assert_eq!(*hub_changes.borrow(), 1);
     assert!(!box_changes.has_changed().unwrap());
     new_box.flush().await.unwrap();

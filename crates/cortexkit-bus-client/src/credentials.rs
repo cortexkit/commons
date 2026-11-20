@@ -121,6 +121,10 @@ pub(crate) struct Credential {
 }
 
 impl Credential {
+    pub(crate) fn box_id(&self) -> Option<BoxId> {
+        self.box_id.clone()
+    }
+
     fn parse(value: Value, hub_module: Option<&str>) -> Result<Self> {
         let hub_box = if hub_module.is_some() {
             if value["domain"].as_str() != Some(HUB_DOMAIN) {
