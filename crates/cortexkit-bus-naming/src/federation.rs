@@ -90,11 +90,7 @@ impl std::error::Error for InvalidBoxId {}
 impl BoxId {
     /// Refuses alternate spellings because the id is embedded in stream permissions.
     pub fn parse(value: &str) -> Result<Self, InvalidBoxId> {
-        if value.len() != 32
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
+        if !is_lowercase_hex(value, 32) {
             return Err(InvalidBoxId);
         }
         Ok(Self(value.to_owned()))
@@ -119,8 +115,71 @@ impl fmt::Display for BoxId {
     }
 }
 
-pub fn hub_inbox_stream_name(box_id: &BoxId) -> String {
-    format!("HUB_INBOX_{box_id}")
+/// The first 16 lowercase hex characters of the SHA-256 pin of a hub's
+/// Subject Public Key Info (SPKI).
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct HubName(String);
+
+/// The supplied hub name or key pin had the wrong length or was not lowercase hexadecimal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidHubName;
+
+impl fmt::Display for InvalidHubName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            "expected a 16-character hub name or 64-character key pin in lowercase hexadecimal",
+        )
+    }
+}
+
+impl std::error::Error for InvalidHubName {}
+
+impl HubName {
+    /// Validates the entire key pin before taking its first 16 characters.
+    pub fn from_key_pin(value: &str) -> Result<Self, InvalidHubName> {
+        if !is_lowercase_hex(value, 64) {
+            return Err(InvalidHubName);
+        }
+        Ok(Self(value[..16].to_owned()))
+    }
+
+    /// Parses the canonical short form used in stream names and permissions.
+    pub fn parse(value: &str) -> Result<Self, InvalidHubName> {
+        if !is_lowercase_hex(value, 16) {
+            return Err(InvalidHubName);
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for HubName {
+    type Err = InvalidHubName;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+impl fmt::Display for HubName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+fn is_lowercase_hex(value: &str, len: usize) -> bool {
+    value.len() == len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Names the per-machine inbox separately on each hub so purge subjects are hub-specific.
+pub fn hub_inbox_stream_name(box_id: &BoxId, hub_name: &HubName) -> String {
+    format!("HUB_INBOX_{box_id}_{hub_name}")
 }
 
 pub fn inbox_stream_name(box_id: &BoxId) -> String {
@@ -217,14 +276,14 @@ impl KvBucketSpec {
     }
 }
 
-pub fn hub_inbox_stream(box_id: &BoxId) -> HubStreamSpec {
+pub fn hub_inbox_stream(box_id: &BoxId, hub_name: &HubName) -> HubStreamSpec {
     let subjects = FEDERATED_FAMILIES
         .iter()
         .map(|family| format!("ck.{box_id}.{family}.>"))
         .collect();
     let mut stream = StreamSpec::new(
         StreamKind::HubInbox,
-        hub_inbox_stream_name(box_id),
+        hub_inbox_stream_name(box_id, hub_name),
         subjects,
     );
     stream.max_age = HOUR * 24 * 7;
@@ -359,9 +418,9 @@ pub fn cuts_object_store() -> HubStreamSpec {
 }
 
 /// Provision these only on a hub, never on the machine's local server.
-pub fn hub_streams(box_id: &BoxId, hub: HubKind) -> Vec<HubStreamSpec> {
+pub fn hub_streams(box_id: &BoxId, hub_name: &HubName, hub: HubKind) -> Vec<HubStreamSpec> {
     vec![
-        hub_inbox_stream(box_id),
+        hub_inbox_stream(box_id, hub_name),
         hub_idlog_stream(),
         hub_rooms_stream(),
         hub_memory_stream(),
@@ -386,13 +445,14 @@ impl LeafUserGrant {
     }
 }
 
-pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
+/// Grants inbox operations only on the issuing hub's per-machine stream.
+pub fn leaf_user_grant(box_id: &BoxId, hub_name: &HubName) -> LeafUserGrant {
     let mut publish: Vec<String> = FEDERATED_FAMILIES
         .iter()
         .map(|family| format!("ck.*.{family}.>"))
         .collect();
     publish.extend(["$JS.FC.>", "$JS.ACK.>", "_INBOX.>"].map(str::to_owned));
-    let inbox = hub_inbox_stream_name(box_id);
+    let inbox = hub_inbox_stream_name(box_id, hub_name);
     // Sources create an unnamed consumer on the bare subject, not its `.>` form.
     for suffix in [
         format!("CONSUMER.CREATE.{inbox}"),
@@ -407,7 +467,6 @@ pub fn leaf_user_grant(box_id: &BoxId) -> LeafUserGrant {
     publish.extend([
         format!("{HUB_API_PREFIX}.$KV.{RESIDENCE_BUCKET}.>"),
         // Vault writes must stay under the leaf's own box ID.
-        format!("$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
         format!("{HUB_API_PREFIX}.$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
         format!("{HUB_API_PREFIX}.$KV.{VAULT_MANIFEST_ACTIVE_BUCKET}.{box_id}"),
         format!("$O.{CUTS_BUCKET}.>"),
@@ -518,7 +577,6 @@ pub fn hub_module_grant(box_id: &BoxId, module_id: &str) -> Option<HubUserGrant>
         HUB_VAULT_MODULE => (
             &[VAULT_SHARED_LOGINS_STREAM, VAULT_MANIFEST_ACTIVE_STREAM],
             vec![
-                format!("$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
                 format!("{HUB_API_PREFIX}.$KV.{VAULT_SHARED_LOGINS_BUCKET}.{box_id}.>"),
                 format!("{HUB_API_PREFIX}.$KV.{VAULT_MANIFEST_ACTIVE_BUCKET}.{box_id}"),
                 format!("{HUB_API_PREFIX}.STREAM.MSG.GET.{VAULT_SHARED_LOGINS_STREAM}"),
@@ -573,9 +631,10 @@ mod tests {
 
     #[test]
     fn federation_leaf_grant_covers_every_hub_module_grant() {
+        let hub_name = HubName::parse("0f1e2d3c4b5a6978").unwrap();
         for id in [SAMPLE_BOX, OTHER_BOX] {
             let box_id = BoxId::parse(id).unwrap();
-            let leaf = leaf_user_grant(&box_id);
+            let leaf = leaf_user_grant(&box_id, &hub_name);
             for module in HUB_MODULES.into_iter().chain([HUB_ROOMS_MODULE_LEGACY]) {
                 let grant = hub_module_grant(&box_id, module).unwrap();
                 for (operation, module_allows, leaf_allows) in [
@@ -651,21 +710,15 @@ mod tests {
                     .any(|allow| subject_filters_overlap(allow, subject).unwrap())
             };
             // A put and a delete marker publish to the same key subject.
-            for bucket in [
-                "$KV.vault-shared-logins",
-                "$JS.hub.API.$KV.vault-shared-logins",
+            let bucket = "$JS.hub.API.$KV.vault-shared-logins";
+            let own_key = format!("{bucket}.{home}.{foreign}");
+            assert!(may_publish(&own_key), "missing write to {own_key}");
+            for subject in [
+                format!("{bucket}.{foreign}.{home}"),
+                format!("{bucket}.{home}"),
+                "$KV.vault-shared-logins.>".to_owned(),
             ] {
-                let own_key = format!("{bucket}.{home}.{foreign}");
-                let foreign_key = format!("{bucket}.{foreign}.{home}");
-                assert!(may_publish(&own_key), "missing write to {own_key}");
-                assert!(
-                    !may_publish(&foreign_key),
-                    "unexpected write to {foreign_key}"
-                );
-                assert!(
-                    !may_publish(&format!("{bucket}.{home}")),
-                    "allowed key without member token"
-                );
+                assert!(!may_publish(&subject), "unexpected write to {subject}");
             }
             assert!(may_publish(&format!(
                 "$JS.hub.API.$KV.vault-manifest-active.{home}"

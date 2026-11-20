@@ -81,6 +81,12 @@ ids. `AccountNames::fedsend` and `AccountNames::inbound_federated` validate a
 family from `room`, `wake`, `peer`, `sync` and a nonempty list of destination
 tokens. Stream descriptors require file storage.
 
+Each hub provisions `HUB_INBOX_{box}_{hub}` for a computer. Use
+`HubName::from_key_pin` with the full lowercase hexadecimal SHA-256 pin of the
+hub's Subject Public Key Info (SPKI) to construct the 16-character hub name.
+Pass the same hub name when building its streams and leaf grant so inbox
+operations, including purge, name the issuing hub's stream.
+
 Every box-account user must receive `box_account_denies(&account)` alongside its
 allow list, including bus and system users. These explicit denies protect the
 `ck.{acct}.*.fed.>` namespace from forged origins even if an allow list is broad.
@@ -115,8 +121,9 @@ users have the same read and consumer APIs as for `HUB_ROOMS`, not purge or
 deletion access to stored changes.
 
 The vault module can read and watch all of `vault-shared-logins`, but can write
-only lists whose key starts with its own box ID. Shared-login confidentiality
-comes from sealing each list to its recipient, not from the hub read grant.
+only lists whose key starts with its own box ID, through the `$JS.hub.API`
+prefix. Shared-login confidentiality comes from sealing each list to its
+recipient, not from the hub read grant.
 Both vault buckets disable rollup headers: a stream-wide rollup from any
 writer could otherwise remove records outside its own keys.
 

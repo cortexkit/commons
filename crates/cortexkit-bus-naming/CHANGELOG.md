@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.9
+
+- Breaking API change: `hub_inbox_stream_name`, `hub_inbox_stream`, `hub_streams`,
+  and `leaf_user_grant` now require the issuing hub's `HubName`, derived from its
+  key pin. `HUB_INBOX_{box}_{hub}` scopes the inbox APIs, including purge, to that
+  hub without changing stream subjects or retention.
+- Remove raw `vault-shared-logins` publish permissions from the vault user and
+  machine leaf grants. Writes still use the hub API prefix and the writer's own
+  box ID.
+
 ## 0.5.8
 
 - Include both vault KV buckets in the machine leaf grant while keeping writes

@@ -43,7 +43,6 @@
         "$JS.hub.API.CONSUMER.CREATE.KV_vault-manifest-active.>",
         "$JS.hub.API.CONSUMER.INFO.KV_vault-manifest-active.>",
         "$JS.hub.API.CONSUMER.DELETE.KV_vault-manifest-active.>",
-        "$KV.vault-shared-logins.0123456789abcdef0123456789abcdef.>",
         "$JS.hub.API.$KV.vault-shared-logins.0123456789abcdef0123456789abcdef.>",
         "$JS.hub.API.$KV.vault-manifest-active.0123456789abcdef0123456789abcdef",
         "$JS.hub.API.STREAM.MSG.GET.KV_vault-shared-logins",

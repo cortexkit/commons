@@ -12,17 +12,65 @@ use cortexkit_bus_naming::{
 use serde_json::{json, Value};
 
 const SAMPLE_BOX: &str = "0123456789abcdef0123456789abcdef";
+// This synthetic key pin is only used in fixtures and tests.
+const SAMPLE_HUB_KEY_PIN: &str = "0f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a6978";
+const OTHER_HUB_NAME: &str = "98badcfe10325476";
 
 fn sample_box() -> BoxId {
     BoxId::parse(SAMPLE_BOX).unwrap()
+}
+
+fn sample_hub() -> HubName {
+    HubName::from_key_pin(SAMPLE_HUB_KEY_PIN).unwrap()
+}
+
+#[test]
+fn federation_hub_name_validates_the_short_name_and_entire_pin() {
+    let short = "0f1e2d3c4b5a6978";
+    let parsed: HubName = short.parse().unwrap();
+    assert_eq!(parsed.as_str(), short);
+    assert_eq!(parsed.to_string(), short);
+    let pin = format!("{short}{}", "9".repeat(48));
+    assert_eq!(HubName::from_key_pin(&pin), Ok(parsed));
+
+    for value in [
+        "",
+        "0f1e2d3c4b5a697",
+        "0f1e2d3c4b5a69780",
+        "0F1e2d3c4b5a6978",
+        "0g1e2d3c4b5a6978",
+        "0f1e2d3c4b5a697>",
+        "0f1e2d3c4b5a697 ",
+        "é1e2d3c4b5a6978",
+        SAMPLE_HUB_KEY_PIN,
+    ] {
+        assert_eq!(HubName::parse(value), Err(InvalidHubName), "{value:?}");
+    }
+
+    for value in [
+        short.to_owned(),
+        "0".repeat(63),
+        "0".repeat(65),
+        format!("{short}{}F", "0".repeat(47)),
+        format!("{short}{}g", "0".repeat(47)),
+        format!("{short}{}\n", "0".repeat(47)),
+        format!("{short}{}é", "0".repeat(46)),
+        format!("0x{}", "0".repeat(62)),
+    ] {
+        assert_eq!(
+            HubName::from_key_pin(&value),
+            Err(InvalidHubName),
+            "{value:?}"
+        );
+    }
 }
 
 #[test]
 fn federation_names_and_module_prefixes_are_exact() {
     let box_id = sample_box();
     assert_eq!(
-        hub_inbox_stream_name(&box_id),
-        "HUB_INBOX_0123456789abcdef0123456789abcdef"
+        hub_inbox_stream_name(&box_id, &sample_hub()),
+        "HUB_INBOX_0123456789abcdef0123456789abcdef_0f1e2d3c4b5a6978"
     );
     assert_eq!(
         inbox_stream_name(&box_id),
@@ -47,12 +95,14 @@ fn federation_names_and_module_prefixes_are_exact() {
 #[test]
 fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
     let box_id = sample_box();
+    let hub_name = sample_hub();
     let local = shipped_streams(&AccountNames::derive("box_example").unwrap());
     for hub in [HubKind::SelfHosted, HubKind::Hosted] {
-        let specs = hub_streams(&box_id, hub);
+        let specs = hub_streams(&box_id, &hub_name, hub);
         let streams: Vec<_> = specs.iter().map(|spec| spec.stream.clone()).collect();
         validate_streams(&streams).unwrap();
         assert_eq!(specs.len(), 8);
+        assert!(specs.contains(&hub_inbox_stream(&box_id, &hub_name)));
         assert!(specs.contains(&hub_memory_stream()));
         assert!(specs.contains(&vault_shared_logins_bucket(hub).backing_stream));
         assert!(specs.contains(&vault_manifest_active_bucket(hub).backing_stream));
@@ -77,7 +127,7 @@ fn federation_hub_streams_keep_their_bounds_and_do_not_enter_local_rows() {
             | StreamKind::Fedout
     )));
 
-    let inbox = hub_inbox_stream(&box_id).stream;
+    let inbox = hub_inbox_stream(&box_id, &hub_name).stream;
     assert_eq!(inbox.max_age, HOUR * 24 * 7);
     assert_eq!(inbox.discard, DiscardPolicy::New);
     assert_eq!(inbox.subjects.len(), 4);
@@ -213,12 +263,55 @@ fn federation_streams_route_local_and_inbound_publishes_to_distinct_bindings() {
 }
 
 #[test]
+fn federation_leaf_grants_scope_inbox_apis_to_issuing_hub() {
+    let box_id = sample_box();
+    for (hub_name, own, other) in [
+        (sample_hub(), "0f1e2d3c4b5a6978", OTHER_HUB_NAME),
+        (
+            HubName::parse(OTHER_HUB_NAME).unwrap(),
+            OTHER_HUB_NAME,
+            "0f1e2d3c4b5a6978",
+        ),
+    ] {
+        let grant = leaf_user_grant(&box_id, &hub_name);
+        let stream = format!("HUB_INBOX_{SAMPLE_BOX}_{own}");
+        let inbox_entries: Vec<_> = grant
+            .publish
+            .iter()
+            .filter(|subject| subject.contains("HUB_INBOX_"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            inbox_entries,
+            [
+                format!("$JS.hub.API.CONSUMER.CREATE.{stream}"),
+                format!("$JS.hub.API.CONSUMER.CREATE.{stream}.>"),
+                format!("$JS.hub.API.CONSUMER.INFO.{stream}.>"),
+                format!("$JS.hub.API.CONSUMER.DELETE.{stream}.>"),
+                format!("$JS.hub.API.STREAM.INFO.{stream}"),
+                format!("$JS.hub.API.STREAM.PURGE.{stream}"),
+            ]
+        );
+        assert!(
+            grant
+                .publish
+                .iter()
+                .chain(&grant.subscribe)
+                .all(|subject| !subject.contains(other)),
+            "grant for {own} names hub {other}"
+        );
+    }
+}
+
+#[test]
 fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
+    let hub_name = sample_hub();
     for box_text in [SAMPLE_BOX, "fedcba9876543210fedcba9876543210"] {
         let box_id = BoxId::parse(box_text).unwrap();
-        let grant = leaf_user_grant(&box_id);
-        assert_eq!(grant.publish.len(), 77);
+        let grant = leaf_user_grant(&box_id, &hub_name);
+        assert_eq!(grant.publish.len(), 76);
         assert_eq!(grant.subscribe.len(), 5);
+        let inbox_suffix = format!("{box_text}_{hub_name}");
         for entries in [&grant.publish, &grant.subscribe] {
             assert_eq!(entries.iter().collect::<BTreeSet<_>>().len(), entries.len());
             assert!(entries
@@ -226,10 +319,9 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
                 .all(|subject| !subject.split('.').any(|token| token == "effect")));
             for subject in entries {
                 for token in subject.split('.') {
-                    if let Some(suffix) = token
-                        .strip_prefix("HUB_INBOX_")
-                        .or_else(|| token.strip_prefix("INBOX_"))
-                    {
+                    if let Some(suffix) = token.strip_prefix("HUB_INBOX_") {
+                        assert_eq!(suffix, inbox_suffix, "{subject}");
+                    } else if let Some(suffix) = token.strip_prefix("INBOX_") {
                         assert_eq!(suffix, box_text, "{subject}");
                     }
                 }
@@ -246,7 +338,12 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
         } else {
             SAMPLE_BOX
         };
-        for stream in [format!("HUB_INBOX_{foreign}"), format!("INBOX_{foreign}")] {
+        for stream in [
+            format!("HUB_INBOX_{foreign}_{hub_name}"),
+            format!("HUB_INBOX_{box_id}_{OTHER_HUB_NAME}"),
+            format!("HUB_INBOX_{box_id}"),
+            format!("INBOX_{foreign}"),
+        ] {
             for suffix in [
                 "CONSUMER.CREATE",
                 "CONSUMER.INFO",
@@ -287,18 +384,17 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
                 stream == CUTS_STREAM
             );
         }
-        assert!(may_publish(&format!(
-            "$JS.hub.API.CONSUMER.CREATE.HUB_INBOX_{box_id}"
-        )));
         assert!(!may_publish("$KV.residence.key"));
         assert!(!may_publish("$JS.hub.API.$KV.other.key"));
-        for prefix in [
-            "$KV.vault-shared-logins",
-            "$JS.hub.API.$KV.vault-shared-logins",
-        ] {
-            assert!(may_publish(&format!("{prefix}.{box_id}.{foreign}")));
-            assert!(!may_publish(&format!("{prefix}.{foreign}.{box_id}")));
-        }
+        let shared_logins = "$JS.hub.API.$KV.vault-shared-logins";
+        assert!(may_publish(&format!("{shared_logins}.{box_id}.{foreign}")));
+        assert!(!may_publish(&format!("{shared_logins}.{foreign}.{box_id}")));
+        assert!(!may_publish(&format!(
+            "$KV.vault-shared-logins.{box_id}.{foreign}"
+        )));
+        assert!(!may_publish(&format!(
+            "$KV.vault-shared-logins.{foreign}.{box_id}"
+        )));
         let manifest = "$JS.hub.API.$KV.vault-manifest-active";
         assert!(may_publish(&format!("{manifest}.{box_id}")));
         assert!(!may_publish(&format!("{manifest}.{foreign}")));
@@ -394,7 +490,8 @@ fn bucket_json(bucket: KvBucketSpec) -> Value {
 #[test]
 fn federation_golden_matches_bytes() {
     let box_id = sample_box();
-    let grant = leaf_user_grant(&box_id);
+    let hub_name = sample_hub();
+    let grant = leaf_user_grant(&box_id, &hub_name);
     let document = json!({
         "box_id": box_id.as_str(),
         "domain": HUB_DOMAIN,
@@ -410,7 +507,7 @@ fn federation_golden_matches_bytes() {
         },
         "grant": { "publish": grant.publish, "subscribe": grant.subscribe },
         "streams": {
-            "hub_inbox": stream_json(&hub_inbox_stream(&box_id)),
+            "hub_inbox": stream_json(&hub_inbox_stream(&box_id, &hub_name)),
             "hub_idlog": stream_json(&hub_idlog_stream()),
             "hub_rooms": stream_json(&hub_rooms_stream()),
             "hub_memory": stream_json(&hub_memory_stream()),

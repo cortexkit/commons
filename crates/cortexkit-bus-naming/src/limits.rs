@@ -637,7 +637,7 @@ fn pattern_subset(candidate: &[&str], binding: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::federation::{fedout_stream, hub_streams, BoxId, HubKind};
+    use crate::federation::{fedout_stream, hub_streams, BoxId, HubKind, HubName};
     use crate::{
         delivery_consumer_specs, event_consumer_specs, federation_consumer_specs,
         flow_engine_consumer_spec,
@@ -656,12 +656,13 @@ mod tests {
     #[test]
     fn shipped_stream_and_consumer_subjects_do_not_overlap_within_specs() {
         let box_id = BoxId::parse("0123456789abcdef0123456789abcdef").unwrap();
+        let hub_name = HubName::parse("0f1e2d3c4b5a6978").unwrap();
         let account = AccountNames::from_roster_host_id(box_id.as_str()).unwrap();
         let mut overlaps = Vec::new();
         let streams = shipped_streams(&account).into_iter().chain(
             [HubKind::SelfHosted, HubKind::Hosted]
                 .into_iter()
-                .flat_map(|hub| hub_streams(&box_id, hub))
+                .flat_map(|hub| hub_streams(&box_id, &hub_name, hub))
                 .map(|spec| spec.stream)
                 .chain(std::iter::once(fedout_stream())),
         );

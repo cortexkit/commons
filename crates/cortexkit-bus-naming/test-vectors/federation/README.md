@@ -2,10 +2,12 @@
 
 `hub.json` pins the names, hub stream descriptors, and permissions a machine
 uses to connect to the hub as a leaf. The sample box is
-`0123456789abcdef0123456789abcdef`. Both self-hosted and hosted issuers use the
-same grant. The fixture lists each KV bucket twice: with one
-replica on a self-hosted hub and three on a hosted hub. The example module name
-only shows how a module's deliver prefix is formed
+`0123456789abcdef0123456789abcdef`. The synthetic hub key pin is
+`0f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a69780f1e2d3c4b5a6978`,
+so the hub inbox name ends in `_0f1e2d3c4b5a6978`. The leaf grant names that
+inbox regardless of whether the hub is self-hosted or hosted. The fixture
+lists each KV bucket twice: with one replica on a self-hosted hub and three on
+a hosted hub. The example module name only shows how a deliver prefix is formed
 (`ckdel.<box id>.<module>`); it names no real module.
 These hub streams must not be provisioned on a machine's local server.
 
