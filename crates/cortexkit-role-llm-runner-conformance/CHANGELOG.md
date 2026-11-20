@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.80
+
+- Track llm-runner `=0.8.66`.
+
 ## 0.17.79
 
 - Pin llm-runner `=0.8.65` for the host-drain wait clarification.

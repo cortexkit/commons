@@ -314,6 +314,8 @@ pub mod interrupt_reasons {
     /// The harness host the runner drives exited while the runner itself
     /// stayed up, so the run could not continue.
     pub const HOST_EXITED: &str = "host_exited";
+    /// The host aborted the turn while its process kept running.
+    pub const HOST_INTERRUPTED: &str = "host_interrupted";
 }
 
 /// What a final message's text parts are joined with: nothing. Text parts
@@ -1433,5 +1435,23 @@ mod interrupt_reason_tests {
         );
         let old: RunResult = serde_json::from_value(file["results"][2].clone()).unwrap();
         assert_eq!(old.reason, None);
+    }
+
+    #[test]
+    fn host_interrupted_sample_preserves_reason_in_result_and_status() {
+        let file = vectors::load("host-interrupted.json");
+        let result: RunResult = vectors::round_trip("run.result", &file["run_result"]);
+        let status: RunStatus = serde_json::from_value(file["run_status"].clone()).unwrap();
+
+        assert_eq!(result.run_state(), RunState::Interrupted);
+        assert_eq!(status.run_state(), RunState::Interrupted);
+        assert_eq!(
+            result.reason.as_deref(),
+            Some(interrupt_reasons::HOST_INTERRUPTED)
+        );
+        assert_eq!(
+            serde_json::to_value(&status).unwrap()["reason"],
+            interrupt_reasons::HOST_INTERRUPTED
+        );
     }
 }

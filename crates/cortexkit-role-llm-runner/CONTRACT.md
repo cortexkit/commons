@@ -2797,6 +2797,8 @@ whichever runner served it.
   `host_unknown` (`HOST_UNKNOWN`) records an owner's Stop or interrupt of
   a session's turn whose host liveness is unknown. No host request is sent
   for that immediate settlement.
+  Unlike `host_exited`, `host_interrupted` (`HOST_INTERRUPTED`) means the
+  host aborted the turn while its process kept running.
   Runner-specific values are allowed: `reason` stays decoded open, with no
   new wire member.
 - [pinned] The recorded value is the same on `run.result`, `run.status` and
@@ -2805,6 +2807,8 @@ whichever runner served it.
   sealed before the runner adopted this group), never a reason guessed
   from the current process's lifetime. `check_describe` checks the group
   for `run.result`; it adds no discovery metadata.
+- [pinned] `test-vectors/llm-runner-v1/host-interrupted.json` shows the same
+  `host_interrupted` reason on `run.result` and `run.status`.
 
 ### 6.6 `finish_reason`: normalized last-model-step finish
 

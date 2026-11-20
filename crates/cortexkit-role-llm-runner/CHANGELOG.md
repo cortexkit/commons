@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.66
+
+- Name `host_interrupted` for a turn the host aborted without exiting.
+  Interrupt reasons remain an open set; readers preserve unknown values.
+
 ## 0.8.65
 
 - §9: a host drain before a planned host update is an untimed wait, never `host_unavailable`.

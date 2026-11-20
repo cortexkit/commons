@@ -1,0 +1,55 @@
+{
+  "run_result": {
+    "finish": "tool_calls",
+    "reason": "host_interrupted",
+    "run_id": "run-host-interrupted",
+    "state": "interrupted",
+    "usage": {
+      "by_model": [
+        {
+          "cache_write_tokens": 0,
+          "cached_input_tokens": 0,
+          "input_tokens": 1000,
+          "model": "example-model",
+          "output_tokens": 50,
+          "provider": "anthropic",
+          "steps": 1,
+          "unreported_steps": 0
+        }
+      ],
+      "cache_write_tokens": 0,
+      "cached_input_tokens": 0,
+      "input_tokens": 1000,
+      "output_tokens": 50,
+      "steps": 1,
+      "unreported_steps": 0
+    }
+  },
+  "run_status": {
+    "final_step_finish_reason": "tool_use",
+    "finish": "tool_calls",
+    "reason": "host_interrupted",
+    "state": "interrupted",
+    "undelivered_steers": [],
+    "usage": {
+      "by_model": [
+        {
+          "cache_write_tokens": 0,
+          "cached_input_tokens": 0,
+          "input_tokens": 1000,
+          "model": "example-model",
+          "output_tokens": 50,
+          "provider": "anthropic",
+          "steps": 1,
+          "unreported_steps": 0
+        }
+      ],
+      "cache_write_tokens": 0,
+      "cached_input_tokens": 0,
+      "input_tokens": 1000,
+      "output_tokens": 50,
+      "steps": 1,
+      "unreported_steps": 0
+    }
+  }
+}
