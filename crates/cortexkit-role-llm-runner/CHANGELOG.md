@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Contract text only: `session.subscribe` is the only surface for `tool_changed`, and its frame may carry a unit such as the message boundary of the refused call.
+
 ## 0.9.0
 
 - Add `tool_versions`, refresh `refetch`, `tool_changed` and compatible tool updates at prefix rebuilds.

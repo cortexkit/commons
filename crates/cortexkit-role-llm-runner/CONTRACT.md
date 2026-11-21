@@ -3056,8 +3056,11 @@ new members.
   - `tool_changed {provider, tool, expected, current}` when a dispatched call
     is refused `tool_major_changed`, only with `tool_versions` (§10.2). Both
     pins are copied from the refusal, and `provider` is the plan's provider
-    id. The runner also emits the same event in the run's events. Recognizing
-    it does not reset the display lane. An older lenient live decoder treats
+    id. `session.subscribe` is its only surface: a worker run's owner holds a
+    subscription on the worker's session too, and the lifecycle events a run
+    publishes do not carry it. A `tool_changed` frame may carry a unit, as
+    other control events do, such as the boundary of the message whose call
+    was refused. Recognizing it does not reset the display lane. An older lenient live decoder treats
     it as `display_reset`; an older strict decoder refuses the unknown type.
     Upgrade event readers before runners start emitting it.
   - `message_started {mid, live_id?}` and `message_finished {mid}` for every stored
@@ -7458,7 +7461,7 @@ every request, answer and refusal.
 - [pinned] A different major is never taken by this rule. When a dispatched
   call receives `tool_major_changed`, the runner records that call's error
   result, never re-dispatches it, and emits `tool_changed` on
-  `session.subscribe` (§7.1) and in the run's events. The owner can then
+  `session.subscribe` (§7.1). The owner can then
   request a refresh. Recovery always restores the recorded surface first.
 
 **Opt-in `plan_notes`.**
