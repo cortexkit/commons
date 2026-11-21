@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.39
+
+- Clarify that LLM lease renewal is optional and reports, including
+  `run_finished`, keep using the original admission id after renewal. Explain
+  what the lease controls and distinguish it from the 30-minute idle release
+  and seven-day account affinity. No wire changes.
+
 ## 0.7.38
 
 - Add `select_harness_capabilities` and optional `harness_capabilities` on

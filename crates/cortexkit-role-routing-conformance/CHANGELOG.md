@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.44
+
+- Pin routing `=0.7.39` for the LLM lease and admission reporting clarification.
+
 ## 0.10.43
 
 - Pin routing `=0.7.38`. Check explicit and inferred harness-capability

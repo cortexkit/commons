@@ -801,10 +801,11 @@ That group's additive defaults, attested namespace and selector rules are in §1
   plan row with an optional operator override. If neither states a cap, the
   cap is unknown and there is no limit. A cap is never zero and is never
   learned from rate-limit errors. This contract fixes the rules, not cap values.
-- [pinned] One started run counts as one slot until it finishes. A reserved,
-  unstarted admission also counts during its validity window, so simultaneous
-  admissions cannot all take the last slot. Interactive head turns count toward
-  the cap but are never refused for concurrency; the router recognizes them
+- [pinned] One started run counts as one slot until it finishes or the router
+  releases it for idleness (§9.2). A reserved, unstarted admission also counts
+  during its validity window, so simultaneous admissions cannot all take the
+  last slot. Interactive head turns count toward the cap but are never refused
+  for concurrency; the router recognizes them
   from the attested caller's head scope, or from `head_turn` sent by an
   attested runner under §9.1's `account_head_turn` rules, never from a
   consumer's priority declaration.
@@ -1269,9 +1270,9 @@ the routing provider allocates (subscription logins).
   the parent's account when no other is eligible. The parent conversation
   is on an account while its conversation key holds a live pin there: the
   account answered by the latest `admit`, `renew` or `reassign` for that
-  key, whether or not `admission_started` has been observed. The pin stops
-  counting when it lapses: an admission never started at
-  `admission_valid_until_ms`, a started one at `lease_valid_until_ms`.
+  key, whether or not `admission_started` has been observed. For this
+  preference, an unstarted admission stops counting as live at
+  `admission_valid_until_ms`, and a started one at `lease_valid_until_ms`.
 - [pinned] `pool` (optional): the quota pool the requested model draws from,
   as the runner names it (§2).
 - [pinned] `admission_id` (required, non-empty, at most 128 characters):
@@ -1296,7 +1297,7 @@ the routing provider allocates (subscription logins).
   `warm_credential` or `fork_of` leaves existing request bodies and fingerprints
   unchanged. A different `fork_of` under the same `admission_id` is
   `admission_conflict`.
-- [pinned] `mode`: `admit` (the default), `renew` (extend the current pin)
+- [pinned] `mode`: `admit` (the default), `renew` (extend the shared pin's lease)
   or `reassign` (a different account after the current one failed).
   `renew` and `reassign` require `expected_pin {id, generation}`; without
   it the request is `invalid_request {field: "expected_pin"}`, and a stale
@@ -1408,8 +1409,15 @@ The answer (`account::AccountForAnswer`):
   neither `admitted` nor any other state word is required. Successful admissions
   are identified by the matching admission id, account provider, and decision id
   when the request carries one.
-- [pinned] The runner renews before `lease_valid_until_ms`, and reassigns
-  after the account fails.
+- [pinned] Renewal for LLM runs is optional. The two-minute lease, which ends
+  at `lease_valid_until_ms`, only controls whether a started admission counts
+  as live for `parent_conversation_key` and whether the shared pin's lease is
+  current. It does not control how long a run counts toward concurrency or
+  how long account affinity lasts (§9.2).
+- [pinned] A runner that sends `mode: "renew"` uses a fresh `admission_id`.
+  The answer echoes that id; the runner still sends observations, including
+  `run_finished`, under the run's original `admission_id` (§9.2).
+- [pinned] The runner reassigns after the account fails.
 - [pinned] Top-level `service_tier_chosen` records the admitted tier, as an
   open string like select's record, not an additional pin member. An explicit
   tier request always receives it, including fallback to `standard`. A
@@ -1471,6 +1479,7 @@ The answer (`account::AccountForAnswer`):
 - [pinned] The request is `{mode: "continue", run_id, admission_id,
   conversation_key, previous_decision_id, exhausted, selection_id}`.
   `admission_id` always stays the original admission, not a new one.
+  A lapsed lease does not prevent continuation.
   `previous_decision_id` names the decision the run is currently using:
   the admitted select decision, or, after an earlier switch, the offered
   decision it switched to. For a run admitted without a select decision,
@@ -1585,8 +1594,8 @@ The answer (`account::AccountForAnswer`):
   not used by `valid_until_ms` is released.
 - [pinned] Observations after a move stay under the original `admission_id`
   and name the account in use; they carry no decision id. One `run_finished`
-  under the original admission ends the run's lease and every reservation
-  the run holds, the original one and each used offer alike.
+  under the original admission frees the run's concurrency slot and releases
+  every reservation the run holds, the original one and each used offer alike.
 - [pinned] `hold` is not an error: no compatible account is available right
   now. It carries `{until_ms?, routing_code, detail}`. The run stays paused;
   the runner asks again at `until_ms` or on its own wake, with a new selection
@@ -1679,8 +1688,17 @@ What a runner saw on an account, so the provider's headroom stays current.
   `invalid_request {field: "headers"}`.
 - [pinned] In `headers` and `limit_window`, a disabled usage window is left
   out of a reading, never sent with a stale fraction.
-- [pinned] `account_observe {kind: run_finished}` releases the runner's
-  account pin; `lease_valid_until_ms` is only the backstop.
+- [pinned] For LLM runs, `attempt`, `account_limit_exhausted`,
+  `transient_backoff` and `run_finished` bind to the run's original
+  `admission_id` even after the lease lapses. Keep sending these observations
+  under the original id after a renewal, not under the renewal's id.
+- [pinned] For an LLM run, `run_finished` under the original admission frees its
+  concurrency slot. Without that finish, a started run counts until 30 minutes
+  after its last observation. Observations bound to the original admission
+  keep the run live without renewal. Finishing only the renewal id leaves the
+  original run counted until that idle release. The conversation's account
+  affinity pin lasts for 7 days after the last accepted admission, independent
+  of the lease or the run's finish.
 - [pinned] The answer (`observe::AccountObserveAnswer`) is
   `{observation: {id, duplicate, bound, effects}}`. `bound` says whether
   the observation matched an admission; `effects` lists, in the provider's
@@ -1707,7 +1725,7 @@ What a runner saw on an account, so the provider's headroom stays current.
   `invalid_request {field: "admission_id"}`. New admissions on that account
   stop for every runner until `retry_at_ms`. Past times are recorded with no
   fence; times over 24 hours out are capped at 24 hours (`RESET_FENCE_CAP_MS`).
-  The current pin stays; only `run_finished` releases it.
+  Backoff does not finish the run or clear its account affinity pin.
 - [pinned] `observe_credential_refused` adds `kind: "credential_refused"`, with
   the same meaning as report `refusal_class: credential_refused` (§8). It names
   `credential_id`, or else the admission's credential through `admission_id`;
@@ -1761,13 +1779,13 @@ What a runner saw on an account, so the provider's headroom stays current.
     §9's runner rule. All kinds are allowed. `decision_id` is informative and
     never refused: it may belong to another consumer or be an `account_continue`
     offer the admission never carried. Authorization follows the admission,
-    not decision ownership, so `run_finished` can still release the pin.
+    not decision ownership, so the runner can still send `run_finished`.
   - `DecisionOwner {decision_id: D, admission_id, carried}`: the caller owns
     a select or panel decision D. Only the kinds that block allocation
     (`account_limit_exhausted`,
     `transient_backoff`, `credential_refused`) are allowed, only naming D and
     that admission, and only if the admission's `account_for` carried D. A
-    decision owner cannot release or reshape a runner's pin.
+    decision owner cannot finish the run or reshape a runner's pin.
   - `Other`: neither arm, including foreign or non-select decisions from a
     non-runner; refused.
   Every authorization refusal is `account_not_authorized`, never
@@ -1781,14 +1799,14 @@ What a runner saw on an account, so the provider's headroom stays current.
 
 - [pinned] Pooled API keys need no second lease mechanism. The select answer's
   `runner.auth` (`select::RunnerAuth`) carries pool and credential hints, never
-  an account lease pin. The runner admits, renews (including keeping prompt-cache
-  affinity), and releases its own account through the existing operations:
+  an account lease pin. The runner uses the existing operations to admit and
+  finish its own runs and, optionally, renew the shared pin's lease:
 
   | Account action | Routing request |
   |---|---|
   | acquire | `route.account_for`, `mode: "admit"`, with `pool` |
-  | renew | `route.account_for`, `mode: "renew"`, with `expected_pin` |
-  | release | `route.account_observe`, `kind: "run_finished"` |
+  | renew (optional) | `route.account_for`, `mode: "renew"`, with `expected_pin` |
+  | finish | `route.account_observe`, `kind: "run_finished"` |
   | block (stop allocating an account or credential) | `route.account_observe`, `account_limit_exhausted` or, with their groups, `transient_backoff` or `credential_refused` |
 
 - [pinned] `account_limit_exhausted` with `limit_window: "credit"` reports
@@ -1801,7 +1819,7 @@ What a runner saw on an account, so the provider's headroom stays current.
   since the credential remains valid. Readers must accept `credit` before
   runners send it (readers first).
 - [pinned] A runner declaring `routed_accounts` in its runner-role describe
-  lists the sign-in methods it admits, renews and releases itself. Entries
+  lists the sign-in methods whose account admissions it manages itself. Entries
   use §1.2's `auth_method` spelling and token grammar. The list is non-empty,
   unique, and at most 64 entries (`check_routed_accounts` in the runner
   contract). Any listed method requires `follows_account_choice: true` in the
@@ -1809,7 +1827,7 @@ What a runner saw on an account, so the provider's headroom stays current.
   meaning.
 - [pinned] A runner declaring `routed_accounts` that learns the provider refused
   the admitted credential for any use sends `credential_refused`, naming the
-  admission, before releasing it with `run_finished`. It sends it only to a
+  admission, before sending `run_finished`. It sends it only to a
   router declaring `observe_credential_refused`, and only from the provider's
   structured error (a code or type), never inferred from message text, which
   can quote a user. When a provider signals the case only by a fixed message
