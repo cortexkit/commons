@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-tool-provider"
-version = "0.15.16"
+version = "0.15.17"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -26,7 +26,7 @@ test-vectors = []
 
 [dependencies]
 cortexkit-bus-naming = { version = ">=0.4.6, <0.6", path = "../cortexkit-bus-naming" }
-cortexkit-role-tool-display = { version = "0.1.13", path = "../cortexkit-role-tool-display" }
+cortexkit-role-tool-display = { version = "0.1.14", path = "../cortexkit-role-tool-display" }
 serde = { version = "1", features = ["derive"] }
 serde_jcs = "0.2"
 serde_json = "1"
@@ -35,7 +35,7 @@ subc-protocol = ">=0.34.1, <0.38"
 
 [dev-dependencies]
 jsonschema = { version = "0.33", default-features = false }
-cortexkit-role-tool-display = { version = "0.1.13", path = "../cortexkit-role-tool-display", features = ["test-vectors"] }
+cortexkit-role-tool-display = { version = "0.1.14", path = "../cortexkit-role-tool-display", features = ["test-vectors"] }
 
 [[test]]
 name = "call_modes"

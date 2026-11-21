@@ -405,6 +405,9 @@ pub mod capabilities {
     /// it gets no mid-session changes; its owner applies them at the next
     /// session instead.
     pub const SESSION_CHANGE: &str = "session_change";
+    /// Versioned tool admission, refresh refetches and compatible tool changes.
+    /// Requires [`SESSION_CHANGE`] and [`LIVE_EVENTS`].
+    pub const TOOL_VERSIONS: &str = "tool_versions";
     /// Relaunch a session's private host to apply tools outside its fixed set.
     /// Requires [`SESSION_CHANGE`] and the `session.subscribe` operation.
     pub const REFRESH_RELAUNCH: &str = "refresh_relaunch";
@@ -636,6 +639,10 @@ pub mod capabilities {
         (SENDER_SUCCESSION, &[ops::SESSION_SEND]),
         (APP_READERS, &[]),
         (SEND_STATUS, &[ops::SESSION_SEND_STATUS, ops::SEND_STATUS]),
+        (
+            TOOL_VERSIONS,
+            &[ops::SESSION_REFRESH, ops::SESSION_SUBSCRIBE],
+        ),
         (
             SESSION_CHANGE,
             &[

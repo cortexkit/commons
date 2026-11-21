@@ -1,6 +1,16 @@
 {
   "requests": [
     {
+      "name": "refresh a changed provider without changing the plan",
+      "op": "session.refresh",
+      "request": {
+        "plan": {"tool_items": [{"provider": "example.tools", "preset": "default", "params": {}}]},
+        "policy": "immediately",
+        "generation": 5,
+        "refetch": ["example.tools"]
+      }
+    },
+    {
       "name": "a refresh with the full plan, a rung and the owner's generation",
       "op": "session.refresh",
       "request": {
@@ -57,6 +67,25 @@
       }
     }
   ],
+  "tool_versions": {
+    "non_declaring_refusal": {
+      "code": "invalid_params",
+      "message": "refetch requires tool_versions",
+      "detail": {"field": "refetch"}
+    },
+    "live_frame": {
+      "kind": "control",
+      "cursor": {"seq": 41},
+      "seq": 2,
+      "event": {
+        "type": "tool_changed",
+        "provider": "example.tools",
+        "tool": "echo",
+        "expected": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:2",
+        "current": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:3"
+      }
+    }
+  },
   "refused_requests": [
     {
       "name": "a refresh with an unknown field",

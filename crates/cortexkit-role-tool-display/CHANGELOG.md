@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.14
+
+- Drop undeclared extensions when joining records and completions, and allow a kept tool view’s record schema to grow within a pin. Apps still treat pins as opaque.
+
 ## 0.1.13
 
 - Add immutable, attested `notice` writes and opt-in notice records on transcript

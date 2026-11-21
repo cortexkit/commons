@@ -545,7 +545,7 @@ pub const ALREADY_APPLIED: &str = "already_applied";
 
 /// A `session.refresh` names a generation at or below the highest one the
 /// runner accepted, and is not an identical repeat of an accepted refresh
-/// (the same generation, plan identity and policy). `detail` is
+/// (the same generation, plan identity, policy and `refetch`). `detail` is
 /// `session_change::GenerationStaleDetail`. Nothing was written.
 pub const GENERATION_STALE: &str = "generation_stale";
 

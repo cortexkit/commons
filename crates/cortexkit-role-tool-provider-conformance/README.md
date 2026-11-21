@@ -157,6 +157,18 @@ The case approves each call and checks that its `(carrier, call_key)` answer
 arrives through `late_results`. Missing fixtures produce named skips, never
 passes. Existing withdraw and crash cases still apply.
 
+## Tool versions
+
+When a tool in the live catalog publishes `version`, implement
+`ToolProviderSubject::tool_version_fixture` for a versioned tool. Supply safe
+calls and schemas from an older and a newer minor of its current major, an
+older shipped `tp1` pin mapped to the older version, and the provider's usual
+argument refusal code. The kit computes the structural digests and sends the
+probes on live routes. It checks same-major admission, an unknown argument
+after rollback, a different major's refusal and pins, malformed `tp2`, and
+the shipped `tp1` mapping. A versioned catalog without a fixture fails these
+checks; an unversioned catalog does not enable them.
+
 ## Per-tool call modes
 
 `catalog_modes_valid` runs for every provider, checking each tool with

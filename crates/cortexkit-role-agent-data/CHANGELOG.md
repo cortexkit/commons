@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- Track llm-runner `0.9`.
+
 ## 0.3.3
 
 - Add optional `holderBox` to `release` so participants can tell their callers

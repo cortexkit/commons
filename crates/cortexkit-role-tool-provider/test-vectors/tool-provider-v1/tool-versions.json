@@ -1,0 +1,51 @@
+{
+  "catalog": {
+    "generation": "g2",
+    "catalog_digest": "echo-catalog-2",
+    "tools": [{
+      "name": "echo",
+      "schema_digest": "d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291",
+      "semantics": 8,
+      "version": "2.1.0",
+      "capabilities": [],
+      "input_schema": {"type": "object", "properties": {"text": {"type": "string"}, "style": {"type": "string"}}}
+    }]
+  },
+  "current_pin": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:2",
+  "shipped_tp1": {"tp1:echo:d95b00b27ca2bbbe11efb4ebcf3e4ee4d61036c801831bccac81b321af6737e5:7": "2.0.0"},
+  "admission": [
+    {
+      "name": "older_minor",
+      "request": {"name": "echo", "arguments": {"text": "hello"}, "schema_pin": "tp2:echo:d95b00b27ca2bbbe11efb4ebcf3e4ee4d61036c801831bccac81b321af6737e5:2"},
+      "outcome": "admitted"
+    },
+    {
+      "name": "newer_minor_after_rollback",
+      "request": {"name": "echo", "arguments": {"text": "hello", "locale": "en"}, "schema_pin": "tp2:echo:bef5cf83ca131181921a996661dd49e71e130773594a6b9059f6ad6af1e70af9:2"},
+      "outcome": "argument_refusal"
+    },
+    {
+      "name": "different_major",
+      "request": {"name": "echo", "arguments": {"text": "hello"}, "schema_pin": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:3"},
+      "outcome": "tool_major_changed",
+      "refusal": {
+        "code": "tool_major_changed",
+        "message": "this tool changed incompatibly",
+        "detail": {"tool": "echo", "expected": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:3", "current": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:2"}
+      }
+    },
+    {
+      "name": "malformed_pin",
+      "request": {"name": "echo", "arguments": {"text": "hello"}, "schema_pin": "tp2:echo:d3d0b6c25e981342811eeb6c6609a30c30cdb33cfc2bb013216fd2a037f90291:02"},
+      "outcome": "invalid_request",
+      "detail": {"field": "schema_pin"}
+    },
+    {
+      "name": "shipped_legacy_pin",
+      "request": {"name": "echo", "arguments": {"text": "hello"}, "schema_pin": "tp1:echo:d95b00b27ca2bbbe11efb4ebcf3e4ee4d61036c801831bccac81b321af6737e5:7"},
+      "outcome": "admitted"
+    }
+  ],
+  "view_tool": {"name": "echo", "version": "2.1.1", "input_schema": {"type": "object", "properties": {"text": {"type": "string"}, "style": {"type": "string"}}}},
+  "invalid_versions": ["2.1", "2.1.0.0", "02.1.0", "2.01.0", "2.1.00", "+2.1.0", "2.-1.0", "2.1.0-beta", "2.1.0+build", "2.1.0 ", "2.1.18446744073709551616", "２.1.0", "", null, 2]
+}

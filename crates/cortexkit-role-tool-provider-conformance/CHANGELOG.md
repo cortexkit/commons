@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.18
+
+- Pin tool-provider `=0.15.17` and check versioned admission on a live provider route.
+
 ## 0.15.17
 
 - Pin tool-provider `=0.15.16`; no new checks.

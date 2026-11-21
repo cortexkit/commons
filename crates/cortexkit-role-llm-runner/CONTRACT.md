@@ -372,6 +372,7 @@ alias until the next breaking release.
 | `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
 | `system_text_default` | `session.send` with preset-less `system_text` plan items | §10.1 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
+| `tool_versions` | `session.refresh` and `session.subscribe`; requires `session_change` and `live_events` | §10.2 |
 | `refresh_relaunch` | `session.subscribe`; requires `session_change` | §10.2 |
 | `plan_notes` | `session.refresh` with `notes_until_rebuild`; requires `session_change` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
@@ -3052,6 +3053,13 @@ new members.
   a display row's. It is otherwise `session.subscribe`'s request.
 - [pinned] **Control events** are durable: each maps onto a record the
   runner already writes, so a replay from a cursor serves them again.
+  - `tool_changed {provider, tool, expected, current}` when a dispatched call
+    is refused `tool_major_changed`, only with `tool_versions` (§10.2). Both
+    pins are copied from the refusal, and `provider` is the plan's provider
+    id. The runner also emits the same event in the run's events. Recognizing
+    it does not reset the display lane. An older lenient live decoder treats
+    it as `display_reset`; an older strict decoder refuses the unknown type.
+    Upgrade event readers before runners start emitting it.
   - `message_started {mid, live_id?}` and `message_finished {mid}` for every stored
     message, started first. `message_finished` rides the control frame that
     carries the stored message's unit, so a consumer gets the re-read signal
@@ -7338,13 +7346,19 @@ every request, answer and refusal.
   senders, so the sender exception changes nothing for it. The reader
   exception likewise changes nothing for a runner without `app_readers`.
 
-**`session.refresh {plan, policy, generation}`** (`RefreshRequest`, strict).
+**`session.refresh {plan, policy, generation, refetch?}`** (`RefreshRequest`, strict).
 
 - [pinned] `plan` is the full fetch-plan object, as `SendRequest::plan`
   carries it (§10.1). `policy` is one rung name from `rungs::ALL`, or
   `notes_until_rebuild` only with `plan_notes` as below; any other
   value is refused `invalid_params {field: "policy"}`. `generation` is a
   u64 the owner chooses, strictly increasing per session.
+- [pinned] `refetch` is an optional array of provider ids from `plan`. The
+  runner reads those providers' catalogs fresh, even if the plan identity
+  is unchanged, and computes the pending change using the fresh answers.
+  It needs a new `generation` and uses the usual rungs. An owner refreshing
+  after a major refusal sends `immediately`. `RefreshRequest` denies unknown
+  fields; owners send `refetch` only to runners declaring `tool_versions`.
 - [pinned] The runner fetches the new plan's items under one deadline,
   exactly as admission does (§10.1), and holds them as the pending change,
   replacing any change pending before. It applies the change at the rung's
@@ -7364,10 +7378,13 @@ every request, answer and refusal.
     govern admission from durable acceptance regardless of this flag;
   - `run_in_progress` says whether that next run is queued behind one
     running now.
-- [pinned] An identical repeat (the same generation, plan identity and
-  policy as an accepted refresh) gets the same answer as the refresh it
-  repeats, and fetches and writes nothing (`session_change::refresh_order`).
+- [pinned] An identical repeat (the same generation, plan identity, policy
+  and `refetch` as an accepted refresh) gets the same answer as the refresh
+  it repeats, and fetches and writes nothing
+  (`session_change::refresh_order_with_refetch`).
 - [pinned] Refusals, none of which writes anything:
+  - `invalid_params {field: "refetch"}` for `refetch` on a runner that does
+    not declare `tool_versions`, or for an invalid provider list;
   - `invalid_params {field: "plan.senders"}` when a session frozen under a
     flow or run scope receives a plan naming anyone but its frozen opener
     (§9, `scope_admission::check_plan_senders`);
@@ -7378,7 +7395,7 @@ every request, answer and refusal.
     `tools` or `system_text` (`session_change::surfaces`);
   - `generation_stale {accepted}` (`GenerationStaleDetail`), for a
     generation at or below the accepted one that is not an identical
-    repeat: the same generation with another plan or policy, or a lower one;
+    repeat: the same generation with another plan, policy or `refetch`, or a lower one;
   - `tool_outside_host_set {names}` (`ToolOutsideHostSetDetail`), terminal.
     Some hosts fix their registered tools when they start: OpenCode, for
     example, registers each tool's name, description and input schema then.
@@ -7403,14 +7420,46 @@ every request, answer and refusal.
   recorded surface first; at the next run boundary an already accepted
   pending change whose rung has been reached is then processed under the
   normal application and `refresh_relaunch` rules, and a recovery rebuild may
-  be what reaches that rung. Tools change only through an accepted refresh. `plan_stale` is an admission and refresh refusal (§10.1,
+  be what reaches that rung. Taking a compatible tool change under
+  `tool_versions` is a separate next-run rule, not recovery or drift. Otherwise
+  tools change only through an accepted refresh. `plan_stale` is an admission and refresh refusal (§10.1,
   §10.2); a runner never ends a session for it, or for any failure to relaunch.
   If a provider can no longer serve a stored definition, it refuses that call
-  at dispatch (`tool_schema_changed` / `tool_semantics_changed` against the
+  at dispatch (`tool_major_changed`, `tool_schema_changed` or `tool_semantics_changed` against the
   frozen `schema_pin`); that ends the call, not the session. If the runner
   cannot restore and verify the recorded surface, the next run ends `error`
   with class `host_relaunch_failed` before any model request, and the session
   stays; it is never ended.
+
+**Opt-in `tool_versions`.**
+
+- [pinned] A runner declares `tool_versions` when it stores and dispatches
+  `tp2` pins for versioned tools, handles `tool_major_changed`, emits
+  `tool_changed`, serves `refetch`, and takes compatible tool changes as
+  specified here. The group requires `session_change` and `live_events`;
+  a declaration missing either is invalid. The owner relies on this behavior
+  only when the runner declares the group.
+- [pinned] At each point that would apply a pending `on_prefix_rebuild`
+  change, and whenever applying any accepted refresh, the runner takes the
+  current definition of each tool in the effective plan whose provider now
+  serves the same major with a different version. These points include a
+  compaction fold or new view that changes the head, a model switch,
+  `session.flush_prefix`, and lapse of the prompt cache. How the runner learns
+  of the change is its own, for example a `tool.catalog {digest_only: true}`
+  probe followed by a fresh catalog read, or watching the daemon catalog.
+- [pinned] Taking a compatible change is a `tools` surface change and follows
+  the same signed-floor rules (§11.1.1): version metadata by itself does not
+  change the rendered tool set. It never occurs inside a running run,
+  a fork or a code-mode program. A runner whose host cannot install the new
+  definition without a relaunch the runner does not support
+  (`tool_outside_host_set`) keeps the old minor, which remains admissible
+  under the provider's same-major rule. Later calls carry the installed
+  definition's pin, which may be unchanged if its structural digest is unchanged.
+- [pinned] A different major is never taken by this rule. When a dispatched
+  call receives `tool_major_changed`, the runner records that call's error
+  result, never re-dispatches it, and emits `tool_changed` on
+  `session.subscribe` (§7.1) and in the run's events. The owner can then
+  request a refresh. Recovery always restores the recorded surface first.
 
 **Opt-in `plan_notes`.**
 
@@ -7775,7 +7824,7 @@ on the rides and usable-window ceiling defined by that contract (§6).
   otherwise), never from a record shared by sibling calls. How it is spelled
   is the runner's.
 - [pinned] The runner records `tool_schema_changed`,
-  `tool_semantics_changed`, `tool_unavailable` and `capability_not_admitted`
+  `tool_semantics_changed`, `tool_major_changed`, `tool_unavailable` and `capability_not_admitted`
   refusals as that call's error result and never re-dispatches the call.
 
 ### 11.3.1 Provider result size

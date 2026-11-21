@@ -36,6 +36,16 @@ pub const TOOL_SCHEMA_CHANGED: &str = "tool_schema_changed";
 /// [`TOOL_SCHEMA_CHANGED`].
 pub const TOOL_SEMANTICS_CHANGED: &str = "tool_semantics_changed";
 
+/// The provider's current major differs from the call's pinned major (or the
+/// major mapped from a shipped legacy pin). The runner never re-dispatches the call.
+pub const TOOL_MAJOR_CHANGED: &str = "tool_major_changed";
+
+/// `expected` is the call's original pin; `current` is the provider's current `tp2` pin.
+pub fn tool_major_changed(tool: &str, expected: &str, current: &str) -> ErrorBody {
+    ErrorBody::new(TOOL_MAJOR_CHANGED, "this tool changed incompatibly")
+        .with_detail(json!({"tool": tool, "expected": expected, "current": current}))
+}
+
 /// The tool cannot run. Detail: `{tool, reason}`, where `reason` is
 /// `retired` (permanent for the session) or `under_review` (this call only).
 /// Never re-dispatched.

@@ -7,7 +7,56 @@ use cortexkit_role_tool_provider_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject, LateCustodyDefect, SystemTextDefect, REFUSED_LISTED_PRESET};
+use fake::{
+    Defects, FakeSubject, LateCustodyDefect, SystemTextDefect, VersionDefect, REFUSED_LISTED_PRESET,
+};
+
+const VERSION_CASES: &[(VersionDefect, &str)] = &[
+    (
+        VersionDefect::RefuseOlder,
+        "tool_versions_older_minor_accepted",
+    ),
+    (
+        VersionDefect::AcceptUnknownArgument,
+        "tool_versions_newer_minor_argument_refused",
+    ),
+    (
+        VersionDefect::IncorrectMajorDetail,
+        "tool_versions_different_major_refused",
+    ),
+    (
+        VersionDefect::AcceptMalformed,
+        "tool_versions_malformed_pin_refused",
+    ),
+    (
+        VersionDefect::ForgetShipped,
+        "tool_versions_shipped_tp1_admitted",
+    ),
+];
+
+#[tokio::test]
+async fn tool_versions_checks_reject_incorrect_providers_by_name() {
+    let run_versioned = |version_defect| async move {
+        run(&FakeSubject::new(Defects {
+            versioned: true,
+            version_defect,
+            ..Defects::default()
+        }))
+        .await
+    };
+    let faithful = run_versioned(None).await;
+    let missing = run_versioned(Some(VersionDefect::MissingFixture)).await;
+    for &(defect, case) in VERSION_CASES {
+        assert_passed(&faithful, case);
+        assert!(failed(&missing, case).contains("requires tool_version_fixture"));
+        let observed = run_versioned(Some(defect)).await;
+        failed(&observed, case);
+        assert!(observed.render().contains(case));
+        for &(_, unaffected) in VERSION_CASES.iter().filter(|(_, name)| *name != case) {
+            assert_passed(&observed, unaffected);
+        }
+    }
+}
 
 #[tokio::test]
 async fn notice_templates_live_case_checks_declarers_and_non_declarers() {
@@ -112,6 +161,21 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     );
 }
 
+fn assert_unaffected_unversioned_case(report: &SuiteReport, case: &str) {
+    if VERSION_CASES.iter().any(|(_, name)| *name == case) {
+        assert_eq!(
+            report.outcome(case),
+            Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::ToolVersions],
+            }),
+            "{case}: {}",
+            report.render(),
+        );
+    } else {
+        assert_passed(report, case);
+    }
+}
+
 #[tokio::test]
 async fn a_faithful_provider_passes_every_case_but_its_simulated_kills_fail_the_run() {
     let report = run(&FakeSubject::new(Defects::default())).await;
@@ -137,7 +201,7 @@ async fn a_faithful_provider_passes_every_case_but_its_simulated_kills_fail_the_
             ));
             continue;
         }
-        assert_passed(&report, spec.name);
+        assert_unaffected_unversioned_case(&report, spec.name);
     }
     assert_eq!(report.kills.len(), 2);
     assert!(report
@@ -373,6 +437,7 @@ async fn without_legacy_reply_the_legacy_case_is_skipped_never_passed() {
         report.verdict,
         SuiteVerdict::ConformingForDeclaredCapabilities {
             skipped: vec![
+                Capability::ToolVersions,
                 Capability::ApprovalExecution,
                 Capability::ReplyCustody,
                 Capability::ReplyCustodyPure,
@@ -579,7 +644,7 @@ async fn ignoring_bind_mode_fails_the_mode_case() {
         if case.case == "system_text_default_served" {
             assert!(matches!(case.outcome, CaseOutcome::Inapplicable { .. }));
         } else if case.case != "call_mode_matches_catalog" {
-            assert_passed(&report, case.case);
+            assert_unaffected_unversioned_case(&report, case.case);
         }
     }
 }
@@ -813,7 +878,7 @@ async fn digesting_a_json_wrapper_fails_system_text_digests_match_text_by_name()
             ]
             .contains(&spec.name)
         {
-            assert_passed(&report, spec.name);
+            assert_unaffected_unversioned_case(&report, spec.name);
         }
     }
 }
@@ -969,7 +1034,7 @@ async fn refusing_a_preset_less_system_text_item_fails_the_optional_preset_case_
             ]
             .contains(&spec.name)
         {
-            assert_passed(&report, spec.name);
+            assert_unaffected_unversioned_case(&report, spec.name);
         }
     }
 }
@@ -1066,6 +1131,7 @@ async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
         report.verdict,
         SuiteVerdict::ConformingForDeclaredCapabilities {
             skipped: vec![
+                Capability::ToolVersions,
                 Capability::DisableTool,
                 Capability::ApprovalExecution,
                 Capability::ReplyCustody,

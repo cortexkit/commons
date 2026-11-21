@@ -94,8 +94,10 @@ impl ToolCallRequestExt for ToolCallRequest {
     }
 }
 
-/// The first number of every schema pin this role defines.
+/// The legacy schema pin prefix.
 pub const SCHEMA_PIN_PREFIX: &str = "tp1:";
+/// The versioned schema pin prefix.
+pub const VERSIONED_SCHEMA_PIN_PREFIX: &str = "tp2:";
 
 /// What a call's `schema_pin` says: the tool, its `schema_digest` and its
 /// `semantics` version, as the runner froze them from the catalog.
@@ -135,7 +137,7 @@ pub struct SchemaPin {
 pub enum SchemaPinError {
     /// The pin fails the shared opaque-field bound ([`validate_schema_pin`]).
     Bound(OpaqueFieldError),
-    /// The pin does not start with [`SCHEMA_PIN_PREFIX`].
+    /// The pin does not start with a recognized prefix.
     UnknownScheme,
     /// The pin does not have exactly three components.
     Shape,
@@ -145,7 +147,7 @@ pub enum SchemaPinError {
     Encoding,
     /// The schema digest is not 64 lowercase hex characters.
     Digest,
-    /// `semantics` is not a canonical decimal `u64`.
+    /// The last component (`semantics` or major) is not a canonical decimal `u64`.
     Semantics,
 }
 
@@ -154,15 +156,18 @@ impl std::fmt::Display for SchemaPinError {
         match self {
             Self::Bound(error) => error.fmt(f),
             Self::UnknownScheme => {
-                write!(f, "{SCHEMA_PIN_FIELD} does not start {SCHEMA_PIN_PREFIX}")
+                write!(f, "{SCHEMA_PIN_FIELD} has an unknown prefix")
             }
             Self::Shape => write!(
                 f,
-                "{SCHEMA_PIN_FIELD} must have tool, schema digest and semantics"
+                "{SCHEMA_PIN_FIELD} must have tool, schema digest and semantics or major"
             ),
             Self::EmptyComponent => write!(f, "{SCHEMA_PIN_FIELD} has an empty component"),
             Self::Encoding => write!(f, "{SCHEMA_PIN_FIELD} is not canonically percent-encoded"),
-            Self::Semantics => write!(f, "{SCHEMA_PIN_FIELD} semantics is not a canonical integer"),
+            Self::Semantics => write!(
+                f,
+                "{SCHEMA_PIN_FIELD} semantics or major is not a canonical integer"
+            ),
             Self::Digest => write!(
                 f,
                 "{SCHEMA_PIN_FIELD} schema digest is not 64 lowercase hex characters"
@@ -228,53 +233,123 @@ impl SchemaPin {
 
     /// The canonical `tp1` string, or why it cannot be sent.
     pub fn encode(&self) -> Result<String, SchemaPinError> {
-        if self.tool.is_empty() {
-            return Err(SchemaPinError::EmptyComponent);
-        }
-        if !is_schema_digest(&self.schema_digest) {
-            return Err(SchemaPinError::Digest);
-        }
-        let pin = format!(
-            "{SCHEMA_PIN_PREFIX}{}:{}:{}",
-            pct_encode(&self.tool),
-            self.schema_digest,
-            self.semantics
-        );
-        validate_schema_pin(&pin).map_err(SchemaPinError::Bound)?;
-        Ok(pin)
+        encode_pin(
+            SCHEMA_PIN_PREFIX,
+            &self.tool,
+            &self.schema_digest,
+            self.semantics,
+        )
     }
 
     /// Parse a canonical `tp1` pin.
     pub fn parse(pin: &str) -> Result<Self, SchemaPinError> {
-        validate_schema_pin(pin).map_err(SchemaPinError::Bound)?;
-        let rest = pin
-            .strip_prefix(SCHEMA_PIN_PREFIX)
-            .ok_or(SchemaPinError::UnknownScheme)?;
-        let parts: Vec<&str> = rest.split(':').collect();
-        let [tool, digest, semantics] = parts.as_slice() else {
-            return Err(SchemaPinError::Shape);
-        };
-        if tool.is_empty() {
-            return Err(SchemaPinError::EmptyComponent);
-        }
-        if !is_schema_digest(digest) {
-            return Err(SchemaPinError::Digest);
-        }
-        if semantics.is_empty()
-            || !semantics.bytes().all(|b| b.is_ascii_digit())
-            || (semantics.len() > 1 && semantics.starts_with('0'))
-        {
-            return Err(SchemaPinError::Semantics);
-        }
-        let semantics = semantics
-            .parse::<u64>()
-            .map_err(|_| SchemaPinError::Semantics)?;
-        Ok(Self {
-            tool: pct_decode(tool)?,
-            schema_digest: (*digest).to_owned(),
-            semantics,
-        })
+        let (tool, digest, semantics) = parse_pin(SCHEMA_PIN_PREFIX, pin)?;
+        Ok(Self::new(tool, digest, semantics))
     }
+}
+
+/// A `tp2` pin records a tool's structural schema and major, not its minor or patch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ToolMajorPin {
+    pub tool: String,
+    pub schema_digest: String,
+    pub major: u64,
+}
+
+impl ToolMajorPin {
+    pub fn new(tool: impl Into<String>, schema_digest: impl Into<String>, major: u64) -> Self {
+        Self {
+            tool: tool.into(),
+            schema_digest: schema_digest.into(),
+            major,
+        }
+    }
+
+    pub fn encode(&self) -> Result<String, SchemaPinError> {
+        encode_pin(
+            VERSIONED_SCHEMA_PIN_PREFIX,
+            &self.tool,
+            &self.schema_digest,
+            self.major,
+        )
+    }
+
+    pub fn parse(pin: &str) -> Result<Self, SchemaPinError> {
+        let (tool, digest, major) = parse_pin(VERSIONED_SCHEMA_PIN_PREFIX, pin)?;
+        Ok(Self::new(tool, digest, major))
+    }
+}
+
+/// A canonical pin in either scheme. The legacy [`SchemaPin`] API remains
+/// available for callers that only use `tp1`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VersionedSchemaPin {
+    Tp1(SchemaPin),
+    Tp2(ToolMajorPin),
+}
+
+impl VersionedSchemaPin {
+    pub fn parse(pin: &str) -> Result<Self, SchemaPinError> {
+        if pin.starts_with(VERSIONED_SCHEMA_PIN_PREFIX) {
+            ToolMajorPin::parse(pin).map(Self::Tp2)
+        } else {
+            SchemaPin::parse(pin).map(Self::Tp1)
+        }
+    }
+
+    pub fn encode(&self) -> Result<String, SchemaPinError> {
+        match self {
+            Self::Tp1(pin) => pin.encode(),
+            Self::Tp2(pin) => pin.encode(),
+        }
+    }
+
+    pub fn tool(&self) -> &str {
+        match self {
+            Self::Tp1(pin) => &pin.tool,
+            Self::Tp2(pin) => &pin.tool,
+        }
+    }
+}
+
+fn encode_pin(
+    prefix: &str,
+    tool: &str,
+    digest: &str,
+    version: u64,
+) -> Result<String, SchemaPinError> {
+    if tool.is_empty() {
+        return Err(SchemaPinError::EmptyComponent);
+    }
+    if !is_schema_digest(digest) {
+        return Err(SchemaPinError::Digest);
+    }
+    let pin = format!("{prefix}{}:{digest}:{version}", pct_encode(tool));
+    validate_schema_pin(&pin).map_err(SchemaPinError::Bound)?;
+    Ok(pin)
+}
+
+fn parse_pin<'a>(prefix: &str, pin: &'a str) -> Result<(String, &'a str, u64), SchemaPinError> {
+    validate_schema_pin(pin).map_err(SchemaPinError::Bound)?;
+    let rest = pin
+        .strip_prefix(prefix)
+        .ok_or(SchemaPinError::UnknownScheme)?;
+    let mut parts = rest.split(':');
+    let (Some(tool), Some(digest), Some(version), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(SchemaPinError::Shape);
+    };
+    if tool.is_empty() {
+        return Err(SchemaPinError::EmptyComponent);
+    }
+    if !is_schema_digest(digest) {
+        return Err(SchemaPinError::Digest);
+    }
+    let version = crate::catalog::parse_decimal(version).ok_or(SchemaPinError::Semantics)?;
+    Ok((pct_decode(tool)?, digest, version))
 }
 
 /// The provider's check of a call's top-level members: a present but
@@ -284,9 +359,26 @@ impl SchemaPin {
 /// a call without a key executes but can be neither deduplicated nor
 /// withdrawn, and a call without a pin is not checked against a schema.
 ///
-/// Returns the parsed pin, which the provider then compares with its current
-/// catalog (refusing `tool_schema_changed` or `tool_semantics_changed`).
+/// This legacy check accepts `tp1` only. A versioned provider uses
+/// [`check_versioned_call`] before applying its catalog admission rules.
 pub fn check_call(request: &ToolCallRequest) -> Result<Option<SchemaPin>, ErrorBody> {
+    check_call_with(request, SchemaPin::parse, |pin| &pin.tool)
+}
+
+/// Check the call's top-level members, accepting either canonical pin form.
+/// Admission against the current catalog and the shipped pin history follows
+/// this check; the pin alone cannot say whether the arguments are valid.
+pub fn check_versioned_call(
+    request: &ToolCallRequest,
+) -> Result<Option<VersionedSchemaPin>, ErrorBody> {
+    check_call_with(request, VersionedSchemaPin::parse, VersionedSchemaPin::tool)
+}
+
+fn check_call_with<P>(
+    request: &ToolCallRequest,
+    parse: fn(&str) -> Result<P, SchemaPinError>,
+    tool: fn(&P) -> &str,
+) -> Result<Option<P>, ErrorBody> {
     if request.name == crate::ops::USER_COMMAND_INVOKE {
         crate::user_command::check_invoke(request)?;
     }
@@ -297,12 +389,12 @@ pub fn check_call(request: &ToolCallRequest) -> Result<Option<SchemaPin>, ErrorB
     let Some(pin) = request.schema_pin.as_deref() else {
         return Ok(None);
     };
-    let pin = SchemaPin::parse(pin)
-        .map_err(|error| errors::invalid_request(SCHEMA_PIN_FIELD, error.to_string()))?;
-    if pin.tool != request.name {
+    let pin =
+        parse(pin).map_err(|error| errors::invalid_request(SCHEMA_PIN_FIELD, error.to_string()))?;
+    if tool(&pin) != request.name {
         return Err(errors::invalid_request(
             SCHEMA_PIN_FIELD,
-            format!("the pin names {}, the call {}", pin.tool, request.name),
+            format!("the pin names {}, the call {}", tool(&pin), request.name),
         ));
     }
     Ok(Some(pin))

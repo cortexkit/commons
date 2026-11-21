@@ -71,8 +71,7 @@ pub fn check_refresh<S: AsRef<str>>(
 /// The `session.refresh` body for a runner declaring `plan_notes`, with or
 /// without `refresh_relaunch`. Decode `RefreshRequest` with neither group,
 /// or `RelaunchRefreshRequest` with only `refresh_relaunch`. These are strict
-/// views of one wire body, not separate operations. This additive type keeps
-/// exhaustive `RefreshRequest` struct literals source-compatible.
+/// views of one wire body, not separate operations.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -80,6 +79,12 @@ pub struct PlanNotesRefreshRequest {
     pub plan: Map<String, Value>,
     pub policy: String,
     pub generation: u64,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::session_change::decode_refetch"
+    )]
+    pub refetch: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_note: Option<String>,
     /// Accepted only when `refresh_relaunch` is also declared.
@@ -108,6 +113,10 @@ impl PlanNotesRefreshRequest {
         groups: &[S],
         system_text_changed: bool,
     ) -> Result<(), &'static str> {
+        crate::session_change::check_refetch(
+            self.refetch.as_deref(),
+            declares(groups, capabilities::TOOL_VERSIONS),
+        )?;
         if self.required.is_some() && !declares(groups, capabilities::REFRESH_RELAUNCH) {
             return Err("required");
         }
@@ -126,6 +135,7 @@ impl From<RefreshRequest> for PlanNotesRefreshRequest {
             plan: request.plan,
             policy: request.policy,
             generation: request.generation,
+            refetch: request.refetch,
             system_note: None,
             required: None,
         }

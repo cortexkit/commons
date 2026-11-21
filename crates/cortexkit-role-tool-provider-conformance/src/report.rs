@@ -16,7 +16,7 @@ pub struct CaseSpec {
 use Capability::{
     ApprovalExecution, CallKey, CallModes, Cancellation, CatalogCapabilityFilter, CatalogModel,
     DisableTool, HeldCalls, HeldReplyV1, LateResults, LegacyReply, SchemaPin, ScopeStamp,
-    SystemText, SystemTextOptionalPreset, ToolResultV1,
+    SystemText, SystemTextOptionalPreset, ToolResultV1, ToolVersions,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -231,12 +231,37 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "schema_pin_current_accepted",
         requires: &[SchemaPin],
-        checks: "a call pinned to its tool's current schema_digest and semantics is accepted",
+        checks: "a call pinned to its tool's current catalog pin is accepted",
     },
     CaseSpec {
         name: "schema_pin_malformed_refused",
         requires: &[SchemaPin],
         checks: "every refused schema-pin vector, and a pin naming another tool, is refused as invalid_request {field: \"schema_pin\"}",
+    },
+    CaseSpec {
+        name: "tool_versions_older_minor_accepted",
+        requires: &[ToolVersions],
+        checks: "a same-major tp2 with an older structural digest admits valid arguments",
+    },
+    CaseSpec {
+        name: "tool_versions_newer_minor_argument_refused",
+        requires: &[ToolVersions],
+        checks: "a same-major tp2 with a newer structural digest gets an argument refusal for a newer-only argument",
+    },
+    CaseSpec {
+        name: "tool_versions_different_major_refused",
+        requires: &[ToolVersions],
+        checks: "a different major is refused as tool_major_changed with the exact tool and pins",
+    },
+    CaseSpec {
+        name: "tool_versions_malformed_pin_refused",
+        requires: &[ToolVersions],
+        checks: "malformed tp2 is refused as invalid_request naming schema_pin",
+    },
+    CaseSpec {
+        name: "tool_versions_shipped_tp1_admitted",
+        requires: &[ToolVersions],
+        checks: "a historical tp1 mapped to the same major is admitted despite its older digest",
     },
     CaseSpec {
         name: "withdraw_unknown_call",

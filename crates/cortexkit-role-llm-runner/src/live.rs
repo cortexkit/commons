@@ -71,6 +71,7 @@ pub fn validate_live_id(live_id: &str) -> Result<(), LiveIdError> {
 /// The event types, as `type` spells them.
 pub mod event_types {
     pub const SESSION_REFRESH_FAILED: &str = "session_refresh_failed";
+    pub const TOOL_CHANGED: &str = "tool_changed";
     pub const MESSAGE_STARTED: &str = "message_started";
     pub const MESSAGE_FINISHED: &str = "message_finished";
     pub const TOOL_STARTED: &str = "tool_started";
@@ -564,6 +565,7 @@ impl RunStatus {
 #[non_exhaustive]
 pub enum LiveEvent {
     SessionRefreshFailed(SessionRefreshFailed),
+    ToolChanged(ToolChanged),
     MessageStarted(MessageEvent),
     MessageFinished(MessageEvent),
     ToolStarted(ToolStarted),
@@ -623,6 +625,7 @@ impl LiveEvent {
         }
         Ok(match kind {
             t::SESSION_REFRESH_FAILED => Self::SessionRefreshFailed(typed(kind, value)?),
+            t::TOOL_CHANGED => Self::ToolChanged(typed(kind, value)?),
             t::MESSAGE_STARTED => Self::MessageStarted(typed(kind, value)?),
             t::MESSAGE_FINISHED => Self::MessageFinished(typed(kind, value)?),
             t::TOOL_STARTED => Self::ToolStarted(typed(kind, value)?),
@@ -646,6 +649,7 @@ impl LiveEvent {
         use event_types as t;
         match self {
             Self::SessionRefreshFailed(_) => t::SESSION_REFRESH_FAILED,
+            Self::ToolChanged(_) => t::TOOL_CHANGED,
             Self::MessageStarted(_) => t::MESSAGE_STARTED,
             Self::MessageFinished(_) => t::MESSAGE_FINISHED,
             Self::ToolStarted(_) => t::TOOL_STARTED,
@@ -660,6 +664,34 @@ impl LiveEvent {
             Self::ToolInputDelta(_) => t::TOOL_INPUT_DELTA,
             Self::DisplayGap(_) => t::DISPLAY_GAP,
             Self::DisplayReset => t::DISPLAY_RESET,
+        }
+    }
+}
+
+/// A dispatched call was refused because the provider now serves a different major.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ToolChanged {
+    pub provider: String,
+    pub tool: String,
+    /// The pin the refused call carried.
+    pub expected: String,
+    /// The provider's current `tp2` pin.
+    pub current: String,
+}
+
+impl ToolChanged {
+    pub fn new(
+        provider: impl Into<String>,
+        tool: impl Into<String>,
+        expected: impl Into<String>,
+        current: impl Into<String>,
+    ) -> Self {
+        Self {
+            provider: provider.into(),
+            tool: tool.into(),
+            expected: expected.into(),
+            current: current.into(),
         }
     }
 }

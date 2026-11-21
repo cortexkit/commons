@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.9
+
+- Track llm-runner `0.9`.
+
 ## 0.2.8
 
 - Add optional request-start and completion timestamps, opaque account

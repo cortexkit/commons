@@ -110,6 +110,30 @@ fn record_and_completion_vectors_enforce_flat_declared_fields() {
 }
 
 #[test]
+fn record_and_completion_join_drops_only_undeclared_fields() {
+    let fixture = vector("records.json");
+    let schema = serde_json::from_value(fixture["schema"].clone()).unwrap();
+    for case in fixture["join_cases"].as_array().unwrap() {
+        let body = object(&case["body"]).clone();
+        let result = if case["kind"] == "completion" {
+            join_completion(body, &schema)
+        } else {
+            join_record(body, &schema)
+        };
+        if let Some(field) = case["field"].as_str() {
+            assert_eq!(result.unwrap_err().field, field, "{}", case["name"]);
+        } else {
+            assert_eq!(
+                Value::Object(result.unwrap()),
+                case["joined"],
+                "{}",
+                case["name"]
+            );
+        }
+    }
+}
+
+#[test]
 fn record_and_completion_schema_vectors_refuse_invalid_declarations() {
     let fixture = vector("records.json");
     for case in fixture["invalid_schemas"].as_array().unwrap() {

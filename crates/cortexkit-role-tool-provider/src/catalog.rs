@@ -332,7 +332,7 @@ pub struct CatalogAnswer {
     pub composition_digest: Option<String>,
     /// Every tool the provider serves under these inputs. A provider with only
     /// system text, and every `digest_only` answer, has none.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "decode_catalog_tools")]
     pub tools: Vec<CatalogTool>,
     /// The system-prompt item's answer, when the request named one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -648,9 +648,15 @@ pub struct CatalogTool {
     /// 64 lowercase hex characters. Description text never changes it. A
     /// call's schema pin names it.
     pub schema_digest: String,
-    /// The tool's behaviour version, bumped when its behaviour changes without
-    /// a schema change. A call's schema pin names it.
+    /// The legacy behaviour version used by `tp1` callers.
     pub semantics: u64,
+    /// The semantic version advertised to `tp2` callers.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "decode_version"
+    )]
+    pub version: Option<ToolVersion>,
     /// Call modes this tool serves. Absent means classic only. Providers
     /// validate this with [`check_modes`] and check every call with
     /// [`serves_call_mode`] against the mode on its route bind, not its body.
@@ -717,6 +723,28 @@ pub struct CatalogTool {
 }
 
 impl CatalogTool {
+    pub fn with_version(mut self, version: ToolVersion) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Construct the current pin, using `tp2` when the tool declares a version.
+    pub fn schema_pin(&self) -> crate::call::VersionedSchemaPin {
+        use crate::call::{SchemaPin, ToolMajorPin, VersionedSchemaPin};
+        match self.version {
+            Some(version) => VersionedSchemaPin::Tp2(ToolMajorPin::new(
+                &self.name,
+                &self.schema_digest,
+                version.major,
+            )),
+            None => VersionedSchemaPin::Tp1(SchemaPin::new(
+                &self.name,
+                &self.schema_digest,
+                self.semantics,
+            )),
+        }
+    }
+
     pub fn with_read_only(mut self) -> Self {
         self.read_only = true;
         self
@@ -806,6 +834,98 @@ impl CatalogTool {
             None => RESULT_OPS_ALL.to_vec(),
         }
     }
+}
+
+fn decode_catalog_tools<'de, D: Deserializer<'de>>(
+    decoder: D,
+) -> Result<Vec<CatalogTool>, D::Error> {
+    Vec::<Value>::deserialize(decoder)?
+        .into_iter()
+        .map(|tool| {
+            CatalogTool::deserialize(&tool).map_err(|error| {
+                let name = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<unnamed>");
+                serde::de::Error::custom(format!("tool {name}: {error}"))
+            })
+        })
+        .collect()
+}
+
+/// A tool version in canonical `MAJOR.MINOR.PATCH` form on the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(try_from = "String", into = "String")]
+#[non_exhaustive]
+pub struct ToolVersion {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+}
+
+impl ToolVersion {
+    pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
+}
+
+impl std::fmt::Display for ToolVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+impl std::str::FromStr for ToolVersion {
+    type Err = &'static str;
+
+    fn from_str(wire: &str) -> Result<Self, Self::Err> {
+        let mut parts = wire.split('.');
+        let (Some(major), Some(minor), Some(patch), None) = (
+            parts.next().and_then(parse_decimal),
+            parts.next().and_then(parse_decimal),
+            parts.next().and_then(parse_decimal),
+            parts.next(),
+        ) else {
+            return Err("version must be three canonical decimal u64 components");
+        };
+        Ok(Self::new(major, minor, patch))
+    }
+}
+
+impl TryFrom<String> for ToolVersion {
+    type Error = &'static str;
+
+    fn try_from(wire: String) -> Result<Self, Self::Error> {
+        wire.parse()
+    }
+}
+
+impl From<ToolVersion> for String {
+    fn from(version: ToolVersion) -> Self {
+        version.to_string()
+    }
+}
+
+pub(crate) fn parse_decimal(wire: &str) -> Option<u64> {
+    if wire.is_empty()
+        || (wire.len() > 1 && wire.starts_with('0'))
+        || !wire.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    wire.parse().ok()
+}
+
+pub(crate) fn decode_version<'de, D: Deserializer<'de>>(
+    decoder: D,
+) -> Result<Option<ToolVersion>, D::Error> {
+    ToolVersion::deserialize(decoder)
+        .map(Some)
+        .map_err(|error| serde::de::Error::custom(format!("invalid version: {error}")))
 }
 
 fn decode_read_only<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {

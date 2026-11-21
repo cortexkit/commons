@@ -195,23 +195,26 @@ integer `revision`. Each map declares provider extension names and their kinds.
 `fields` applies to both records and completions; `completion_fields` adds
 fields only for completions. An absent `completion_fields` means an empty map;
 an empty map is omitted when serialized. Neither map may redefine a standard
-field or declare a name already present in the other map. The
-`completion_fields` map is part of a view's `record_schema`, which never changes
-for a given pin. A provider adds a completion field only with a new schema pin.
+field or declare a name already present in the other map. Under a tool pin,
+either map may gain optional declarations as part of a record schema growth
+(§6). Existing fields stay in the same map with the same kind.
 
 A declared extension is optional. Except for `text_lines`, a present field
 must be one scalar of its kind or a **nonempty array of at most 64 scalars** of
-that kind. Nested objects, arrays of arrays, nulls, wrong JSON types and every
-undeclared extension fail the schema check. Standard fields are always
+that kind. Nested objects, arrays of arrays, nulls and wrong JSON types fail
+the schema check for a declared field. Standard fields are always
 validated by their fixed rules, never by declarations. The validators can't
 tell whether a string that passes the rules is meaningful. The fixed `message`
 body (§9) is not a provider extension schema and adds no `FieldKind`.
 
 The display server doesn't check bodies against the schema when it stores a
 write, because the schema comes from the view, fetched later (§6). The app
-server checks a record or completion against its view's schema when it joins
-it (`validate_record`, `validate_completion`), and leaves a body that fails out
-of the transcript, showing the call without display data.
+server drops undeclared extensions from the body it joins, then checks the
+remaining fields against its held schema (`join_record`, `join_completion`).
+A completion-only field is undeclared for a record. A declared field of the
+wrong kind still leaves the body out of the transcript, showing the call
+without display data. An app never receives a record or completion field
+that is neither standard nor declared for that body by the held schema.
 
 | Kind | Rule |
 | --- | --- |
@@ -238,8 +241,8 @@ Writers strip ANSI escape sequences and cut a long line with a trailing `…`,
 which counts toward the 200-scalar limit. Providers are responsible for limiting
 the content to text the chat's step log already shows for the same call.
 Upgrade display servers to 0.1.12 before any provider declares `text_lines`.
-Older readers ignore `completion_fields` and refuse a completion carrying an
-undeclared field. The completion is lost, so the row stays without its tail.
+Readers before 0.1.12 ignore `completion_fields` and refused a completion
+carrying an undeclared field. New field kinds still need readers first.
 
 Apps render every kind as **plain text, never a link**, with one exception:
 an app may pass a value of an `id` field to its own item opener. The opener
@@ -298,14 +301,15 @@ pin outside the writer's current `tool.catalog`, **before judging catalog
 membership**. It decides from the answer:
 
 - If the view carries `tool`, the server computes its `schema_digest` from
-  `tool.input_schema` and recomputes the tool-provider contract's `tp1` pin
-  from `tool.name`, that digest and `tool.semantics`. It accepts the view only
-  when that pin equals the requested pin, and takes the input schema from
-  `tool.input_schema`; no current catalog membership is needed.
-- A view without `tool` is accepted only if the requested pin belongs to a
-  tool in the writer's current `tool.catalog`: the `tp1` pin computed from the
-  catalog tool's `name`, `schema_digest` and `semantics` must equal it. The
-  input schema then comes from that catalog entry, as for older providers.
+  `tool.input_schema` and recomputes the pin from `tool.name`, that digest and
+  `tool.semantics` (`tp1`) or `tool.version`'s major (`tp2`). It accepts the
+  view only when that pin equals the requested pin, and takes the input schema
+  from `tool.input_schema`; no current catalog membership is needed.
+- A view without `tool` is accepted only for a `tp1` pin belonging to a tool
+  in the writer's current `tool.catalog`: the `tp1` pin computed from its
+  `name`, `schema_digest` and `semantics` must equal it. The input schema then
+  comes from that catalog entry, as for older providers. A `tp2` view must
+  carry `tool` with `version`.
 - Anything else is `unknown` and cannot authorize a join: no view, `"unknown"`,
   a `tool` that cannot recompute to the requested pin, or no `tool` and no
   matching current catalog entry. A mismatched `tool` never falls back to the
@@ -314,8 +318,9 @@ membership**. It decides from the answer:
 The server keeps the accepted result and input schema with the view, through
 later template refreshes, so a call recorded before the provider changed its
 catalog still joins. A matching pin fixes the tool's name, structural input
-schema and `semantics`; it doesn't fix `description` text or say which
-provider owns the tool. A server that cached a pin as unusable only because
+schema and `semantics` or major; it doesn't fix `description` text or say
+which provider owns the tool. Apps treat either pin form as an opaque string.
+A server that cached a pin as unusable only because
 the pin was missing from the writer's current catalog, without asking
 `tool.views`, MUST ask for that pin again once and judge the answer under
 these rules. A provider's own `"unknown"` answer keeps its normal retry rules.
@@ -339,9 +344,15 @@ definition (tool-provider §2.1). The template is opaque JSON
 that only the app server interprets; this contract defines no template format,
 so which templates an app server understands is its own choice. An `unknown`
 view cannot authorize a join.
-A pin never changes meaning, so the display server may keep a view's record
-schema and reads forever; it replaces the template only with a higher
-`template_revision` (tool-provider §2.1).
+A pin never changes meaning. A fetched view may replace the template or
+refresh the tool's description only with a higher `template_revision`. If
+the record schema differs, the fetched view replaces the kept view only with
+a higher `template_revision`, the same schema name, a higher record schema
+revision, every kept field still declared in the same map with the same kind,
+and unchanged reads. New declarations are optional. After a rollback a lower
+revision keeps the larger view. Reads and all other pinned properties stay
+unchanged (tool-provider §2.1). A `tp2` view's minor and patch are metadata
+for display or logs, not join criteria.
 
 ## 7. Tool-provider obligations
 

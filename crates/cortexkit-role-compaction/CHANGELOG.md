@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.9
+
+- Track llm-runner `0.9`.
+
 ## 0.4.8
 
 - A provider's length refusal ends the run with llm-runner's `context_overflow`;

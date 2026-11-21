@@ -34,10 +34,12 @@ use cortexkit_role_tool_provider_conformance::{
         Trigger,
     },
     wire::{
-        call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
+        call::{
+            check_versioned_call, SchemaPin, ToolCallRequest, VersionedSchemaPin, CALL_KEY_FIELD,
+        },
         catalog::{
             check_model_param, composition_digest, schema_digest, select_by_capabilities,
-            serves_call_mode, system_text_digest, CatalogRequest, CatalogTool,
+            serves_call_mode, system_text_digest, CatalogRequest, CatalogTool, ToolVersion,
         },
         consumer_reads_held_reply_v1, consumer_reads_tool_result_v1,
         describe::{Major, RoleDescribe},
@@ -54,13 +56,57 @@ use cortexkit_role_tool_provider_conformance::{
         },
         CallMode, CATALOG_CAPABILITY_FILTER, CATALOG_MODEL, REQUIRED_OPS,
     },
-    CallModeProbe, CallSpec, Capability, Exchange, ObservedFrame, RouteFailure, ScopedPrincipals,
-    ToolProviderSubject, ToolRoute,
+    CallModeProbe, CallSpec, Capability, Exchange, MinorVersionProbe, ObservedFrame, RouteFailure,
+    ScopedPrincipals, ToolProviderSubject, ToolRoute, ToolVersionFixture,
 };
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 pub const QUICK: &str = "echo";
+const VERSION_ARGUMENT_ERROR: &str = "bad_arguments";
+
+fn version_schema(minor: u64) -> Value {
+    let mut schema = json!({"type":"object", "properties":{"text":{"type":"string"}}});
+    if minor >= 1 {
+        schema["properties"]["style"] = json!({"type":"string"});
+    }
+    if minor >= 2 {
+        schema["properties"]["locale"] = json!({"type":"string"});
+    }
+    schema
+}
+
+fn version_fixture() -> ToolVersionFixture {
+    let older_schema = version_schema(0);
+    let shipped_tp1 = SchemaPin::new(QUICK, schema_digest(&older_schema).unwrap(), 7)
+        .encode()
+        .unwrap();
+    ToolVersionFixture {
+        tool: QUICK.into(),
+        older: MinorVersionProbe {
+            version: ToolVersion::new(2, 0, 0),
+            input_schema: older_schema,
+            arguments: json!({"text":"hello"}),
+        },
+        newer: MinorVersionProbe {
+            version: ToolVersion::new(2, 2, 0),
+            input_schema: version_schema(2),
+            arguments: json!({"text":"hello", "locale":"en"}),
+        },
+        shipped_tp1,
+        argument_refusal_code: VERSION_ARGUMENT_ERROR.into(),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VersionDefect {
+    RefuseOlder,
+    AcceptUnknownArgument,
+    IncorrectMajorDetail,
+    AcceptMalformed,
+    ForgetShipped,
+    MissingFixture,
+}
 pub const SLOW: &str = "sleep";
 pub const HELD: &str = "effect";
 pub const DISABLED: &str = "danger";
@@ -119,6 +165,8 @@ pub enum LateCustodyDefect {
 /// Fixture variations and deliberate contract breaks for runner tests.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub versioned: bool,
+    pub version_defect: Option<VersionDefect>,
     pub refuse_system_text_facts: bool,
     pub accept_malformed_system_text_facts: bool,
     pub late_custody: Option<LateCustodyDefect>,
@@ -515,6 +563,10 @@ impl Module {
             json!({ "name": HELD, "semantics": 2, "result_ops": ["prepend", "append"],
                     "capabilities": held_capabilities, "input_schema": held_schema }),
         ];
+        if self.defects.versioned {
+            tools[0]["input_schema"] = version_schema(1);
+            tools[0]["version"] = json!("2.1.0");
+        }
         for tool in &mut tools {
             tool["schema_digest"] = json!(schema_digest(&tool["input_schema"]).unwrap());
         }
@@ -794,8 +846,17 @@ impl Module {
             ops::LATE_RESULTS_ACK => return Ok(reply(self.ack(stamp, &request.arguments))),
             _ => {}
         }
-        let pin = match check_call(&request) {
+        let pin = match check_versioned_call(&request) {
             Ok(pin) => pin,
+            Err(_)
+                if self.defects.version_defect == Some(VersionDefect::AcceptMalformed)
+                    && request
+                        .schema_pin
+                        .as_deref()
+                        .is_some_and(|pin| pin.starts_with("tp2:")) =>
+            {
+                None
+            }
             Err(refusal) => return Ok(error(refusal)),
         };
         let current = self.tools().into_iter().find(|tool| tool["name"] == name);
@@ -815,16 +876,69 @@ impl Module {
             }
         }
         if let (Some(pin), Some(current)) = (&pin, &current) {
-            if pin.schema_digest != current["schema_digest"] {
-                return Ok(error(ErrorBody::new(
-                    errors::TOOL_SCHEMA_CHANGED,
-                    "the schema moved",
-                )));
-            }
-            if json!(pin.semantics) != current["semantics"] {
-                return Ok(error(ErrorBody::new(
-                    errors::TOOL_SEMANTICS_CHANGED,
-                    "semantics moved",
+            let Some(raw) = request.schema_pin.as_deref() else {
+                unreachable!()
+            };
+            let served: CatalogTool = {
+                let mut current = current.clone();
+                current.as_object_mut().unwrap().remove("emits_events");
+                serde_json::from_value(current).unwrap()
+            };
+            let pinned_major = match (pin, served.version) {
+                (VersionedSchemaPin::Tp2(pin), Some(_)) => Some(pin.major),
+                (VersionedSchemaPin::Tp1(_), Some(_))
+                    if self.defects.version_defect != Some(VersionDefect::ForgetShipped)
+                        && raw == version_fixture().shipped_tp1 =>
+                {
+                    Some(2)
+                }
+                _ => None,
+            };
+            if let (Some(pinned_major), Some(version)) = (pinned_major, served.version) {
+                if pinned_major != version.major {
+                    let current = served.schema_pin().encode().unwrap();
+                    let expected = if self.defects.version_defect
+                        == Some(VersionDefect::IncorrectMajorDetail)
+                    {
+                        &current
+                    } else {
+                        raw
+                    };
+                    return Ok(error(errors::tool_major_changed(name, expected, &current)));
+                }
+                if self.defects.version_defect == Some(VersionDefect::RefuseOlder)
+                    && matches!(pin, VersionedSchemaPin::Tp2(pin) if pin.schema_digest == schema_digest(&version_schema(0)).unwrap())
+                {
+                    return Ok(error(ErrorBody::new(
+                        errors::TOOL_SCHEMA_CHANGED,
+                        "the schema moved",
+                    )));
+                }
+                if request.arguments.get("locale").is_some()
+                    && self.defects.version_defect != Some(VersionDefect::AcceptUnknownArgument)
+                {
+                    return Ok(error(ErrorBody::new(
+                        VERSION_ARGUMENT_ERROR,
+                        "locale is not a declared argument",
+                    )));
+                }
+            } else if let VersionedSchemaPin::Tp1(pin) = pin {
+                if pin.schema_digest != current["schema_digest"] {
+                    return Ok(error(ErrorBody::new(
+                        errors::TOOL_SCHEMA_CHANGED,
+                        "the schema moved",
+                    )));
+                }
+                if json!(pin.semantics) != current["semantics"] {
+                    return Ok(error(ErrorBody::new(
+                        errors::TOOL_SEMANTICS_CHANGED,
+                        "semantics moved",
+                    )));
+                }
+            } else {
+                return Ok(error(errors::invalid_request(
+                    "schema_pin",
+                    "tp2 is not served",
                 )));
             }
         }
@@ -1311,6 +1425,12 @@ impl ToolProviderSubject for FakeSubject {
 
     fn quick_call(&self) -> CallSpec {
         (QUICK.into(), json!({ "text": "hi" }))
+    }
+
+    fn tool_version_fixture(&self) -> Option<ToolVersionFixture> {
+        (self.defects.versioned
+            && self.defects.version_defect != Some(VersionDefect::MissingFixture))
+        .then(version_fixture)
     }
 
     fn tool_result_v1_calls(&self) -> Vec<CallSpec> {

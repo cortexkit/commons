@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.45
+
+- Track routing `=0.7.40`.
+
 ## 0.10.44
 
 - Pin routing `=0.7.39` for the LLM lease and admission reporting clarification.

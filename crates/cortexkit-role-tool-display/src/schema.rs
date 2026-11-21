@@ -70,6 +70,24 @@ impl RecordSchema {
         }
         Ok(())
     }
+
+    /// Whether a higher revision keeps every declaration of the held schema.
+    /// Moving a field between the two maps would change where it is declared.
+    pub fn is_growth_of(&self, held: &Self) -> bool {
+        self.name == held.name
+            && self.revision > held.revision
+            && (self.fields.len() > held.fields.len()
+                || self.completion_fields.len() > held.completion_fields.len())
+            && self.validate().is_ok()
+            && held
+                .fields
+                .iter()
+                .all(|(name, kind)| self.fields.get(name) == Some(kind))
+            && held
+                .completion_fields
+                .iter()
+                .all(|(name, kind)| self.completion_fields.get(name) == Some(kind))
+    }
 }
 
 /// `^[a-z][a-z0-9_]{0,63}$`, for machine-readable reasons and codes.
@@ -237,6 +255,31 @@ pub fn validate_completion(
     schema: &RecordSchema,
 ) -> Result<(), InvalidParams> {
     validate_flat(body, schema, false)
+}
+
+/// Drop undeclared extensions, then validate the body to be joined as a record.
+/// A declared field with the wrong kind still rejects the whole body.
+pub fn join_record(
+    mut body: Map<String, Value>,
+    schema: &RecordSchema,
+) -> Result<Map<String, Value>, InvalidParams> {
+    body.retain(|field, _| is_standard(field) || schema.fields.contains_key(field));
+    validate_record(&body, schema)?;
+    Ok(body)
+}
+
+/// Drop undeclared extensions, then validate the body to be joined as a completion.
+pub fn join_completion(
+    mut body: Map<String, Value>,
+    schema: &RecordSchema,
+) -> Result<Map<String, Value>, InvalidParams> {
+    body.retain(|field, _| {
+        is_standard(field)
+            || schema.fields.contains_key(field)
+            || schema.completion_fields.contains_key(field)
+    });
+    validate_completion(&body, schema)?;
+    Ok(body)
 }
 
 fn validate_flat(

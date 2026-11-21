@@ -148,16 +148,20 @@ they aren't offered to the model as tools, and their shapes are the
 provider's own. `template` is opaque JSON that only the app server interprets;
 neither contract defines a template format, and this crate never interprets it. An unsupported pin is the string `"unknown"`, not a guessed view.
 
-`tool` is `{name, input_schema, semantics}` (`views::ViewTool`), with the same
-types and spellings as those members of `CatalogTool`. A provider sends it for
-every pin it serves, and MUST send it for any pin no longer in its current
-`tool.catalog`. A pin fixes the tool's name, the structural digest of its
-input schema and its `semantics`; the structural digest leaves out
-`description` keywords, so a matching pin doesn't fix that text. A provider
-keeps serving the `tool` it first served for a pin. `ViewTool::schema_pin`
-computes the existing `tp1` encoding from `name`, the structural
-`schema_digest(input_schema)` and `semantics` (§4), without trusting a
-separately supplied digest. `ViewManifest::check_pin` returns whether `tool`
+`tool` (`views::ViewTool`) is `{name, input_schema, semantics}` for `tp1` and
+`{name, input_schema, version}` for `tp2`, with the same member types as
+`CatalogTool`. A provider sends it for every pin it serves, and MUST send it for
+`tp2` and for any pin no longer in its current `tool.catalog`. A pin fixes
+the name, structural input schema and legacy `semantics` or major. A change
+to the pinned tool definition under that pin is limited to `description`
+text and requires a higher `template_revision`. For `tp2`, `version` reports
+the version current when that revision was served. Minor and patch are
+metadata, not part of the pinned definition: they may advance with a higher
+`template_revision` alongside a description change or record-schema growth.
+Readers use them for display and logs only, never to admit or join.
+`ViewTool::schema_pin` computes the pin from `name`, the structural
+`schema_digest(input_schema)` and `semantics` or the major of `version`
+(§4), without trusting a separately supplied digest. `ViewManifest::check_pin` returns whether `tool`
 is present and recomputes to the requested pin. It errors when the schema
 can't be canonicalized, the pin can't be encoded, or the pin differs. It
 checks only that binding, not whether `input_schema` is a valid argument
@@ -181,8 +185,10 @@ kinds; apps treat those rows as ordinary. A provider that adds or changes
 servers replace the cached copy under the refetch rules below.
 
 A known view may also carry `template_revision`, a u64 that defaults to 0 and
-is omitted when 0. For a pin, `record_schema` and `reads` never change:
-records are validated against `record_schema`, and `reads` bounds which detail
+is omitted when 0. Under a pin, `record_schema` may only grow, with a higher
+`template_revision`: its name stays the same, its revision increases, every
+existing field stays in the same declaration map with the same kind, and it
+adds optional fields. `reads` never changes; it bounds which detail
 operations the app server may call on a route it carries. `template` may
 change, but only together with a higher `template_revision`, and one revision
 always carries one template. A template fix can therefore reach rows recorded
@@ -191,15 +197,15 @@ fetches and accepts the revised view. The refetch rules are below; this
 contract sets no deadline for a revision to reach existing rows.
 
 A provider that has ever served a view for a pin MUST keep serving a view for
-it, with the same `record_schema` and `reads`, for as long as it declares
+it, subject to the growth rule and with the same `reads`, for as long as it declares
 `tool-views/v1`, even after the tool's definition changes. It answers
 `"unknown"` only for a pin it never served. A change to a tool's name, schema
-digest or `semantics` mints a new pin (§4); it never retires the old pin's
+digest or pinned `semantics` or major mints a new pin (§4); it never retires the old pin's
 view. The pinned `tool` lets the display server first fetch and check an old
 pin even after the tool has left the writer's current catalog (tool-display
 §6). One way to meet this obligation is a committed table of every
-view the provider has shipped, with a test that fails if an entry's record
-schema or reads change or the entry is removed.
+view the provider has shipped, with a test that fails if an entry is removed,
+its schema changes other than by growth, or its reads change.
 
 The display server (tool-display §6) keeps each view with the writer's
 `module_version` from its `catalog.list` entry and, when the entry also carries
@@ -212,16 +218,15 @@ the pin check, whose accepted result and input schema the server keeps. If a wri
 one `module_version` across builds and its catalog entry carries no build, only
 that optional policy refreshes a kept view. A cached `"unknown"` answer is
 checked again when the version or build changes, and may be retried after an
-age the server chooses. `ViewManifest::compare_with_kept` classifies
-the fetched view by its record schema, reads and template only; it doesn't
-look at `tool`. The display server keeps the first `tool` and input schema
-it accepted for a pin, through template refreshes; a view that gains `tool`
-after being accepted without one is checked by `check_pin` and changes
-nothing else. A changed `record_schema` or `reads` is a conflict whatever
-its revision. Otherwise a higher revision is accepted, and the display server
-keeps the fetched view, its revision included; a lower revision is stale; and
-the same revision with a different template is a conflict. A stale or
-conflicting view is ignored, keeping the kept one. View decoders on
+age the server chooses. The display server checks a freshly fetched view's pin
+binding before comparing it with the kept view using
+`ViewManifest::compare_with_kept`. An older view may gain a checked `tool`
+without changing revision. A higher `template_revision` replaces the kept
+view only with unchanged reads, a tool definition that still matches the pin,
+and an unchanged or grown record schema. The same revision cannot change
+the template, tool definition or record schema. A stale or conflicting view
+is ignored, keeping the kept one; after a rollback this keeps the larger
+record schema. View decoders on
 tool-provider 0.14.1, the first release with views, ignore
 `template_revision` when decoding and don't compare revisions, so a display
 server adopts 0.14.2, and this comparison, before any provider sends a
@@ -613,7 +618,7 @@ responsibilities, not behaviors checked by this provider kit.
       `test-vectors/tool-provider-v1/catalog-notice-templates.json`.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
-- Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
+- Each tool (`CatalogTool`): `{name, schema_digest, semantics, version?, result_ops?,
   result_format?, load?, capabilities, description?, input_schema, reply?, modes?,
   emits_events?}`.
   - `name` is the exact name the user tier disables the tool by.
@@ -621,7 +626,20 @@ responsibilities, not behaviors checked by this provider kit.
     (see "Schema digest" below): 64 lowercase hex characters. Description
     text never changes it.
   - `semantics` is an integer, bumped whenever the tool's behaviour changes
-    without a schema change.
+    without a schema change. It remains on the wire for `tp1` consumers.
+  - `version`, when present, is a `MAJOR.MINOR.PATCH` string. Each component
+    is decimal `u64`, with no sign or leading zeros. A malformed version
+    invalidates the catalog answer (`invalid_answer`), naming the tool and
+    `version`. Older catalog readers ignore the optional member.
+    - **Patch:** nothing a caller or model sees changes, for example adding
+      an optional app record field or fixing an internal implementation.
+    - **Minor:** a compatible, model-visible change, for example a new
+      optional argument, updated description text, or a new optional result
+      field. A structural digest change needs at least a minor bump. A
+      description-only change is minor and does not change the digest.
+    - **Major:** an incompatible change, for example removing, renaming or
+      requiring an argument, or changing what it means. A provider that
+      cannot determine the level makes a major change.
   - `modes` lists the call modes this tool serves: `classic`, `codemode` and
     `flow`. Absent means `["classic"]`. An explicit `["classic"]` decodes to
     absence (`None`), and both forms encode without `modes`, including a
@@ -880,30 +898,46 @@ responsibilities, not behaviors checked by this provider kit.
   per-session entry id joined with the model's call id) does not meet this
   rule; the carrier adds something unique across its sessions.
 - `schema_pin` (subc-protocol 0.27.0, top-level, omitted when `None`) has the
-  same byte bound as `call_key`. Its content is this role's: the tool name,
-  the tool's `schema_digest` and its `semantics`, as the runner froze them.
-  A pin never holds the catalog `generation` or any description text, so it
-  survives a description-only deploy. It is encoded canonically as **`tp1`**
-  (`SchemaPin`):
+  same byte bound as `call_key`. It records the exact name and structural
+  `schema_digest` the runner froze, and either legacy `semantics` or major:
 
   ```text
   tp1:<pct(tool)>:<schema_digest>:<semantics>
+  tp2:<pct(tool)>:<schema_digest>:<major>
   ```
 
   `pct` keeps the RFC 3986 unreserved bytes (`A-Z a-z 0-9 - . _ ~`) and
   writes every other byte of the UTF-8 string as `%` plus two uppercase hex
   digits, so `:` inside the tool name is always `%3A`. `schema_digest` is 64
-  lowercase hex characters. `semantics` is decimal, with no sign and no
+  lowercase hex characters. `semantics` and `major` are decimal u64, with no sign and no
   leading zeros. The tool is non-empty. Exactly one string encodes each pin;
   anything else is refused. A pin that is
   malformed, or names a tool other than the call's `name`, is refused as
   `invalid_request {field: "schema_pin"}`. The field and its bound are
-  subc-protocol 0.27.0's, re-exported by this crate (`call.rs`).
-- A call whose pinned `schema_digest` the provider can no longer honour is
-  refused `tool_schema_changed {tool, expected, current}`; one whose pinned
-  `semantics` it can no longer honour, `tool_semantics_changed {tool,
-  expected, current}`. Providers keep argument changes additive so old
-  schemas stay servable.
+  subc-protocol 0.27.0's, re-exported by this crate (`call.rs`). Both schemes
+  have the same maximum overhead (90 bytes plus `pct(tool)`). Minor and patch
+  live in the catalog's `version`, not in the pin. A pin also omits the catalog
+  `generation` and description text. `VersionedSchemaPin` parses and encodes
+  both forms, while `SchemaPin` remains the `tp1` Rust API.
+- A `tp2` call naming this tool with the provider's current major runs if
+  its arguments validate against the current schema, regardless of the
+  pin's structural digest. A call with an invalid argument, including an
+  unknown new argument sent after rollback, is refused as that provider
+  refuses arguments that fail its schema today. While serving a major, the provider keeps valid every argument that
+  any earlier minor or patch of that major could send.
+- A different major is refused as `tool_major_changed`, with
+  `detail: {tool, expected, current}`. `expected` is the call's exact pin;
+  `current` is the provider's current `tp2` pin for that tool.
+- A versioned provider maps each `tp1` pin it ever shipped to a version from
+  its own shipped-pin history, then applies the same-major rule. An unmapped
+  `tp1` pin keeps the legacy refusals: `tool_schema_changed {tool, expected,
+  current}` when the digest can no longer be honoured, or
+  `tool_semantics_changed {tool, expected, current}` when semantics can no
+  longer be honoured. A provider without `version` keeps legacy admission
+  unchanged, including keeping argument changes additive so old schemas stay
+  servable.
+- `test-vectors/tool-provider-v1/tool-versions.json` shows a versioned catalog,
+  its view tool, and both pin forms in admission and refusal examples.
 - Every request gets exactly one terminal frame (`RESPONSE`, `STREAM_END` or
   `ERROR`), and it is the last frame: on success, refusal, cancel, drain, and
   when the provider stops tracking the request.
@@ -916,7 +950,7 @@ responsibilities, not behaviors checked by this provider kit.
 - Refusal codes: `unknown_tool {tool}` for a tool the provider does not serve;
   `tool_disabled {tool}` for a disabled tool; and, recorded by the runner as
   the call's error result and never re-dispatched, `tool_schema_changed`,
-  `tool_semantics_changed`, `tool_unavailable {tool, reason: retired |
+  `tool_semantics_changed`, `tool_major_changed`, `tool_unavailable {tool, reason: retired |
   under_review}` and `capability_not_admitted`.
 - Model-shaped arguments are coerced before anything records, hashes or
   checks them. Scope, owner and agent are never arguments; they come from the

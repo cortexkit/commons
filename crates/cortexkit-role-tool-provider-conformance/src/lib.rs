@@ -47,5 +47,6 @@ pub use route::{
 };
 pub use runner::{run_suite, SetupError};
 pub use subject::{
-    CallModeProbe, CallSpec, Capability, ScopedPrincipals, ToolProviderSubject, UserCommandScope,
+    CallModeProbe, CallSpec, Capability, MinorVersionProbe, ScopedPrincipals, ToolProviderSubject,
+    ToolVersionFixture, UserCommandScope,
 };

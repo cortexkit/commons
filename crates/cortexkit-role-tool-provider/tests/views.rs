@@ -10,6 +10,8 @@ use cortexkit_role_tool_provider::{
 };
 use serde_json::{json, Value};
 
+const VIEW_TOOLS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/view-tools.json");
+
 fn fixture() -> Value {
     serde_json::from_str(include_str!("../test-vectors/tool-provider-v1/views.json")).unwrap()
 }
@@ -46,8 +48,10 @@ fn shared_views_vectors_validate_and_round_trip() {
 
 #[test]
 fn view_halves_validate_reader_and_writer_vectors() {
-    let fixture: Value =
-        serde_json::from_str(cortexkit_role_tool_provider::vectors::VIEW_HALVES_JSON).unwrap();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../test-vectors/tool-provider-v1/view-halves.json"
+    ))
+    .unwrap();
     let pin = fixture["pin"].as_str().unwrap();
     let request = ViewsRequest::new(vec![pin.into()]);
 
@@ -184,13 +188,13 @@ fn template_revisions_replace_only_the_template() {
 }
 
 fn view_tools_fixture() -> Value {
-    serde_json::from_str(cortexkit_role_tool_provider::vectors::VIEW_TOOLS_JSON).unwrap()
+    serde_json::from_str(VIEW_TOOLS_JSON).unwrap()
 }
 
 #[test]
 fn view_tool_vectors_are_identical_in_both_packages() {
     assert_eq!(
-        cortexkit_role_tool_provider::vectors::VIEW_TOOLS_JSON,
+        VIEW_TOOLS_JSON,
         cortexkit_role_tool_display::vectors::VIEW_TOOLS_JSON
     );
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.17
+
+- Add optional tool `version`, canonical `tp2` pins, `tool_major_changed` and additive tool-view revisions. Older `CatalogTool` readers ignore `version`; their `tp1` API remains available. Use `VersionedSchemaPin` and `check_versioned_call` to handle both schemes.
+
 ## 0.15.16
 
 - Clarify the notice views-bucket value wording and add a pinned sample; no wire change.

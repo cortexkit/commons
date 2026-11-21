@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.1
+
+- Track llm-runner `0.9`.
+
 - Contract text only (§1): a consumer's other routes to the same module for
   a session, such as tool or compaction routes, use the hook route's
   `(harness, session)`, so the module sees one session.

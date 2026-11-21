@@ -10,7 +10,7 @@ use cortexkit_role_harness::{
     CrashDriver, DriverHandle, KillPoint, RealKillVerdict, RouteStamp, Trigger,
 };
 use cortexkit_role_tool_provider::{
-    call::{SchemaPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
+    call::{SchemaPin, ToolMajorPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
         check_flat_schema, check_modes, check_presets, check_reply, is_schema_digest,
         params_for_capabilities, schema_digest, session_capabilities, system_text_digest,
@@ -75,6 +75,14 @@ impl std::fmt::Display for SetupError {
 impl std::error::Error for SetupError {}
 
 type CaseResult = Result<(), String>;
+
+enum VersionCase {
+    Older,
+    NewerArgument,
+    DifferentMajor,
+    Malformed,
+    Shipped,
+}
 
 /// Mints call keys that are unique within one run.
 struct KeyMint(u64);
@@ -166,8 +174,8 @@ where
     // The catalog's own declarations decide whether result and fork checks apply;
     // adapter capabilities cannot opt out of a promise. Catalog/setup errors must
     // fail the case rather than hide as a skip.
-    let (has_tool_result_v1, has_read_only) = match &main {
-        Err(_) => (true, true),
+    let (has_tool_result_v1, has_read_only, has_tool_versions) = match &main {
+        Err(_) => (true, true, true),
         Ok(handle) => {
             let case = Case {
                 subject,
@@ -177,15 +185,16 @@ where
                 capabilities: &capabilities,
             };
             match case.plain_route().await {
-                Err(_) => (true, true),
+                Err(_) => (true, true, true),
                 Ok(route) => match case.catalog(&route).await {
-                    Err(_) => (true, true),
+                    Err(_) => (true, true, true),
                     Ok(catalog) => (
                         catalog
                             .tools
                             .iter()
                             .any(|tool| tool.result_format == Some(ResultFormat::ToolResultV1)),
                         catalog.tools.iter().any(|tool| tool.read_only),
+                        catalog.tools.iter().any(|tool| tool.version.is_some()),
                     ),
                 },
             }
@@ -194,6 +203,10 @@ where
     capabilities.remove(&Capability::ToolResultV1);
     if has_tool_result_v1 {
         capabilities.insert(Capability::ToolResultV1);
+    }
+    capabilities.remove(&Capability::ToolVersions);
+    if has_tool_versions {
+        capabilities.insert(Capability::ToolVersions);
     }
 
     capabilities.remove(&Capability::UserCommands);
@@ -535,6 +548,17 @@ where
             "call_key_well_formed_accepted" => self.call_key_well_formed_accepted().await,
             "schema_pin_current_accepted" => self.schema_pin_current_accepted().await,
             "schema_pin_malformed_refused" => self.schema_pin_malformed_refused().await,
+            "tool_versions_older_minor_accepted" => self.tool_versions(VersionCase::Older).await,
+            "tool_versions_newer_minor_argument_refused" => {
+                self.tool_versions(VersionCase::NewerArgument).await
+            }
+            "tool_versions_different_major_refused" => {
+                self.tool_versions(VersionCase::DifferentMajor).await
+            }
+            "tool_versions_malformed_pin_refused" => {
+                self.tool_versions(VersionCase::Malformed).await
+            }
+            "tool_versions_shipped_tp1_admitted" => self.tool_versions(VersionCase::Shipped).await,
             "withdraw_unknown_call" => self.withdraw_unknown_call(mint.next(name)).await,
             "withdraw_answer_identical_on_repeat_and_owner" => {
                 self.withdraw_identical(mint.next(name)).await
@@ -1614,7 +1638,8 @@ where
             .iter()
             .find(|tool| tool.name == name)
             .ok_or_else(|| format!("the quick call's tool {name} is not in the catalog"))?;
-        let pin = SchemaPin::new(&name, &tool.schema_digest, tool.semantics)
+        let pin = tool
+            .schema_pin()
             .encode()
             .map_err(|e| format!("the current pin cannot be encoded: {e}"))?;
         let exchange = request(&route, self.pinned_quick_call(&pin)).await?;
@@ -1648,6 +1673,128 @@ where
                 .map_err(|e| format!("schema_pin {pin:?}: {e}"))?;
         }
         Ok(())
+    }
+
+    async fn tool_versions(&self, case: VersionCase) -> CaseResult {
+        let fixture = self
+            .subject
+            .tool_version_fixture()
+            .ok_or("versioned catalog requires tool_version_fixture")?;
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        let tool = catalog
+            .tools
+            .iter()
+            .find(|tool| tool.name == fixture.tool)
+            .ok_or("fixture tool is not in the live catalog")?;
+        let version = tool.version.ok_or("fixture tool has no version")?;
+        let current_digest = schema_digest(&tool.input_schema).map_err(|e| e.to_string())?;
+        if tool.schema_digest != current_digest {
+            return Err("fixture tool's live catalog digest does not match its schema".into());
+        }
+        let current = tool.schema_pin().encode().map_err(|e| e.to_string())?;
+        let pin_for = |digest: &str, major| {
+            ToolMajorPin::new(&fixture.tool, digest, major)
+                .encode()
+                .map_err(|e| e.to_string())
+        };
+        let other_digest = |probe: &crate::MinorVersionProbe, older: bool| {
+            let digest = schema_digest(&probe.input_schema).map_err(|e| e.to_string())?;
+            let minor_order = if older {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+            if probe.version.major != version.major
+                || probe.version.minor.cmp(&version.minor) != minor_order
+                || digest == current_digest
+            {
+                return Err(format!(
+                    "fixture needs a structurally distinct {} minor of major {}",
+                    if older { "older" } else { "newer" },
+                    version.major
+                ));
+            }
+            Ok(digest)
+        };
+        let (pin, arguments) = match case {
+            VersionCase::Older => (
+                pin_for(&other_digest(&fixture.older, true)?, version.major)?,
+                &fixture.older.arguments,
+            ),
+            VersionCase::NewerArgument => {
+                let digest = other_digest(&fixture.newer, false)?;
+                if !fixture
+                    .newer
+                    .arguments
+                    .as_object()
+                    .is_some_and(|arguments| {
+                        arguments.keys().any(|key| {
+                            fixture.newer.input_schema["properties"].get(key).is_some()
+                                && tool.input_schema["properties"].get(key).is_none()
+                        })
+                    })
+                {
+                    return Err(
+                        "fixture must send an argument declared only by the newer schema".into(),
+                    );
+                }
+                (pin_for(&digest, version.major)?, &fixture.newer.arguments)
+            }
+            VersionCase::DifferentMajor => (
+                pin_for(&current_digest, version.major.wrapping_add(1))?,
+                &fixture.older.arguments,
+            ),
+            VersionCase::Malformed => {
+                let (prefix, major) = current.rsplit_once(':').ok_or("missing pin major")?;
+                (format!("{prefix}:0{major}"), &fixture.older.arguments)
+            }
+            VersionCase::Shipped => {
+                let digest = other_digest(&fixture.older, true)?;
+                let legacy = SchemaPin::parse(&fixture.shipped_tp1).map_err(|e| e.to_string())?;
+                if legacy.tool != fixture.tool || legacy.schema_digest != digest {
+                    return Err(
+                        "shipped tp1 must name the fixture tool and its exact older digest".into(),
+                    );
+                }
+                (fixture.shipped_tp1.clone(), &fixture.older.arguments)
+            }
+        };
+        let mut body = call_body(&fixture.tool, arguments.clone(), None);
+        body[SCHEMA_PIN_FIELD] = json!(pin);
+        let exchange = request(&route, body).await?;
+        match case {
+            VersionCase::Older | VersionCase::Shipped => {
+                match single_terminal(&exchange).map_err(|e| e.to_string())? {
+                    ObservedFrame::Error(error) => Err(format!("pin {pin} was refused: {error:?}")),
+                    _ => Ok(()),
+                }
+            }
+            VersionCase::NewerArgument => {
+                let error = expect_error("newer minor with an unknown argument", exchange)?;
+                if error.code == errors::TOOL_MAJOR_CHANGED {
+                    return Err(format!(
+                        "same major got a major refusal instead of an argument refusal ({})",
+                        fixture.argument_refusal_code
+                    ));
+                }
+                Ok(())
+            }
+            VersionCase::DifferentMajor => {
+                let error = expect_error("different tool major", exchange)?;
+                if error.code != errors::TOOL_MAJOR_CHANGED
+                    || error.detail
+                        != Some(json!({"tool":fixture.tool,"expected":pin,"current":current}))
+                {
+                    return Err(format!("different major did not identify the exact refused and current pins: {error:?}"));
+                }
+                Ok(())
+            }
+            VersionCase::Malformed => expect_invalid_field(
+                &expect_error("malformed tp2 pin", exchange)?,
+                SCHEMA_PIN_FIELD,
+            ),
+        }
     }
 
     async fn withdraw_unknown_call(&self, key: String) -> CaseResult {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.40
+
+- Track llm-runner `0.9`.
+
 ## 0.7.39
 
 - Clarify that LLM lease renewal is optional and reports, including

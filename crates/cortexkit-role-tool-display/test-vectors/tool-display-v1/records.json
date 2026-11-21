@@ -1,5 +1,10 @@
 {
   "schema":{"name":"command","revision":1,"fields":{"paths":"project_path","exit_code":"integer","ready":"boolean","job":"id"},"completion_fields":{"tail":"text_lines","finished":"boolean"}},
+  "join_cases":[
+    {"name":"drop_extensions_from_record","kind":"record","body":{"durationMs":2,"outcome":"success","exit_code":0,"count":3,"tail":[{"text":"Done"}]},"joined":{"durationMs":2,"outcome":"success","exit_code":0}},
+    {"name":"drop_extensions_from_completion","kind":"completion","body":{"outcome":"success","tail":[{"text":"Done"}],"new_info":{"unrecognized":true}},"joined":{"outcome":"success","tail":[{"text":"Done"}]}},
+    {"name":"wrong_kind_leaves_body_out","kind":"completion","body":{"outcome":"success","exit_code":"0","new_info":null},"field":"exit_code"}
+  ],
   "cases":[
     {"name":"required","kind":"record","body":{"durationMs":12,"outcome":"success"},"valid":true},
     {"name":"missing_duration","kind":"record","body":{"outcome":"success"},"valid":false,"field":"durationMs"},

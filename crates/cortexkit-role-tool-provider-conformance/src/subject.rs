@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use async_trait::async_trait;
 use cortexkit_role_harness::{Harness, HarnessError, RouteStamp};
-use cortexkit_role_tool_provider::{scope::ScopeIdentity, CallMode};
+use cortexkit_role_tool_provider::{catalog::ToolVersion, scope::ScopeIdentity, CallMode};
 use serde_json::Value;
 
 /// A capability a conformance case requires of the provider or its harness.
@@ -27,6 +27,8 @@ pub enum Capability {
     /// The provider decodes the top-level `schema_pin` and checks it against
     /// its catalog.
     SchemaPin,
+    /// At least one live catalog tool publishes a semantic version.
+    ToolVersions,
     /// The provider holds calls past its reply and serves `tool.withdraw`.
     /// See [`ToolProviderSubject::held_call`].
     HeldCalls,
@@ -105,6 +107,7 @@ impl Capability {
             Self::ScopeStamp => "scope_stamp",
             Self::CallKey => "call_key",
             Self::SchemaPin => "schema_pin",
+            Self::ToolVersions => "tool_versions",
             Self::HeldCalls => "held_calls",
             Self::DisableTool => "disable_tool",
             Self::Cancellation => "cancellation",
@@ -187,6 +190,28 @@ pub enum UserCommandScope {
 pub struct CallModeProbe {
     pub call: CallSpec,
     pub unlisted_mode: CallMode,
+}
+
+/// The schema and safe call sent by another minor in the same major.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinorVersionProbe {
+    pub version: ToolVersion,
+    pub input_schema: Value,
+    pub arguments: Value,
+}
+
+/// Version history for one tool in the live catalog. Both minor probes must
+/// have schemas structurally different from the live version's schema.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolVersionFixture {
+    pub tool: String,
+    pub older: MinorVersionProbe,
+    /// Supplies an argument declared only by the newer schema.
+    pub newer: MinorVersionProbe,
+    /// Shipped `tp1` pin mapped to `older.version`, with its exact old digest.
+    pub shipped_tp1: String,
+    /// The error code this provider uses for arguments that fail its schema.
+    pub argument_refusal_code: String,
 }
 
 /// A live tool provider under test: its harness plus the few facts the
@@ -318,6 +343,12 @@ pub trait ToolProviderSubject: Harness {
     /// A call that completes promptly and successfully. Its tool must be in
     /// the catalog.
     fn quick_call(&self) -> CallSpec;
+
+    /// Required when a tool in the catalog publishes `version`. The runner
+    /// sends the probes to the live route; the fixture only supplies history.
+    fn tool_version_fixture(&self) -> Option<ToolVersionFixture> {
+        None
+    }
 
     /// Safe prompt calls covering each tool marked `read_only`. The fixture's
     /// [`Self::plain_stamp`] must bind the probe to the head's own session

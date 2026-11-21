@@ -1,12 +1,12 @@
 //! Optional display views, fetched by the display server off the write path.
-//! For a tool pin, the record schema and reads never change; its template can
-//! be replaced with a higher `template_revision` (CONTRACT §2.1).
+//! Under a tool pin, reads stay fixed and the record schema can only grow.
+//! Updates require a higher `template_revision` (CONTRACT §2.1).
 
 mod notice;
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use subc_protocol::ErrorBody;
 
@@ -14,8 +14,11 @@ pub use cortexkit_role_tool_display::{FieldKind, RecordSchema};
 pub use notice::{NoticeView, NoticeViewDefinition, NoticeViewTemplates};
 
 use crate::{
-    call::{validate_call_key, validate_schema_pin, SchemaPin},
-    catalog::{schema_digest, CatalogTool},
+    call::{
+        validate_call_key, validate_schema_pin, SchemaPin, ToolMajorPin,
+        VERSIONED_SCHEMA_PIN_PREFIX,
+    },
+    catalog::{decode_version, schema_digest, CatalogTool, ToolVersion},
     errors,
 };
 
@@ -66,12 +69,13 @@ impl ViewRead {
 
 /// The catalog definition needed to recover a pin's input schema after the
 /// tool has left the provider's current catalog.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct ViewTool {
     pub name: String,
     pub input_schema: Value,
     pub semantics: u64,
+    pub version: Option<ToolVersion>,
 }
 
 impl ViewTool {
@@ -80,23 +84,79 @@ impl ViewTool {
             name: name.into(),
             input_schema,
             semantics,
+            version: None,
         }
     }
 
-    /// Compute the canonical `tp1` pin using the catalog's structural schema
+    pub fn new_versioned(
+        name: impl Into<String>,
+        input_schema: Value,
+        version: ToolVersion,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            input_schema,
+            semantics: 0,
+            version: Some(version),
+        }
+    }
+
+    /// Compute the canonical pin using the catalog's structural schema
     /// digest, not a digest supplied by the view's writer.
     pub fn schema_pin(&self) -> Result<String, ErrorBody> {
         let digest = schema_digest(&self.input_schema)
             .map_err(|error| errors::invalid_request("tool.input_schema", error.to_string()))?;
-        SchemaPin::new(&self.name, digest, self.semantics)
-            .encode()
-            .map_err(|error| errors::invalid_request("tool", error.to_string()))
+        match self.version {
+            Some(version) => ToolMajorPin::new(&self.name, digest, version.major).encode(),
+            None => SchemaPin::new(&self.name, digest, self.semantics).encode(),
+        }
+        .map_err(|error| errors::invalid_request("tool", error.to_string()))
     }
 }
 
 impl From<&CatalogTool> for ViewTool {
     fn from(tool: &CatalogTool) -> Self {
-        Self::new(&tool.name, tool.input_schema.clone(), tool.semantics)
+        match tool.version {
+            Some(version) => Self::new_versioned(&tool.name, tool.input_schema.clone(), version),
+            None => Self::new(&tool.name, tool.input_schema.clone(), tool.semantics),
+        }
+    }
+}
+
+impl Serialize for ViewTool {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut wire = serializer.serialize_struct("ViewTool", 3)?;
+        wire.serialize_field("name", &self.name)?;
+        wire.serialize_field("input_schema", &self.input_schema)?;
+        if let Some(version) = self.version {
+            wire.serialize_field("version", &version)?;
+        } else {
+            wire.serialize_field("semantics", &self.semantics)?;
+        }
+        wire.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ViewTool {
+    fn deserialize<D: Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Wire {
+            name: String,
+            input_schema: Value,
+            semantics: Option<u64>,
+            #[serde(default, deserialize_with = "decode_version")]
+            version: Option<ToolVersion>,
+        }
+        let wire = Wire::deserialize(decoder)?;
+        Ok(match wire.version {
+            Some(version) => Self::new_versioned(wire.name, wire.input_schema, version),
+            None => Self::new(
+                wire.name,
+                wire.input_schema,
+                wire.semantics
+                    .ok_or_else(|| serde::de::Error::missing_field("semantics"))?,
+            ),
+        })
     }
 }
 
@@ -146,8 +206,8 @@ impl ViewHalfOf {
 /// Provider schema, the detail reads the app server may call, and a template
 /// that only the app server interprets.
 ///
-/// For one pin, `record_schema` and `reads` never change. `template` may be
-/// replaced, but only together with a higher `template_revision` (§2.1).
+/// For one pin, `reads` never change. A higher `template_revision` can replace
+/// the template, refresh description text, or extend `record_schema` (§2.1).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ViewManifest {
@@ -159,10 +219,8 @@ pub struct ViewManifest {
     /// serializes with the same members as before this field existed.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub template_revision: u64,
-    /// The tool definition behind this pin. Absent on older providers' views;
-    /// omission preserves their serialized bytes. A provider keeps serving the
-    /// first one it served for a pin; a matching pin fixes the name, the
-    /// structural input schema and `semantics`, not `description` text.
+    /// The tool definition behind this pin. Absent on older providers' `tp1`
+    /// views. The pin fixes the name, structure and semantics or major.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ViewTool>,
     /// The paired wake record. An absent marker means an ordinary row.
@@ -179,18 +237,15 @@ fn is_zero(value: &u64) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ViewChange {
-    /// Same record schema, reads, template revision and template as the
-    /// kept view. `tool` isn't compared.
+    /// Same schema, reads, template revision and template as the kept view,
+    /// with no change to a previously pinned tool definition.
     Same,
-    /// Same record schema and reads with a higher template revision: keep
-    /// the fetched view in place of the kept one, its revision included.
+    /// Higher template revision with unchanged reads and an unchanged or
+    /// grown record schema: replace the kept view.
     NewerTemplate,
-    /// Same record schema and reads with a lower template revision: keep the
-    /// kept view.
+    /// Lower template revision with an unchanged or older record schema.
     Stale,
-    /// A changed record schema or reads, whatever the revision, or the kept
-    /// revision with a different template. That breaks the provider's §2.1
-    /// obligation; keep the kept view.
+    /// An incompatible change or a changed definition at the kept revision.
     Conflict,
 }
 
@@ -230,6 +285,12 @@ impl ViewManifest {
     /// and not the writer or the runner's stored call pin.
     pub fn check_pin(&self, pin: &str) -> Result<bool, ErrorBody> {
         let Some(tool) = &self.tool else {
+            if pin.starts_with(VERSIONED_SCHEMA_PIN_PREFIX) {
+                return Err(errors::invalid_request(
+                    "tool",
+                    "a tp2 view requires a versioned tool",
+                ));
+            }
             return Ok(false);
         };
         if tool.schema_pin()? != pin {
@@ -243,14 +304,49 @@ impl ViewManifest {
 
     /// Compare this freshly fetched view with the one kept for the same pin.
     pub fn compare_with_kept(&self, kept: &ViewManifest) -> ViewChange {
-        if self.record_schema != kept.record_schema || self.reads != kept.reads {
+        let same_schema = self.record_schema == kept.record_schema;
+        if self.reads != kept.reads {
             return ViewChange::Conflict;
         }
+        let same_tool = match (&self.tool, &kept.tool) {
+            (Some(fetched), Some(held)) => {
+                let (Ok(fetched_pin), Ok(held_pin)) = (fetched.schema_pin(), held.schema_pin())
+                else {
+                    return ViewChange::Conflict;
+                };
+                if fetched_pin != held_pin {
+                    return ViewChange::Conflict;
+                }
+                if self.template_revision > kept.template_revision
+                    && fetched.version != held.version
+                    && (fetched.version < held.version
+                        || (same_schema && fetched.input_schema == held.input_schema))
+                {
+                    return ViewChange::Conflict;
+                }
+                fetched == held
+            }
+            (None, Some(_)) => return ViewChange::Conflict,
+            // Older views can gain a checked tool definition without changing revision.
+            _ => true,
+        };
         match self.template_revision.cmp(&kept.template_revision) {
-            std::cmp::Ordering::Greater => ViewChange::NewerTemplate,
-            std::cmp::Ordering::Less => ViewChange::Stale,
-            std::cmp::Ordering::Equal if self.template == kept.template => ViewChange::Same,
-            std::cmp::Ordering::Equal => ViewChange::Conflict,
+            std::cmp::Ordering::Greater
+                if same_schema || self.record_schema.is_growth_of(&kept.record_schema) =>
+            {
+                ViewChange::NewerTemplate
+            }
+            std::cmp::Ordering::Less
+                if same_schema || kept.record_schema.is_growth_of(&self.record_schema) =>
+            {
+                ViewChange::Stale
+            }
+            std::cmp::Ordering::Equal
+                if same_schema && same_tool && self.template == kept.template =>
+            {
+                ViewChange::Same
+            }
+            _ => ViewChange::Conflict,
         }
     }
 }
@@ -348,6 +444,9 @@ impl ViewsReply {
                         &format!("views.{pin}"),
                         "a notice pin requires a notice view",
                     ));
+                }
+                if pin.starts_with(VERSIONED_SCHEMA_PIN_PREFIX) {
+                    view.check_pin(pin)?;
                 }
                 view.record_schema.validate().map_err(|problem| {
                     errors::invalid_request(

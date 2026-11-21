@@ -970,6 +970,16 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::PLAN_NOTES_WITHOUT_SESSION_CHANGE,
         ),
         (
+            capabilities::TOOL_VERSIONS,
+            capabilities::SESSION_CHANGE,
+            "tool_versions_without_session_change",
+        ),
+        (
+            capabilities::TOOL_VERSIONS,
+            capabilities::LIVE_EVENTS,
+            "tool_versions_without_live_events",
+        ),
+        (
             capabilities::RETRACT_OWN_SEND,
             capabilities::RETRACT,
             problem_names::RETRACT_OWN_SEND_WITHOUT_RETRACT,
@@ -1299,6 +1309,50 @@ mod message_senders_tests {
 #[cfg(test)]
 mod live_ids_tests {
     use super::*;
+
+    #[test]
+    fn tool_versions_requires_session_change_and_live_events() {
+        let ops = crate::REQUIRED_OPS
+            .iter()
+            .copied()
+            .chain(
+                [capabilities::SESSION_CHANGE, capabilities::LIVE_EVENTS]
+                    .into_iter()
+                    .flat_map(|group| capabilities::group_ops(group).unwrap().iter().copied()),
+            )
+            .map(String::from)
+            .collect();
+        let describe = RoleDescribe::new(vec![Major::new(crate::PROVIDES, ops, "alpha")], "0.9.0")
+            .with_session_capabilities_from("baseline");
+        let declaration = |groups: &[&str]| {
+            serde_json::to_value(
+                describe
+                    .clone()
+                    .with_capabilities(groups.iter().map(|&group| group.into()).collect()),
+            )
+            .unwrap()
+        };
+        for (present, missing) in [
+            (
+                capabilities::LIVE_EVENTS,
+                "tool_versions_without_session_change",
+            ),
+            (
+                capabilities::SESSION_CHANGE,
+                "tool_versions_without_live_events",
+            ),
+        ] {
+            let problems =
+                check_describe(&declaration(&[capabilities::TOOL_VERSIONS, present])).unwrap_err();
+            assert!(problems.contains(&DescribeProblem::Undecodable(missing.into())));
+        }
+        assert!(check_describe(&declaration(&[
+            capabilities::TOOL_VERSIONS,
+            capabilities::LIVE_EVENTS,
+            capabilities::SESSION_CHANGE
+        ]))
+        .is_ok());
+    }
 
     #[test]
     fn live_ids_requires_live_events_by_name() {

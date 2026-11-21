@@ -45,6 +45,7 @@ pub mod surfaces {
 /// `invalid_params` naming it.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct RefreshRequest {
     /// The full fetch plan, as [`crate::send::SendRequest::plan`] carries
     /// it, passed to providers verbatim except for runner-only hints such as
@@ -54,13 +55,20 @@ pub struct RefreshRequest {
     pub policy: String,
     /// Chosen by the owner, strictly increasing per session.
     pub generation: u64,
+    /// Providers in this plan whose catalogs must be fetched fresh. Send only
+    /// to a runner that declares `tool_versions`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "decode_refetch"
+    )]
+    pub refetch: Option<Vec<String>>,
 }
 
 /// Strict `session.refresh` body for a runner declaring `refresh_relaunch`.
 /// Owners must never send `required` to a runner without that group: those
 /// runners continue decoding [`RefreshRequest`] and refuse unknown fields.
-/// The next breaking release will fold `required` into `RefreshRequest` and
-/// mark that type non-exhaustive; this separate type preserves struct literals.
+/// This separate type keeps the `required` field off the base request.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -68,6 +76,12 @@ pub struct RelaunchRefreshRequest {
     pub plan: Map<String, Value>,
     pub policy: String,
     pub generation: u64,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "decode_refetch"
+    )]
+    pub refetch: Option<Vec<String>>,
     /// Absent means false: an unsuccessful relaunch may run on the old plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
@@ -154,6 +168,7 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
             plan: request.plan,
             policy: request.policy,
             generation: request.generation,
+            refetch: request.refetch,
             required: None,
             system_note: None,
         }
@@ -198,7 +213,13 @@ impl RefreshRequest {
             plan,
             policy: policy.into(),
             generation,
+            refetch: None,
         }
+    }
+
+    pub fn with_refetch(mut self, providers: Vec<String>) -> Self {
+        self.refetch = Some(providers);
+        self
     }
 
     /// Refuse a policy that names no rung of [`rungs::ALL`], with the field
@@ -211,7 +232,7 @@ impl RefreshRequest {
 
 /// The `session.refresh` answer. Decoded leniently.
 ///
-/// An identical repeat (the same generation, plan identity and policy) gets
+/// An identical repeat (same generation, plan identity, policy and `refetch`) gets
 /// the same answer as the request it repeats.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -483,13 +504,48 @@ pub fn refresh_order(
     policy: &str,
     earlier: Option<(&str, &str)>,
 ) -> RefreshOrder {
+    refresh_order_with_refetch(
+        accepted,
+        generation,
+        (plan_identity, policy, None),
+        earlier.map(|(plan, policy)| (plan, policy, None)),
+    )
+}
+
+/// Plan identity, policy and the optional list as accepted for a generation.
+pub type VersionedRefreshIdentity<'a> = (&'a str, &'a str, Option<&'a [String]>);
+
+/// Classify a refresh including the exact `refetch` list for repeat detection.
+pub fn refresh_order_with_refetch(
+    accepted: u64,
+    generation: u64,
+    identity: VersionedRefreshIdentity<'_>,
+    earlier: Option<VersionedRefreshIdentity<'_>>,
+) -> RefreshOrder {
     if generation > accepted {
         RefreshOrder::New
-    } else if earlier == Some((plan_identity, policy)) {
+    } else if earlier == Some(identity) {
         RefreshOrder::Repeat
     } else {
         RefreshOrder::Stale
     }
+}
+
+pub(crate) fn decode_refetch<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+) -> Result<Option<Vec<String>>, D::Error> {
+    Vec::<String>::deserialize(decoder)
+        .map(Some)
+        .map_err(|error| serde::de::Error::custom(format!("invalid refetch: {error}")))
+}
+
+/// Refuse an explicit `refetch` without `tool_versions` as `invalid_params`,
+/// naming this field. The runner also checks the ids against the request plan.
+pub fn check_refetch(refetch: Option<&[String]>, tool_versions: bool) -> Result<(), &'static str> {
+    if refetch.is_some() && !tool_versions {
+        return Err("refetch");
+    }
+    Ok(())
 }
 
 /// Check an owner send's plan while a change may be pending: a plan that is
@@ -531,6 +587,89 @@ pub fn admission_plan<'a>(
 mod tests {
     use super::*;
     use crate::{baseline::BaselineReply, capabilities, errors, ops, vectors};
+
+    #[test]
+    fn tool_versions_refetch_is_gated_and_part_of_repeat_identity() {
+        let file = vectors::load("session-change.json");
+        let wire = file["requests"][0]["request"].clone();
+        let request: RefreshRequest = vectors::round_trip("refetch", &wire);
+        let relaunch: RelaunchRefreshRequest = vectors::round_trip("relaunch refetch", &wire);
+        assert_eq!(RelaunchRefreshRequest::from(request.clone()), relaunch);
+        let notes: crate::plan_notes::PlanNotesRefreshRequest =
+            vectors::round_trip("plan notes refetch", &wire);
+        assert_eq!(
+            crate::plan_notes::PlanNotesRefreshRequest::from(request.clone()),
+            notes
+        );
+        assert_eq!(
+            request.refetch.as_deref(),
+            Some(["example.tools".to_owned()].as_slice())
+        );
+        let error = check_refetch(request.refetch.as_deref(), false).unwrap_err();
+        assert_eq!(
+            file["tool_versions"]["non_declaring_refusal"]["code"],
+            errors::INVALID_PARAMS
+        );
+        assert_eq!(
+            file["tool_versions"]["non_declaring_refusal"]["detail"]["field"],
+            error
+        );
+        assert_eq!(check_refetch(request.refetch.as_deref(), true), Ok(()));
+        let identity = (
+            "same-plan",
+            request.policy.as_str(),
+            request.refetch.as_deref(),
+        );
+        assert_eq!(
+            refresh_order_with_refetch(4, 5, identity, None),
+            RefreshOrder::New
+        );
+        assert_eq!(
+            refresh_order_with_refetch(5, 5, identity, Some(identity)),
+            RefreshOrder::Repeat
+        );
+        assert_eq!(
+            refresh_order_with_refetch(
+                5,
+                5,
+                identity,
+                Some(("same-plan", request.policy.as_str(), None))
+            ),
+            RefreshOrder::Stale
+        );
+        let mut malformed = wire;
+        malformed["refetch"] = Value::Null;
+        assert!(serde_json::from_value::<RefreshRequest>(malformed)
+            .unwrap_err()
+            .to_string()
+            .contains("refetch"));
+    }
+
+    #[test]
+    fn tool_versions_event_decodes_without_resetting_the_display() {
+        use crate::live::{LiveEvent, ToolChanged};
+        let file = vectors::load("session-change.json");
+        let wire = &file["tool_versions"]["live_frame"];
+        let frame: crate::subscribe::SubscribeEvent = vectors::round_trip("tool changed", wire);
+        let expected = LiveEvent::ToolChanged(ToolChanged::new(
+            "example.tools",
+            "echo",
+            wire["event"]["expected"].as_str().unwrap(),
+            wire["event"]["current"].as_str().unwrap(),
+        ));
+        assert_eq!(frame.live_event(), Some(expected.clone()));
+        assert_eq!(
+            LiveEvent::decode_strict(&wire["event"]),
+            Ok(expected.clone())
+        );
+        assert_eq!(serde_json::to_value(expected).unwrap(), wire["event"]);
+        let future = serde_json::json!({"type":"unrecognized_event"});
+        assert_eq!(
+            serde_json::from_value::<LiveEvent>(future.clone()).unwrap(),
+            LiveEvent::DisplayReset
+        );
+        assert!(LiveEvent::decode_strict(&future).is_err());
+    }
 
     #[test]
     fn requests_round_trip_and_refuse_unknown_fields() {

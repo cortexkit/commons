@@ -157,6 +157,9 @@ pub const VIEW_TOOLS_JSON: &str = include_str!("../test-vectors/tool-provider-v1
 /// Mixed tool and notice views, bucket keys and invalid notice entries.
 pub const NOTICE_VIEWS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/notice-views.json");
+/// Versioned tool catalogs, pin admission and refusal examples, and a pinned view tool.
+pub const TOOL_VERSIONS_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/tool-versions.json");
 /// The vectors' `README.md`.
 pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.md");
 
@@ -211,6 +214,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("model-visible-size.json", MODEL_VISIBLE_SIZE_JSON),
     ("README.md", README),
     ("reply-custody.json", REPLY_CUSTODY_JSON),
+    ("tool-versions.json", TOOL_VERSIONS_JSON),
 ];
 
 /// `sha256sum` output for every file in [`FILES`].

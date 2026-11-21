@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- Add `tool_versions`, refresh `refetch`, `tool_changed` and compatible tool updates at prefix rebuilds.
+- Rust upgrade: use `RefreshRequest::new` instead of struct literals and `.with_refetch(...)` when supported. Upgrade live-event readers before emitting `tool_changed`.
+
 ## 0.8.66
 
 - Name `host_interrupted` for a turn the host aborted without exiting.
