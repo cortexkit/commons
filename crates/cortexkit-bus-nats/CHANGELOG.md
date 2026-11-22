@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.8
+
+- Add `NatsStreamCursor::next_or_undecodable` to let callers settle messages
+  from their own durable whose bus headers cannot be decoded. `next` is
+  unchanged, and both methods still discard foreign deliveries without replying.
+- Add `NatsStreamCursor::with_pull_expires` to set the server expiry for each
+  fetch without changing the connection's request timeout. Zero is clamped to
+  one nanosecond to keep the fetch bounded.
+
 ## 0.5.7
 
 - Stream cursors and work queues drop forged messages sent to the reply inbox

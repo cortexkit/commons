@@ -16,7 +16,7 @@ pub use connection::{
     CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionState, NatsPermissionViolations,
 };
 pub use register::{NatsRegister, NatsRegisterWatch, NatsRegisterWatchChange};
-pub use stream::{NatsStream, NatsStreamCursor};
+pub use stream::{NatsStream, NatsStreamCursor, Pulled, Undecodable};
 pub use work_queue::NatsWorkQueue;
 
 /// Lowest `async-nats` release accepted by this backend's manifest.

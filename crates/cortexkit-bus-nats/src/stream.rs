@@ -44,6 +44,28 @@ pub struct NatsStreamCursor {
     in_flight: Option<async_nats::jetstream::Message>,
 }
 
+/// A message pulled from this cursor's durable by [`NatsStreamCursor::next_or_undecodable`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Pulled {
+    /// A successfully decoded delivery, in flight until settled.
+    Delivery(StreamDelivery),
+    /// A message from this cursor's own durable whose bus headers could not be
+    /// decoded. It stays in flight: settle it with `ack`, `nak`, or `term`
+    /// before pulling again.
+    Undecodable(Undecodable),
+}
+
+/// Metadata and the bus header error for an undecodable message from this cursor's durable.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Undecodable {
+    pub stream_seq: u64,
+    pub delivery_count: u64,
+    pub subject: String,
+    pub error: BusError,
+}
+
 #[async_trait]
 impl Stream for NatsStream {
     type Cursor = NatsStreamCursor;
@@ -107,32 +129,16 @@ fn durable_name(owner: DurableOwner<'_>) -> BusResult<String> {
 #[async_trait]
 impl StreamCursor for NatsStreamCursor {
     async fn next(&mut self) -> BusResult<Option<StreamDelivery>> {
-        if self.in_flight.is_some() {
-            return Err(BusError::unavailable(
-                "the current delivery must be acknowledged, negatively acknowledged or terminated",
-            ));
+        match self.next_or_undecodable().await? {
+            Some(Pulled::Delivery(delivery)) => Ok(Some(delivery)),
+            Some(Pulled::Undecodable(undecodable)) => {
+                // Leave the message unsettled so a reader that understands its
+                // headers can process it on redelivery.
+                self.in_flight = None;
+                Err(undecodable.error)
+            }
+            None => Ok(None),
         }
-        let Some(genuine) = fetch_genuine(
-            &self.connection,
-            &self.consumer,
-            &self.origin,
-            self.pull_expires,
-            "consumer pull",
-        )
-        .await?
-        else {
-            return Ok(None);
-        };
-        let message = genuine.message;
-        let delivery = StreamDelivery {
-            stream_seq: genuine.stream_sequence,
-            // `delivered` from the delivery's metadata; the server counts
-            // from 1, so a negative value cannot occur on a real delivery.
-            delivery_count: u64::try_from(genuine.delivered).unwrap_or(0),
-            message: decode_message(&message)?,
-        };
-        self.in_flight = Some(message);
-        Ok(Some(delivery))
     }
 
     async fn ack(&mut self) -> BusResult<()> {
@@ -169,6 +175,61 @@ impl StreamCursor for NatsStreamCursor {
 }
 
 impl NatsStreamCursor {
+    /// Sets the expiry of each server fetch on this cursor, overriding the
+    /// connection's request timeout as the default. Zero is clamped to one
+    /// nanosecond, the smallest positive expiry, so the fetch stays bounded.
+    pub fn with_pull_expires(mut self, expires: Duration) -> Self {
+        self.pull_expires = expires.max(Duration::from_nanos(1));
+        self
+    }
+
+    /// Pulls a verified message from this cursor's durable, or returns `None`
+    /// if the fetch expires. Messages from other origins are dropped without
+    /// a reply, just as in [`StreamCursor::next`].
+    ///
+    /// Unlike `next`, this method keeps a message with undecodable bus headers
+    /// in flight. Both returned variants must be settled with `ack`, `nak`,
+    /// or `term` before another pull. A pull while a message is in flight
+    /// returns an error.
+    pub async fn next_or_undecodable(&mut self) -> BusResult<Option<Pulled>> {
+        if self.in_flight.is_some() {
+            return Err(BusError::unavailable(
+                "the current delivery must be acknowledged, negatively acknowledged or terminated",
+            ));
+        }
+        let Some(genuine) = fetch_genuine(
+            &self.connection,
+            &self.consumer,
+            &self.origin,
+            self.pull_expires,
+            "consumer pull",
+        )
+        .await?
+        else {
+            return Ok(None);
+        };
+        let message = genuine.message;
+        let stream_seq = genuine.stream_sequence;
+        // The server counts deliveries from 1, so a negative count cannot
+        // occur on a real delivery.
+        let delivery_count = u64::try_from(genuine.delivered).unwrap_or(0);
+        let pulled = match decode_message(&message) {
+            Ok(message) => Pulled::Delivery(StreamDelivery {
+                stream_seq,
+                delivery_count,
+                message,
+            }),
+            Err(error) => Pulled::Undecodable(Undecodable {
+                stream_seq,
+                delivery_count,
+                subject: message.subject.to_string(),
+                error,
+            }),
+        };
+        self.in_flight = Some(message);
+        Ok(Some(pulled))
+    }
+
     async fn ack_with(&mut self, kind: AckKind) -> BusResult<()> {
         let message = self
             .in_flight

@@ -21,7 +21,7 @@ use tempfile::TempDir;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, Instant};
 
-use crate::{CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionState};
+use crate::{CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionState, Pulled};
 
 const ADMIN_PUBLIC: &str = "UADMIN";
 const PARTICIPANT_PUBLIC: &str = "UPARTICIPANT";
@@ -361,6 +361,126 @@ async fn publish_reports_jetstream_duplicates() {
         .unwrap()
         .clone();
     assert_eq!(info.state.messages, 1);
+}
+
+#[tokio::test]
+async fn pull_cursor_can_term_undecodable_delivery() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let subject = "ck.box.peer.agent.s.deliver";
+    create_stream_and_consumer(
+        &admin,
+        "CK_BOX_PEER",
+        subject,
+        subject,
+        "c_agent",
+        -1,
+        Duration::from_millis(75),
+    )
+    .await;
+    let mut consumer = admin
+        .jetstream()
+        .get_consumer_from_stream::<pull::Config, _, _>("c_agent", "CK_BOX_PEER")
+        .await
+        .expect("get durable info");
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(
+        crate::codec::CONTENT_DIGEST_HEADER,
+        digest("bad").to_string(),
+    );
+    let malformed = admin
+        .jetstream()
+        .publish_with_headers(subject, headers, Bytes::new())
+        .await
+        .expect("publish without Nats-Msg-Id")
+        .await
+        .expect("store malformed message");
+    let stream = admin.stream("CK_BOX_PEER");
+    let mut cursor = stream
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("bind reader cursor");
+
+    let missing_id = BusError::absent("header Nats-Msg-Id");
+    assert_eq!(cursor.next().await.unwrap_err(), missing_id);
+    assert_eq!(
+        cursor.ack().await.unwrap_err(),
+        BusError::absent("in-flight stream delivery")
+    );
+    assert_eq!(consumer.info().await.unwrap().num_ack_pending, 1);
+
+    let pulled = cursor
+        .next_or_undecodable()
+        .await
+        .expect("pull after ack wait")
+        .expect("redelivery of the malformed message");
+    let Pulled::Undecodable(undecodable) = pulled else {
+        panic!("expected an undecodable message, got {pulled:?}");
+    };
+    assert_eq!(undecodable.stream_seq, malformed.sequence);
+    assert_eq!(undecodable.delivery_count, 2);
+    assert_eq!(undecodable.subject, subject);
+    assert_eq!(undecodable.error, missing_id);
+    cursor
+        .term(Some("missing_message_id"))
+        .await
+        .expect("terminate the undecodable message");
+    assert_eq!(consumer.info().await.unwrap().num_ack_pending, 0);
+
+    let genuine = stream
+        .publish(subject, "genuine", digest("genuine"), Headers::new())
+        .await
+        .expect("store following genuine message");
+    let pulled = cursor.next_or_undecodable().await.unwrap().unwrap();
+    let Pulled::Delivery(delivery) = pulled else {
+        panic!("expected a decoded delivery, got {pulled:?}");
+    };
+    assert_eq!(delivery.stream_seq, genuine.stream_sequence());
+    assert_eq!(delivery.message.id, "genuine");
+    cursor.ack().await.unwrap();
+}
+
+#[tokio::test]
+async fn pull_cursor_expires_empty_fetch_at_configured_duration() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let subject = "ck.box.peer.agent.s.deliver";
+    create_stream_and_consumer(
+        &admin,
+        "CK_BOX_PEER",
+        subject,
+        subject,
+        "c_agent",
+        -1,
+        Duration::from_secs(30),
+    )
+    .await;
+    let expires = Duration::from_millis(75);
+    let mut cursor = admin
+        .stream("CK_BOX_PEER")
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("bind reader cursor")
+        .with_pull_expires(expires);
+    let started = Instant::now();
+    // The default fetch expires at the connection timeout (2 seconds).
+    let delivery = tokio::time::timeout(Duration::from_secs(1), cursor.next())
+        .await
+        .expect("empty fetch should finish before the default expiry")
+        .expect("pull from empty durable");
+    assert!(delivery.is_none());
+    assert!(started.elapsed() >= expires, "empty fetch returned early");
+
+    let mut cursor = cursor.with_pull_expires(Duration::ZERO);
+    assert!(tokio::time::timeout(Duration::from_secs(1), cursor.next())
+        .await
+        .expect("zero expiry should be clamped to a bounded fetch")
+        .expect("pull with clamped expiry")
+        .is_none());
 }
 
 #[tokio::test]
