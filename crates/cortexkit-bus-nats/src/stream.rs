@@ -9,10 +9,10 @@ use cortexkit_bus_trait::{
     BusError, BusResult, ContentDigest, DurableOwner, Headers, PublishReceipt, Stream,
     StreamCursor, StreamDelivery,
 };
-use futures_util::StreamExt;
 
 use crate::codec::{decode_message, encode_headers};
 use crate::error::map_operation_error;
+use crate::pull_delivery::{fetch_genuine, PullOrigin};
 use crate::NatsConnection;
 
 #[derive(Clone)]
@@ -39,6 +39,7 @@ impl NatsStream {
 pub struct NatsStreamCursor {
     connection: NatsConnection,
     consumer: Consumer<pull::Config>,
+    origin: PullOrigin,
     pull_expires: Duration,
     in_flight: Option<async_nats::jetstream::Message>,
 }
@@ -78,9 +79,11 @@ impl Stream for NatsStream {
             .get_consumer_from_stream::<pull::Config, _, _>(&durable, &self.stream)
             .await
             .map_err(|error| map_operation_error(&durable, error, &mut events))?;
+        let origin = PullOrigin::bind(&self.connection, &consumer, &self.stream, &durable).await?;
         Ok(NatsStreamCursor {
             connection: self.connection.clone(),
             consumer,
+            origin,
             pull_expires: self.pull_expires,
             in_flight: None,
         })
@@ -109,28 +112,23 @@ impl StreamCursor for NatsStreamCursor {
                 "the current delivery must be acknowledged, negatively acknowledged or terminated",
             ));
         }
-        let mut events = self.connection.event_receiver();
-        let mut messages = self
-            .consumer
-            .fetch()
-            .max_messages(1)
-            .expires(self.pull_expires)
-            .messages()
-            .await
-            .map_err(|error| map_operation_error("consumer pull", error, &mut events))?;
-        let Some(message) = messages.next().await else {
+        let Some(genuine) = fetch_genuine(
+            &self.connection,
+            &self.consumer,
+            &self.origin,
+            self.pull_expires,
+            "consumer pull",
+        )
+        .await?
+        else {
             return Ok(None);
         };
-        let message =
-            message.map_err(|error| map_operation_error("consumer pull", error, &mut events))?;
-        let info = message.info().map_err(|error| {
-            map_operation_error("consumer delivery metadata", error, &mut events)
-        })?;
+        let message = genuine.message;
         let delivery = StreamDelivery {
-            stream_seq: info.stream_sequence,
-            // `num_delivered` from the delivery's metadata; the server counts
+            stream_seq: genuine.stream_sequence,
+            // `delivered` from the delivery's metadata; the server counts
             // from 1, so a negative value cannot occur on a real delivery.
-            delivery_count: u64::try_from(info.delivered).unwrap_or(0),
+            delivery_count: u64::try_from(genuine.delivered).unwrap_or(0),
             message: decode_message(&message)?,
         };
         self.in_flight = Some(message);

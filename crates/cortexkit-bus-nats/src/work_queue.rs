@@ -8,17 +8,18 @@ use async_trait::async_trait;
 use cortexkit_bus_trait::{
     BusError, BusResult, ClaimOutcome, DeliveryToken, MaxDeliveriesExceeded, WorkItem, WorkQueue,
 };
-use futures_util::StreamExt;
 use tokio::sync::Mutex;
 
 use crate::codec::decode_message;
 use crate::error::map_operation_error;
+use crate::pull_delivery::{fetch_genuine, PullOrigin};
 use crate::NatsConnection;
 
 #[derive(Clone)]
 pub struct NatsWorkQueue {
     connection: NatsConnection,
     consumer: Consumer<pull::Config>,
+    origin: PullOrigin,
     max_deliveries: u32,
     pull_expires: Duration,
     in_flight: Arc<Mutex<HashMap<DeliveryToken, async_nats::jetstream::Message>>>,
@@ -55,9 +56,11 @@ impl NatsWorkQueue {
                 ),
             )
         })?;
+        let origin = PullOrigin::bind(&connection, &consumer, &stream, &durable).await?;
         Ok(Self {
             connection,
             consumer,
+            origin,
             max_deliveries,
             pull_expires,
             in_flight: Arc::new(Mutex::new(HashMap::new())),
@@ -103,26 +106,21 @@ fn claimant_cap(max_deliver: i64) -> Option<u32> {
 #[async_trait]
 impl WorkQueue for NatsWorkQueue {
     async fn claim(&self) -> BusResult<ClaimOutcome> {
-        let mut events = self.connection.event_receiver();
-        let mut messages = self
-            .consumer
-            .fetch()
-            .max_messages(1)
-            .expires(self.pull_expires)
-            .messages()
-            .await
-            .map_err(|error| map_operation_error("work queue pull", error, &mut events))?;
-        let Some(message) = messages.next().await else {
+        let Some(genuine) = fetch_genuine(
+            &self.connection,
+            &self.consumer,
+            &self.origin,
+            self.pull_expires,
+            "work queue pull",
+        )
+        .await?
+        else {
             return Ok(ClaimOutcome::Empty);
         };
-        let message =
-            message.map_err(|error| map_operation_error("work queue pull", error, &mut events))?;
-        let info = message
-            .info()
-            .map_err(|error| map_operation_error("work delivery metadata", error, &mut events))?;
-        let delivery_count = u32::try_from(info.delivered)
+        let delivery_count = u32::try_from(genuine.delivered)
             .map_err(|_| BusError::unavailable("NATS returned a negative delivery count"))?;
-        let token = DeliveryToken(info.stream_sequence);
+        let token = DeliveryToken(genuine.stream_sequence);
+        let message = genuine.message;
         let item = WorkItem {
             token,
             message: decode_message(&message)?,

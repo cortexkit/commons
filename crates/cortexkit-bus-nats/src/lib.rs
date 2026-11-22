@@ -7,6 +7,7 @@ mod codec;
 mod connection;
 mod error;
 mod kv_watch;
+mod pull_delivery;
 mod register;
 mod stream;
 mod work_queue;

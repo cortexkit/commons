@@ -175,12 +175,11 @@ impl NatsConnection {
         self.connection_state.subscribe()
     }
 
-    /// How many messages register watches on this connection have dropped
-    /// because they did not come from the watch's own consumer on its bucket.
+    /// How many deliveries register watches, stream cursors and work queues
+    /// on this connection have dropped because they did not match the bound
+    /// JetStream consumer and subject filter.
     ///
-    /// Anyone allowed to create a JetStream consumer can point its delivery
-    /// subject at a watch's inbox; such messages keep their original subject
-    /// and are dropped without being parsed. Shared by every clone.
+    /// Drops are counted before decoding. The count is shared by every clone.
     pub fn forged_deliveries_dropped(&self) -> u64 {
         self.forged_deliveries_dropped.load(Ordering::Relaxed)
     }

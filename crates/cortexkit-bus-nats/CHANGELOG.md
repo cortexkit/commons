@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.7
+
+- Stream cursors and work queues drop forged messages sent to the reply inbox
+  for a module's pull durable. Before decoding, they check the JetStream reply
+  metadata against the bound stream and durable and check the message subject
+  against the durable's filters (or the stream's subjects if it has none).
+  Drops never reply on the message's reply subject, which could belong to
+  another consumer. Genuine deliveries are returned unchanged, and a genuine
+  delivery whose headers fail to decode still returns the decode error with
+  nothing settled, so the server redelivers it.
+  An unfiltered durable loads the stream's subjects at bind and fails closed if
+  `$JS.API.STREAM.INFO.<stream>` is unavailable; filtered durables never make
+  that request.
+- `NatsConnection::forged_deliveries_dropped` also counts pull drops. The first
+  one per cursor or work queue is logged at WARN with its subject.
+
 ## 0.5.6
 
 - Register watches warn once while a bucket is missing and retry with backoff.

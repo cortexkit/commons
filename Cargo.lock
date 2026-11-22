@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-nats"
-version = "0.5.6"
+version = "0.5.7"
 dependencies = [
  "async-nats",
  "async-trait",

@@ -10,7 +10,7 @@ use async_nats::ConnectOptions;
 use bytes::Bytes;
 use cortexkit_bus_naming::{
     delivery_authority_permissions, participant_permissions, AccountNames, AllowEntry, Operation,
-    PINNED_GOLDEN_FIXTURE,
+    Principal, PINNED_GOLDEN_FIXTURE,
 };
 use cortexkit_bus_trait::{
     terminally_dispose, terminally_dispose_cursor, BusError, ClaimOutcome, ContentDigest,
@@ -361,6 +361,217 @@ async fn publish_reports_jetstream_duplicates() {
         .unwrap()
         .clone();
     assert_eq!(info.state.messages, 1);
+}
+
+#[tokio::test]
+async fn pull_cursor_drops_forged_inbox_delivery_without_replying() {
+    use futures_util::StreamExt;
+
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let reader = connect(&server.url, "UREADER").await;
+    let subject = "ck.box.peer.agent.s.deliver";
+    create_stream_and_consumer(
+        &admin,
+        "CK_BOX_PEER",
+        subject,
+        subject,
+        "c_agent",
+        -1,
+        Duration::from_secs(30),
+    )
+    .await;
+    create_stream_and_consumer(
+        &admin,
+        "CK_FOREIGN",
+        "foreign.deliver",
+        "foreign.deliver",
+        "foreign",
+        -1,
+        Duration::from_secs(30),
+    )
+    .await;
+    let forged_receipt = admin
+        .stream("CK_FOREIGN")
+        .publish(
+            "foreign.deliver",
+            "forged",
+            digest("forged"),
+            Headers::new(),
+        )
+        .await
+        .expect("store a well-formed foreign delivery");
+    assert!(!forged_receipt.duplicate());
+
+    let mut cursor = reader
+        .stream("CK_BOX_PEER")
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("bind reader cursor");
+    let client = admin.client();
+    let mut pulls = client
+        .subscribe("$JS.API.CONSUMER.MSG.NEXT.CK_BOX_PEER.c_agent")
+        .await
+        .expect("observe pull requests");
+    let mut foreign_replies = client
+        .subscribe("$JS.ACK.CK_FOREIGN.>")
+        .await
+        .expect("observe any attempt to settle the forged delivery");
+    client.flush().await.expect("install both subscriptions");
+    let dropped_before = reader.forged_deliveries_dropped();
+
+    let delivery = {
+        let pull = cursor.next();
+        tokio::pin!(pull);
+        let inject = async {
+            let inbox = pulls.next().await.unwrap().reply.unwrap();
+            // The foreign server delivery carries valid headers and its own
+            // stream's ack metadata onto the target cursor's actual inbox.
+            client
+                .publish_with_reply(
+                    "$JS.API.CONSUMER.MSG.NEXT.CK_FOREIGN.foreign",
+                    inbox.clone(),
+                    Bytes::from_static(br#"{"batch":1,"no_wait":true}"#),
+                )
+                .await
+                .expect("deliver the foreign message into the cursor inbox");
+            client.flush().await.expect("flush the foreign pull");
+
+            let retry_inbox = pulls.next().await.unwrap().reply.unwrap();
+            assert_ne!(retry_inbox, inbox, "the cursor must issue a fresh pull");
+            reader
+                .client()
+                .flush()
+                .await
+                .expect("flush reader commands");
+            let receipt = admin
+                .stream("CK_BOX_PEER")
+                .publish(subject, "genuine", digest("genuine"), Headers::new())
+                .await
+                .expect("publish genuine delivery after the retry");
+            assert!(!receipt.duplicate());
+        };
+        // If the original pull accepts the foreign delivery, fail on its
+        // message ID rather than waiting for a retry that will never happen.
+        tokio::select! {
+            delivery = &mut pull => delivery,
+            () = inject => pull.await,
+        }
+        .expect("pull succeeds")
+        .expect("delivery")
+    };
+    assert_eq!(delivery.message.id, "genuine");
+    assert_eq!(reader.forged_deliveries_dropped(), dropped_before + 1);
+    cursor.ack().await.expect("ack only the genuine delivery");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), foreign_replies.next())
+            .await
+            .is_err(),
+        "the forged delivery's reply subject must receive nothing"
+    );
+}
+
+#[tokio::test]
+async fn unfiltered_cursor_requires_stream_info_but_filtered_cursor_does_not() {
+    let grant = [
+        AllowEntry {
+            principal: Principal::Participant,
+            operation: Operation::Publish,
+            subject: "$JS.API.CONSUMER.INFO.CK_FILTERED.c_agent".into(),
+        },
+        AllowEntry {
+            principal: Principal::Participant,
+            operation: Operation::Publish,
+            subject: "$JS.API.CONSUMER.INFO.CK_UNFILTERED.c_agent".into(),
+        },
+        AllowEntry {
+            principal: Principal::Participant,
+            operation: Operation::Subscribe,
+            subject: "_INBOX.UREADER.>".into(),
+        },
+    ];
+    let render =
+        |port: u16, directory: &TempDir| grant_users_config(port, directory, &[("reader", &grant)]);
+    let Some(server) = TestServer::with_config(&render).await else {
+        return;
+    };
+    let admin = connect_admin(&server.url).await;
+    create_stream_and_consumer(
+        &admin,
+        "CK_FILTERED",
+        "filtered.one",
+        "filtered.one",
+        "c_agent",
+        -1,
+        Duration::from_secs(30),
+    )
+    .await;
+    let unfiltered = admin
+        .jetstream()
+        .create_stream(stream::Config {
+            name: "CK_UNFILTERED".into(),
+            subjects: vec!["events.one".into(), "events.two".into()],
+            storage: stream::StorageType::File,
+            ..Default::default()
+        })
+        .await
+        .expect("create unfiltered stream");
+    unfiltered
+        .create_consumer(pull::Config {
+            durable_name: Some("c_agent".into()),
+            ack_policy: AckPolicy::Explicit,
+            ack_wait: Duration::from_secs(30),
+            max_deliver: -1,
+            ..Default::default()
+        })
+        .await
+        .expect("create unfiltered durable");
+
+    let reader = connect_user(&server.url, "reader", "UREADER").await;
+    reader
+        .stream("CK_FILTERED")
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("a filtered durable needs no stream-info permission");
+    let error = reader
+        .stream("CK_UNFILTERED")
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .err()
+        .expect("an unfiltered durable must fail closed without stream info");
+    let BusError::Denied { subject, reason } = error else {
+        panic!("missing stream-info permission must be denied: {error:?}");
+    };
+    assert_eq!(subject, "$JS.API.STREAM.INFO.CK_UNFILTERED");
+    for expected in [
+        "c_agent",
+        "CK_UNFILTERED",
+        "$JS.API.STREAM.INFO.CK_UNFILTERED",
+        "permission",
+    ] {
+        assert!(
+            reason.contains(expected),
+            "bind error must name {expected}: {reason}"
+        );
+    }
+
+    let receipt = admin
+        .stream("CK_UNFILTERED")
+        .publish("events.two", "genuine", digest("genuine"), Headers::new())
+        .await
+        .expect("publish to the stream's second subject");
+    assert!(!receipt.duplicate());
+    let mut cursor = admin
+        .stream("CK_UNFILTERED")
+        .consumer(DurableOwner::Agent("agent"))
+        .await
+        .expect("stream-info permission binds an unfiltered durable");
+    let delivery = cursor.next().await.expect("pull").expect("delivery");
+    assert_eq!(delivery.message.subject, "events.two");
+    assert_eq!(delivery.message.id, "genuine");
+    cursor.ack().await.expect("ack genuine delivery");
 }
 
 #[tokio::test]
