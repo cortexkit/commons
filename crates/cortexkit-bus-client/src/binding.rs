@@ -93,9 +93,13 @@ impl ConnectionBinding {
         }
     }
 
-    pub(crate) fn drop_forged(&self, warned: &mut bool, expected: &str, subject: &str) {
+    pub(crate) fn record_forged_delivery(&self) {
         self.forged_deliveries_dropped
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn drop_forged(&self, warned: &mut bool, expected: &str, subject: &str) {
+        self.record_forged_delivery();
         if !*warned {
             *warned = true;
             tracing::warn!(

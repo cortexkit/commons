@@ -94,8 +94,7 @@ impl Proxy {
     }
 }
 
-/// Provisions the account's EVENT stream and the module's own durable.
-async fn provision_events(rig: &Rig, module: &str) -> (AccountNames, jetstream::Context) {
+async fn provision_event_stream(rig: &Rig) -> (AccountNames, jetstream::Context) {
     let names = AccountNames::derive("box_goldenfixture").unwrap();
     let context = jetstream::new(rig.admin.clone());
     context
@@ -106,17 +105,52 @@ async fn provision_events(rig: &Rig, module: &str) -> (AccountNames, jetstream::
         })
         .await
         .unwrap();
+    (names, context)
+}
+
+/// Provisions the account's EVENT stream and the module's own durable.
+async fn provision_events(rig: &Rig, module: &str) -> (AccountNames, jetstream::Context) {
+    let (names, context) = provision_event_stream(rig).await;
     context
         .get_stream(&names.streams().event)
         .await
         .unwrap()
         .create_consumer(pull::Config {
             durable_name: Some(AccountNames::module_consumer_name(module).unwrap()),
+            filter_subject: format!("ck.{}.event.>", names.account()),
             ..Default::default()
         })
         .await
         .unwrap();
     (names, context)
+}
+
+#[tokio::test]
+async fn event_reader_refuses_an_unfiltered_durable() {
+    let Some(rig) = Rig::start().await else {
+        return;
+    };
+    let (names, context) = provision_event_stream(&rig).await;
+    let stream = &names.streams().event;
+    let durable = "m_reader";
+    context
+        .get_stream(stream)
+        .await
+        .unwrap()
+        .create_consumer(pull::Config {
+            durable_name: Some(durable.into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let (client, _manager, _issuer) = rig.client_via("reader", &rig.server.url).await;
+
+    let Err(crate::Error::Nats(error)) = client.event_reader(durable).await else {
+        panic!("an unfiltered durable must fail to bind");
+    };
+    assert!(error.contains(durable), "{error}");
+    assert!(error.contains(stream), "{error}");
+    assert!(error.contains("no subject filter"), "{error}");
 }
 
 async fn publish(names: &AccountNames, context: &jetstream::Context, msg_id: &str) {

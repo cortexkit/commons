@@ -375,9 +375,8 @@ impl BusClient {
         self.connection().inbox_prefix().to_owned()
     }
 
-    /// Counts deliveries dropped because their origin or subject did not match
-    /// the receiving subscription, preventing forged pushes from becoming hints
-    /// or bucket changes.
+    /// Counts deliveries that live hints, bucket watches and event readers
+    /// discarded because their origin or subject could not be verified.
     pub fn forged_deliveries_dropped(&self) -> u64 {
         self.managed
             .forged_deliveries_dropped
@@ -387,7 +386,8 @@ impl BusClient {
     /// Attaches to an existing EVENT durable owned by this module.
     ///
     /// ck-bus provisions durables; this method never creates or changes one.
-    /// The name must follow bus-naming's `m_{module}[_suffix]` owner rule.
+    /// The name must follow bus-naming's `m_{module}[_suffix]` owner rule, and
+    /// the durable must have at least one subject filter.
     /// The reader rebinds automatically after credential re-issue. Nothing is
     /// acknowledged automatically: commit your own transaction before `ack()`.
     pub async fn event_reader(&self, durable: &str) -> Result<EventReader> {

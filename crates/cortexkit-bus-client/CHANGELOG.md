@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.15
+
+- `EventReader` discards pull deliveries that do not match its bound EVENT
+  stream, durable, and subject filters. It counts them in
+  `BusClient::forged_deliveries_dropped()` and fetches again without replying.
+  An unfiltered EVENT durable is refused at bind time.
+
 ## 0.1.14
 
 - Recover established hub clients from `HubUnavailable` by retrying credential

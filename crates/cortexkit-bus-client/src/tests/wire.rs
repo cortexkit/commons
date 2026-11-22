@@ -85,7 +85,7 @@ fn response(
             json!({
                 "stream_name": "CK_BOX_TEST_EVENT", "name": name,
                 "created": "2026-01-01T00:00:00Z",
-                "config": {"durable_name": name, "deliver_policy": "all", "ack_policy": "explicit", "ack_wait": 30000000000_u64, "max_deliver": -1, "replay_policy": "instant"},
+                "config": {"durable_name": name, "filter_subject": "ck.box_test.event.>", "deliver_policy": "all", "ack_policy": "explicit", "ack_wait": 30000000000_u64, "max_deliver": -1, "replay_policy": "instant"},
                 "delivered": {"consumer_seq": 0, "stream_seq": 0},
                 "ack_floor": {"consumer_seq": 0, "stream_seq": 0},
                 "num_ack_pending": 0, "num_redelivered": 0, "num_waiting": 0, "num_pending": seen.events.len()
@@ -659,6 +659,61 @@ async fn event_reader_attaches_only_to_existing_owned_durables() {
 }
 
 #[tokio::test]
+async fn event_reader_drops_unverified_delivery_without_replying_and_fetches_again() {
+    let server = Server::start().await;
+    let genuine = FakeEvent::new(41);
+    let subject = genuine.subject.clone();
+    server.observed.lock().unwrap().events.push_back(genuine);
+    let (client, _) = event_client(&server).await;
+    let mut reader = client.event_reader("m_test_module").await.unwrap();
+    let before = client.forged_deliveries_dropped();
+    let reply = "test.unverified_reply";
+    let mut unverified = Some(async_nats::jetstream::Message {
+        message: async_nats::Message {
+            subject: subject.into(),
+            reply: Some(reply.into()),
+            payload: Default::default(),
+            headers: None,
+            status: None,
+            description: None,
+            length: 0,
+        },
+        context: async_nats::jetstream::new(client.connection().client()),
+    });
+    let mut fetches = 0;
+    let item = tokio::time::timeout(
+        Duration::from_secs(5),
+        reader.next_from(async |consumer| {
+            fetches += 1;
+            match unverified.take() {
+                Some(message) => Ok(Some(message)),
+                None => crate::events::fetch_one(consumer).await,
+            }
+        }),
+    )
+    .await
+    .expect("event pull timed out")
+    .unwrap();
+    let EventItem::Delivery(event) = item else {
+        panic!("the unverified delivery escaped the origin check");
+    };
+    assert_eq!(event.msg_id, "fact-41");
+    assert_eq!(fetches, 2, "a drop must start a new fetch");
+    assert_eq!(client.forged_deliveries_dropped(), before + 1);
+    client.connection().client().flush().await.unwrap();
+    assert!(
+        !server
+            .observed
+            .lock()
+            .unwrap()
+            .publishes
+            .iter()
+            .any(|(subject, _)| subject == reply),
+        "the unverified delivery must not be answered"
+    );
+}
+
+#[tokio::test]
 async fn event_reader_reads_headers_and_settles_ack_nak_term() {
     let server = Server::start().await;
     let mut event = FakeEvent::new(41);
@@ -732,7 +787,7 @@ async fn event_reader_malformed_records_can_be_terminated() {
     let mut missing_id = FakeEvent::new(1);
     missing_id.headers.clear();
     let mut bad_subject = FakeEvent::new(2);
-    bad_subject.subject = "ck.box_other.event.publisher.fact.v1".into();
+    bad_subject.subject = "ck.box_test.event.publisher.fact.not_a_version".into();
     server
         .observed
         .lock()

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer::pull, AckKind};
+use async_nats::jetstream::{self, consumer::pull, message::Info, AckKind};
 use bytes::Bytes;
 use cortexkit_bus_naming::{AccountNames, EventSubject};
 use cortexkit_bus_trait::Headers;
@@ -68,6 +68,8 @@ impl EventDelivery {
 pub enum MalformedReason {
     MissingMsgId,
     BadSubject,
+    /// The reader no longer returns this reason; it discards deliveries with
+    /// unparseable metadata.
     BadMetadata,
 }
 
@@ -77,7 +79,8 @@ pub enum MalformedReason {
 pub struct MalformedDelivery {
     pub raw_subject: String,
     pub reason: MalformedReason,
-    /// Absent only when the server supplied malformed JetStream metadata.
+    /// The sequence in the bound EVENT stream. Readers only yield records
+    /// with parseable JetStream metadata, so this is always present.
     pub stream_sequence: Option<u64>,
     message: jetstream::Message,
 }
@@ -104,7 +107,13 @@ pub struct EventReader {
     binding: ConnectionBinding,
     names: AccountNames,
     durable: String,
-    consumer: Option<jetstream::consumer::Consumer<pull::Config>>,
+    bound: Option<BoundConsumer>,
+    warned_foreign: bool,
+}
+
+struct BoundConsumer {
+    consumer: jetstream::consumer::Consumer<pull::Config>,
+    filters: Vec<String>,
 }
 
 impl EventReader {
@@ -131,7 +140,8 @@ impl EventReader {
             binding: ConnectionBinding::new(client),
             names: client.names.clone(),
             durable: durable.into(),
-            consumer: None,
+            bound: None,
+            warned_foreign: false,
         };
         reader.bind().await?;
         Ok(reader)
@@ -140,13 +150,24 @@ impl EventReader {
     async fn bind(&mut self) -> Result<()> {
         let durable = &self.durable;
         let stream = &self.names.streams().event;
-        self.consumer = Some(
+        self.bound = Some(
             self.binding
                 .bind(|connection| async move {
-                    jetstream::new(connection.client())
+                    let consumer = jetstream::new(connection.client())
                         .get_consumer_from_stream(durable, stream)
                         .await
-                        .map_err(|error| Error::Nats(error.to_string()))
+                        .map_err(|error| Error::Nats(error.to_string()))?;
+                    let config = &consumer.cached_info().config;
+                    let mut filters = config.filter_subjects.clone();
+                    if !config.filter_subject.is_empty() {
+                        filters.push(config.filter_subject.clone());
+                    }
+                    if filters.is_empty() {
+                        return Err(Error::Nats(format!(
+                            "EVENT durable {durable} on stream {stream} has no subject filter"
+                        )));
+                    }
+                    Ok(BoundConsumer { consumer, filters })
                 })
                 .await?,
         );
@@ -156,40 +177,111 @@ impl EventReader {
     /// Pulls one event, rebinding after credential re-issue if necessary.
     /// This never acknowledges a message. Commit before acknowledging a valid
     /// delivery; log and terminate a malformed record instead of retrying it.
+    /// Deliveries outside the bound durable are counted and discarded without
+    /// replying, then the reader fetches again.
     /// If the connection closes for good, this waits for the client's
     /// replacement connection and rebinds instead of returning an error.
     /// A closed connection-change stream reports a transport error so the caller
     /// can reconnect the client or report degraded credential maintenance.
     pub async fn next(&mut self) -> Result<EventItem> {
+        self.next_from(fetch_one).await
+    }
+
+    pub(crate) async fn next_from(
+        &mut self,
+        mut fetch: impl AsyncFnMut(
+            &jetstream::consumer::Consumer<pull::Config>,
+        ) -> Result<Option<jetstream::Message>>,
+    ) -> Result<EventItem> {
         loop {
-            if self.binding.has_changed() || self.consumer.is_none() {
+            if self.binding.has_changed() || self.bound.is_none() {
                 self.bind().await?;
             }
-            let consumer = self.consumer.as_ref().expect("bound consumer");
-            tokio::select! {
+            let bound = self.bound.as_ref().expect("bound consumer");
+            let result = tokio::select! {
                 biased;
                 changed = self.binding.changed() => {
                     changed?;
-                    self.consumer = None;
+                    self.bound = None;
+                    continue;
                 }
-                result = async {
-                    let mut batch = consumer.fetch().max_messages(1)
-                        .expires(Duration::from_secs(30)).messages().await
-                        .map_err(|error| Error::Nats(error.to_string()))?;
-                    batch.next().await.transpose().map_err(|error| Error::Nats(error.to_string()))
-                } => {
-                    match result {
-                        Ok(Some(message)) => return Ok(decode(&self.names, message)),
-                        Ok(None) => {}
-                        Err(error) => {
-                            self.binding.recover(error).await?;
-                            self.consumer = None;
-                        }
+                result = fetch(&bound.consumer) => result,
+            };
+            match result {
+                Ok(Some(message)) => {
+                    let stream = &self.names.streams().event;
+                    let durable = &self.durable;
+                    let subject = message.subject.as_str();
+                    if belongs_to_durable(message.info(), subject, stream, durable, &bound.filters)
+                    {
+                        return Ok(decode(&self.names, message));
                     }
+                    // Never use the reply subject of a delivery outside the bound durable.
+                    self.binding.record_forged_delivery();
+                    if self.warned_foreign {
+                        tracing::debug!(%stream, %durable, %subject, "dropped a pull delivery from outside the bound durable");
+                    } else {
+                        self.warned_foreign = true;
+                        tracing::warn!(%stream, %durable, %subject, "dropped a pull delivery from outside the bound durable");
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.binding.recover(error).await?;
+                    self.bound = None;
                 }
             }
         }
     }
+}
+
+pub(crate) async fn fetch_one(
+    consumer: &jetstream::consumer::Consumer<pull::Config>,
+) -> Result<Option<jetstream::Message>> {
+    let mut batch = consumer
+        .fetch()
+        .max_messages(1)
+        .expires(Duration::from_secs(30))
+        .messages()
+        .await
+        .map_err(|error| Error::Nats(error.to_string()))?;
+    batch
+        .next()
+        .await
+        .transpose()
+        .map_err(|error| Error::Nats(error.to_string()))
+}
+
+fn belongs_to_durable(
+    metadata: std::result::Result<Info<'_>, async_nats::Error>,
+    subject: &str,
+    stream: &str,
+    durable: &str,
+    filters: &[String],
+) -> bool {
+    metadata.is_ok_and(|info| {
+        info.stream == stream
+            && info.consumer == durable
+            && filters
+                .iter()
+                .any(|filter| subject_matches(filter, subject))
+    })
+}
+
+fn subject_matches(filter: &str, subject: &str) -> bool {
+    let mut tokens = subject.split('.');
+    for filter_token in filter.split('.') {
+        let Some(token) = tokens.next().filter(|token| !token.is_empty()) else {
+            return false;
+        };
+        match filter_token {
+            ">" => return tokens.all(|token| !token.is_empty()),
+            "*" => {}
+            expected if expected == token => {}
+            _ => return false,
+        }
+    }
+    tokens.next().is_none()
 }
 
 fn decode(names: &AccountNames, message: jetstream::Message) -> EventItem {
@@ -239,4 +331,92 @@ fn decode(names: &AccountNames, message: jetstream::Message) -> EventItem {
         headers,
         message,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info<'a>(stream: &'a str, consumer: &'a str) -> Info<'a> {
+        Info {
+            domain: None,
+            acc_hash: None,
+            stream,
+            consumer,
+            stream_sequence: 41,
+            consumer_sequence: 1,
+            delivered: 1,
+            pending: 0,
+            published: async_nats::datetime::from_nanos(0).expect("epoch"),
+            token: None,
+        }
+    }
+
+    #[test]
+    fn event_origin_requires_matching_stream_and_consumer() {
+        let filters = ["events.one".to_owned()];
+        for (stream, consumer, expected) in [
+            ("EVENT", "reader", true),
+            ("OTHER", "reader", false),
+            ("EVENT", "other", false),
+        ] {
+            assert_eq!(
+                belongs_to_durable(
+                    Ok(info(stream, consumer)),
+                    "events.one",
+                    "EVENT",
+                    "reader",
+                    &filters
+                ),
+                expected,
+                "{stream}/{consumer}"
+            );
+        }
+    }
+
+    #[test]
+    fn event_origin_rejects_unparseable_reply_metadata() {
+        let invalid_metadata =
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid reply");
+        assert!(!belongs_to_durable(
+            Err(invalid_metadata.into()),
+            "events.one",
+            "EVENT",
+            "reader",
+            &["events.one".into()],
+        ));
+    }
+
+    #[test]
+    fn event_origin_requires_one_matching_filter_with_nats_token_wildcards() {
+        let filters = [
+            "events.one".into(),
+            "events.*.ready".into(),
+            "archive.>".into(),
+        ];
+        for (subject, expected) in [
+            ("events.one", true),
+            ("events.two", false),
+            ("events.two.ready", true),
+            ("events.ready", false),
+            ("events.two.three.ready", false),
+            ("events..ready", false),
+            ("archive.one", true),
+            ("archive.one.two", true),
+            ("archive", false),
+            ("archive.one.", false),
+        ] {
+            assert_eq!(
+                belongs_to_durable(
+                    Ok(info("EVENT", "reader")),
+                    subject,
+                    "EVENT",
+                    "reader",
+                    &filters
+                ),
+                expected,
+                "{subject}"
+            );
+        }
+    }
 }

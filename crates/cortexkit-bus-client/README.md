@@ -164,10 +164,15 @@ durable; ck-bus provisions it, and the client never creates or changes one.
 Names must follow bus-naming's owner rule: `m_{module}` or
 `m_{module}_{suffix}`, with a nonempty lowercase-letter, digit or underscore
 suffix. Ownership does not grant new permissions: the module must already be
-an authorized event reader.
+an authorized event reader. The durable must have at least one subject filter.
 
 `reader.next().await?` waits for one record and returns `EventItem::Delivery`
-or `EventItem::Malformed`. A valid delivery has a naming-parsed `subject`
+or `EventItem::Malformed`. Only deliveries with parseable metadata identifying
+the bound stream and durable and a subject matching a configured filter reach
+the caller. Other deliveries are counted in `bus.forged_deliveries_dropped()`
+and discarded without replying; the reader starts another fetch.
+
+A valid delivery has a naming-parsed `subject`
 (`module` is the publisher, plus `event`, `version`, optional `reader`),
 `msg_id`, `body: Bytes`, `stream_sequence` and `delivered_count`. Its
 `headers()` accessor returns a read-only `cortexkit_bus_trait::Headers` map;
@@ -182,8 +187,8 @@ the server keeps its cursor and unacknowledged records may redeliver. Keep the
 `BusClient` alive for credential maintenance.
 
 Malformed records (for example, a missing `Nats-Msg-Id` or an invalid EVENT
-subject) carry a raw subject, a reason, and a stream sequence (absent only for
-invalid JetStream metadata). They expose only `term()`: log the reason and
+subject that still matches a durable filter) carry a raw subject, a reason, and
+a stream sequence. They expose only `term()`: log the reason and
 terminate the record rather than retrying it. They are not terminated
 automatically. `next()` returns `Err` for transport or bind failures, including
 the credential-maintenance change stream closing.
