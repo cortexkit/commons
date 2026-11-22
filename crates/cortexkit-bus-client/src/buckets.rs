@@ -292,6 +292,8 @@ impl BucketWatch {
     /// On [`Error::BucketReset`], clear the old state and call `next` again.
     /// Current entries from the replacement bucket come before a fresh
     /// [`BucketItem::CaughtUp`], even when the new bucket is empty.
+    /// If the connection closes during a hub outage, an open watch waits for
+    /// the replacement connection instead of returning [`Error::HubUnavailable`].
     pub async fn next(&mut self) -> Result<BucketItem> {
         loop {
             if self.binding.has_changed() || self.subscription.is_none() {

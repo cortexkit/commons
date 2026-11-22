@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, LazyLock, OnceLock, Weak},
+    sync::{Arc, LazyLock, Weak},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -38,7 +38,7 @@ pub(crate) async fn cached_manager(
     static HUB_MANAGERS: LazyLock<Managers> = LazyLock::new(Default::default);
     let mut managers = if hub { &HUB_MANAGERS } else { &BOX_MANAGERS }.lock().await;
     if let Some(manager) = managers.get(module).and_then(Weak::upgrade) {
-        if manager.check_hub_refusal().is_ok() {
+        if manager.revision().check_hub_grant().is_ok() {
             return Ok(manager);
         }
     }
@@ -182,7 +182,7 @@ impl Credential {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum HubRefusal {
     Unavailable,
     NotGranted,
@@ -205,15 +205,52 @@ impl HubRefusal {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct CredentialRevision {
+    pub number: u64,
+    hub_refusal: Option<HubRefusal>,
+    // Each client sharing this manager must install the recovered credential
+    // before it can expose its connection again.
+    pub recovered_at: u64,
+}
+
+impl CredentialRevision {
+    pub fn check_hub_grant(self) -> Result<()> {
+        if self.hub_refusal == Some(HubRefusal::NotGranted) {
+            return Err(Error::HubNotGranted);
+        }
+        Ok(())
+    }
+
+    pub fn hub_unavailable(self) -> bool {
+        self.hub_refusal == Some(HubRefusal::Unavailable)
+    }
+
+    pub fn check_hub_availability(self) -> Result<()> {
+        self.check_hub_grant()?;
+        if self.hub_unavailable() {
+            return Err(Error::HubUnavailable);
+        }
+        Ok(())
+    }
+
+    pub fn check_hub_connection(self, installed: u64) -> Result<()> {
+        self.check_hub_availability()?;
+        if installed < self.recovered_at {
+            return Err(Error::HubUnavailable);
+        }
+        Ok(())
+    }
+}
+
 pub(crate) struct CredentialManager {
     transport: Arc<dyn CredentialTransport>,
     hub_module: Option<String>,
-    hub_refusal: OnceLock<HubRefusal>,
     current: RwLock<Credential>,
     // Serializing issue and renewal prevents replies for an old key from
     // replacing the current credential.
     flight: Mutex<()>,
-    revisions: watch::Sender<u64>,
+    revisions: watch::Sender<CredentialRevision>,
 }
 
 impl CredentialManager {
@@ -242,11 +279,10 @@ impl CredentialManager {
                 }
                 error
             })?;
-        let (revisions, _) = watch::channel(0);
+        let (revisions, _) = watch::channel(CredentialRevision::default());
         Ok(Arc::new(Self {
             transport,
             hub_module,
-            hub_refusal: OnceLock::new(),
             current: RwLock::new(credential),
             flight: Mutex::new(()),
             revisions,
@@ -257,25 +293,30 @@ impl CredentialManager {
         self.current.read().await.clone()
     }
 
-    pub fn revisions(&self) -> watch::Receiver<u64> {
+    pub fn revisions(&self) -> watch::Receiver<CredentialRevision> {
         self.revisions.subscribe()
     }
 
-    pub fn check_hub_refusal(&self) -> Result<()> {
-        match self.hub_refusal.get() {
-            Some(refusal) => Err(refusal.error()),
-            None => Ok(()),
-        }
+    pub fn revision(&self) -> CredentialRevision {
+        *self.revisions.borrow()
     }
 
-    fn record_refusal(&self, error: Error) -> Error {
+    fn record_refusal(&self, observed_revision: u64, error: Error) -> Error {
         if self.hub_module.is_some() {
             if let Some(refusal) = HubRefusal::from_error(&error) {
-                // Wake maintenance even if the refusal came from a nonce
-                // callback during NATS reconnect, rather than a renewal.
-                if self.hub_refusal.set(refusal).is_ok() {
-                    self.revisions.send_modify(|_| {});
-                }
+                self.revisions.send_if_modified(|revision| {
+                    // A late signing reply for a superseded key cannot put the
+                    // new key back into recovery. A denied grant is terminal.
+                    if revision.hub_refusal == Some(refusal)
+                        || revision.hub_refusal == Some(HubRefusal::NotGranted)
+                        || (refusal == HubRefusal::Unavailable
+                            && revision.number != observed_revision)
+                    {
+                        return false;
+                    }
+                    revision.hub_refusal = Some(refusal);
+                    true
+                });
                 return refusal.error();
             }
         }
@@ -307,13 +348,14 @@ impl CredentialManager {
     /// that another waiter has just issued, because issuance revokes that key.
     pub async fn reissue(&self, observed_public: &str) -> Result<()> {
         let _flight = self.flight.lock().await;
-        self.check_hub_refusal()?;
+        let revision = self.revision();
+        revision.check_hub_grant()?;
         if self.current.read().await.credential_public != observed_public {
             return Ok(());
         }
         let credential = Self::issue(&*self.transport, self.hub_module.as_deref())
             .await
-            .map_err(|error| self.record_refusal(error))?;
+            .map_err(|error| self.record_refusal(revision.number, error))?;
         let mut current = self.current.write().await;
         if credential.acct != current.acct {
             return Err(Error::Reply("re-issue changed the account"));
@@ -322,15 +364,26 @@ impl CredentialManager {
             return Err(Error::Reply("re-issue changed the hub credential box id"));
         }
         *current = credential;
-        self.revisions.send_modify(|revision| *revision += 1);
+        self.revisions.send_modify(|revision| {
+            revision.number += 1;
+            if revision.hub_unavailable() {
+                revision.recovered_at = revision.number;
+                revision.hub_refusal = None;
+            }
+        });
         Ok(())
     }
 
     pub async fn sign(&self, public: &str, nonce: Vec<u8>) -> Result<Vec<u8>> {
-        self.check_hub_refusal()?;
-        if self.current.read().await.credential_public != public {
-            return Err(Error::Reply(REPLACED_CREDENTIAL));
-        }
+        let revision = {
+            let current = self.current.read().await;
+            let revision = self.revision();
+            revision.check_hub_availability()?;
+            if current.credential_public != public {
+                return Err(Error::Reply(REPLACED_CREDENTIAL));
+            }
+            revision.number
+        };
         match self
             .transport
             .call(
@@ -355,14 +408,15 @@ impl CredentialManager {
                 // connection may authenticate with the newly issued key.
                 Err(Error::Reply(REPLACED_CREDENTIAL))
             }
-            Err(error) => Err(error),
+            Err(error) => Err(self.record_refusal(revision, error)),
         }
     }
 
     pub async fn renew(&self) -> Result<()> {
         let observed = self.credential().await;
         let _flight = self.flight.lock().await;
-        self.check_hub_refusal()?;
+        let revision = self.revision();
+        revision.check_hub_availability()?;
         if self.current.read().await.credential_public != observed.credential_public {
             return Ok(());
         }
@@ -435,7 +489,7 @@ impl CredentialManager {
                 drop(_flight);
                 self.reissue(&observed.credential_public).await
             }
-            Err(error) => Err(self.record_refusal(error)),
+            Err(error) => Err(self.record_refusal(revision.number, error)),
         }
     }
 }

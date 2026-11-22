@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.14
+
+- Recover established hub clients from `HubUnavailable` by retrying credential
+  reissue and connection replacement with backoff. Report the outage until a
+  replacement is ready. Initial connection refusals aren't retried, and
+  `HubNotGranted` remains terminal.
+
 ## 0.1.13
 
 - Add `HubClient::box_id` to read the computer's box id from its hub credential

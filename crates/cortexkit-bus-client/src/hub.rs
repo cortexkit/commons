@@ -25,8 +25,10 @@ pub struct HubClient {
 impl HubClient {
     /// Requests a hub credential over the module's existing daemon route.
     ///
-    /// [`Error::HubUnavailable`] can be retried when the module next needs the
-    /// hub. [`Error::HubNotGranted`] is terminal. Neither refusal is retried here.
+    /// Refusals are returned without retrying the initial connection. Retry
+    /// [`Error::HubUnavailable`] when the module next needs the hub; an
+    /// established client recovers in the background. [`Error::HubNotGranted`]
+    /// is terminal.
     pub async fn connect(subc: Arc<SubcConsumer>, opts: BusClientOptions) -> Result<Self> {
         let manager = credentials::module_manager(subc, &opts, true).await?;
         Self::connect_manager(manager, opts.request_timeout).await
@@ -56,9 +58,12 @@ impl HubClient {
 
     /// Returns the current raw NATS client for core publishes. A held snapshot
     /// does not follow credential replacements; get a new one after a change.
+    /// Returns [`Error::HubUnavailable`] until recovery installs a replacement.
     pub fn client(&self) -> Result<async_nats::Client> {
         let stopped = self.managed.changes.has_changed().is_err();
-        self.manager.check_hub_refusal()?;
+        self.manager
+            .revision()
+            .check_hub_connection(*self.managed.changes.borrow())?;
         if stopped {
             return Err(Error::Reply("hub credential maintenance stopped"));
         }
@@ -67,6 +72,7 @@ impl HubClient {
 
     /// Returns a JetStream context on the current connection, in the `hub`
     /// domain. Like [`Self::client`], it must be reopened after replacement.
+    /// Returns [`Error::HubUnavailable`] while the client recovers.
     pub fn jetstream(&self) -> Result<jetstream::Context> {
         Ok(jetstream::with_domain(self.client()?, HUB_DOMAIN))
     }
@@ -77,6 +83,9 @@ impl HubClient {
     /// [`Error::BucketReset`] before its new snapshot. The hub credential must
     /// allow stream info and consumer creation for this bucket. Keep the hub
     /// client alive for credential upkeep and automatic rebinding.
+    /// Opening a watch returns [`Error::HubUnavailable`] during recovery;
+    /// an already-open watch waits for a replacement connection if it loses
+    /// its connection.
     pub async fn watch_bucket(&self, bucket: &str) -> Result<BucketWatch> {
         self.client()?;
         BucketWatch::open(
@@ -88,9 +97,10 @@ impl HubClient {
     }
 
     /// Notifies after a replacement connection is ready. The receiver closes
-    /// when maintenance stops, including after a hub refusal. Get a fresh
-    /// snapshot with [`Self::client`] to check for a typed refusal on closure;
-    /// after [`Error::HubUnavailable`], call [`Self::connect`] when ready to retry.
+    /// when maintenance stops, including after [`Error::HubNotGranted`].
+    /// During [`Error::HubUnavailable`] it stays open and notifies once the
+    /// recovered connection is ready. Use [`Self::client`] for a fresh snapshot
+    /// or to check for a typed refusal on closure.
     pub fn connection_changes(&self) -> watch::Receiver<u64> {
         self.managed.changes.clone()
     }

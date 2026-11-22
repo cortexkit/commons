@@ -22,9 +22,10 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 struct HubIssuer {
     url: String,
     calls: Mutex<Vec<(String, Value)>>,
+    issued: Mutex<usize>,
     fields: Vec<(&'static str, Value)>,
     issue_refusal: Option<&'static str>,
-    reissue_refusal: Option<&'static str>,
+    reissue_refusal: Mutex<Option<&'static str>>,
     renew_refusal: Option<&'static str>,
     sign_refusal: Mutex<Option<&'static str>>,
     renew_fields: Vec<(&'static str, Value)>,
@@ -36,10 +37,8 @@ struct HubIssuer {
 impl CredentialTransport for HubIssuer {
     async fn call(&self, method: &str, params: Value) -> Result<Value> {
         let mut calls = self.calls.lock().unwrap();
-        let issued = calls
-            .iter()
-            .filter(|(name, _)| name == "ckbus.hub_credential")
-            .count();
+        let mut issued_count = self.issued.lock().unwrap();
+        let issued = *issued_count;
         calls.push((method.to_owned(), params.clone()));
         let exp = super::super::expiry();
         match method {
@@ -48,19 +47,20 @@ impl CredentialTransport for HubIssuer {
                 let refusal = if issued == 0 {
                     self.issue_refusal
                 } else {
-                    self.reissue_refusal
+                    *self.reissue_refusal.lock().unwrap()
                 };
                 if let Some(code) = refusal {
                     return Err(Error::Refused(code.to_owned()));
                 }
                 let mut reply = json!({
                     "jwt": format!("hub-jwt-{issued}"), "credential_public": format!("UHUB{issued}"),
-                    "exp": if self.renew_now { exp - 780 } else { exp }, "acct": format!("fed_{BOX}"),
+                    "exp": if issued == 0 && self.renew_now { exp - 780 } else { exp }, "acct": format!("fed_{BOX}"),
                     "domain": "hub", "box_id": BOX, "inbox_prefix": PREFIX, "server_url": self.url,
                 });
                 for (name, value) in &self.fields {
                     reply[*name] = value.clone();
                 }
+                *issued_count += 1;
                 Ok(reply)
             }
             "ckbus.hub_credential_renew" => {
@@ -83,7 +83,7 @@ impl CredentialTransport for HubIssuer {
                     json!({"credential_public": format!("UHUB{}", issued - 1),
                         "nonce_b64": STANDARD.encode(self.server_nonce.unwrap_or("server-nonce"))})
                 );
-                if let Some(code) = *self.sign_refusal.lock().unwrap() {
+                if let Some(code) = self.sign_refusal.lock().unwrap().take() {
                     return Err(Error::Refused(code.to_owned()));
                 }
                 Ok(json!({"signature_b64": STANDARD.encode([42; 64])}))
@@ -91,6 +91,35 @@ impl CredentialTransport for HubIssuer {
             _ => panic!("unexpected method {method}"),
         }
     }
+}
+
+async fn wait_for_refused_reissues(
+    issuer: &HubIssuer,
+    changes: &tokio::sync::watch::Receiver<u64>,
+    retries: usize,
+) {
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let reissues = issuer
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(name, _)| name == "ckbus.hub_credential")
+                .skip(1)
+                .count();
+            if reissues >= retries {
+                break;
+            }
+            assert!(
+                changes.has_changed().is_ok(),
+                "maintenance stopped during a transient hub outage"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("maintenance retries the refused hub credential");
 }
 
 #[tokio::test]
@@ -153,17 +182,17 @@ async fn hub_bucket_watch_live_history_origin_and_reset() {
     })
     .await
     .expect("hub broker did not listen");
-    let manager = CredentialManager::start_hub(
-        Arc::new(HubIssuer {
-            url: url.clone(),
-            server_nonce: Some(""),
-            ..Default::default()
-        }),
-        MODULE,
-    )
-    .await
-    .unwrap();
-    let hub = HubClient::connect_manager(manager, TIMEOUT).await.unwrap();
+    let issuer = Arc::new(HubIssuer {
+        url: url.clone(),
+        server_nonce: Some(""),
+        ..Default::default()
+    });
+    let manager = CredentialManager::start_hub(issuer.clone(), MODULE)
+        .await
+        .unwrap();
+    let hub = HubClient::connect_manager(manager.clone(), TIMEOUT)
+        .await
+        .unwrap();
     let admin = async_nats::connect(url).await.unwrap();
     let context = jetstream::with_domain(admin.clone(), "hub");
     let config = kv::Config {
@@ -252,6 +281,56 @@ async fn hub_bucket_watch_live_history_origin_and_reset() {
         }
     );
     assert_eq!(watch.next().await.unwrap(), crate::BucketItem::CaughtUp);
+
+    let old = hub.client().unwrap();
+    let mut changes = hub.connection_changes();
+    *issuer.reissue_refusal.lock().unwrap() = Some("hub_unavailable");
+    assert!(matches!(
+        manager.reissue("UHUB0").await,
+        Err(Error::HubUnavailable)
+    ));
+    assert!(matches!(
+        hub.watch_bucket(&name).await,
+        Err(Error::HubUnavailable)
+    ));
+    tokio::time::timeout(TIMEOUT, async {
+        while old.flush().await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the original connection closes during hub recovery");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), watch.next())
+            .await
+            .is_err(),
+        "the open watch must wait for the replacement"
+    );
+
+    assert_eq!(
+        new_bucket
+            .put("during_outage", "third".into())
+            .await
+            .unwrap(),
+        3
+    );
+    *issuer.reissue_refusal.lock().unwrap() = None;
+    tokio::time::timeout(TIMEOUT, changes.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(hub.watch_bucket(&name).await.is_ok());
+    assert_eq!(
+        tokio::time::timeout(TIMEOUT, watch.next())
+            .await
+            .unwrap()
+            .unwrap(),
+        crate::BucketItem::Put {
+            key: "during_outage".into(),
+            revision: 3,
+            value: "third".into(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -314,7 +393,7 @@ async fn hub_obtains_connects_and_renews_with_hub_domain_and_inbox() {
 }
 
 #[tokio::test]
-async fn hub_refusals_are_typed_and_not_retried_on_issue_or_renewal() {
+async fn hub_first_issue_refusals_are_typed_and_not_retried() {
     let server = Server::start().await;
     for code in ["hub_unavailable", "hub_not_granted"] {
         let is_expected = |error: &Error| {
@@ -340,11 +419,17 @@ async fn hub_refusals_are_typed_and_not_retried_on_issue_or_renewal() {
             "{code}"
         );
         assert_eq!(issuer.calls.lock().unwrap().len(), 1);
+    }
+}
 
+#[tokio::test]
+async fn hub_not_granted_is_sticky_after_renewal_or_nonce_sign() {
+    let server = Server::start().await;
+    for renewal in [true, false] {
         let issuer = Arc::new(HubIssuer {
             url: server.url.clone(),
-            renew_now: true,
-            renew_refusal: Some(code),
+            renew_now: renewal,
+            renew_refusal: renewal.then_some("hub_not_granted"),
             ..Default::default()
         });
         let manager = CredentialManager::start_hub(issuer.clone(), MODULE)
@@ -354,18 +439,24 @@ async fn hub_refusals_are_typed_and_not_retried_on_issue_or_renewal() {
             .await
             .unwrap();
         let mut changes = hub.connection_changes();
+        if !renewal {
+            *issuer.sign_refusal.lock().unwrap() = Some("hub_not_granted");
+            hub.client().unwrap().force_reconnect().await.unwrap();
+        }
         assert!(tokio::time::timeout(TIMEOUT, changes.changed())
             .await
             .unwrap()
             .is_err());
-        assert!(
-            matches!(hub.client(), Err(error) if is_expected(&error)),
-            "{code}"
-        );
-        assert!(
-            matches!(manager.renew().await, Err(error) if is_expected(&error)),
-            "{code}"
-        );
+        assert!(matches!(hub.client(), Err(Error::HubNotGranted)));
+        assert!(matches!(manager.renew().await, Err(Error::HubNotGranted)));
+        assert!(matches!(
+            manager.reissue("UHUB0").await,
+            Err(Error::HubNotGranted)
+        ));
+        assert!(matches!(
+            manager.sign("UHUB0", vec![]).await,
+            Err(Error::HubNotGranted)
+        ));
         let calls = issuer.calls.lock().unwrap();
         assert_eq!(
             calls
@@ -375,9 +466,47 @@ async fn hub_refusals_are_typed_and_not_retried_on_issue_or_renewal() {
             [
                 "ckbus.hub_credential",
                 "ckbus.nonce_sign",
-                "ckbus.hub_credential_renew"
+                if renewal {
+                    "ckbus.hub_credential_renew"
+                } else {
+                    "ckbus.nonce_sign"
+                }
             ]
         );
+    }
+}
+
+#[tokio::test]
+async fn hub_recovers_from_unavailable_renewal_or_nonce_sign() {
+    let server = Server::start().await;
+    for renewal in [true, false] {
+        let issuer = Arc::new(HubIssuer {
+            url: server.url.clone(),
+            renew_now: renewal,
+            renew_refusal: renewal.then_some("hub_unavailable"),
+            reissue_refusal: Mutex::new(Some("hub_unavailable")),
+            ..Default::default()
+        });
+        let manager = CredentialManager::start_hub(issuer.clone(), MODULE)
+            .await
+            .unwrap();
+        let hub = HubClient::connect_manager(manager, TIMEOUT).await.unwrap();
+        let mut changes = hub.connection_changes();
+        if !renewal {
+            *issuer.sign_refusal.lock().unwrap() = Some("hub_unavailable");
+            hub.client().unwrap().force_reconnect().await.unwrap();
+        }
+        wait_for_refused_reissues(&issuer, &changes, 2).await;
+        assert!(matches!(hub.client(), Err(Error::HubUnavailable)));
+        assert!(!changes.has_changed().unwrap());
+        *issuer.reissue_refusal.lock().unwrap() = None;
+
+        tokio::time::timeout(TIMEOUT, changes.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*changes.borrow(), 1);
+        hub.client().unwrap().flush().await.unwrap();
     }
 }
 
@@ -583,11 +712,11 @@ async fn hub_and_box_replacements_are_independent() {
 }
 
 #[tokio::test]
-async fn hub_unavailable_during_nonce_reissue_stops_maintenance() {
+async fn hub_recovers_when_nonce_reissue_is_unavailable_after_connection_ends() {
     let server = Server::start().await;
     let issuer = Arc::new(HubIssuer {
         url: server.url.clone(),
-        reissue_refusal: Some("hub_unavailable"),
+        reissue_refusal: Mutex::new(Some("hub_unavailable")),
         ..Default::default()
     });
     let manager = CredentialManager::start_hub(issuer.clone(), MODULE)
@@ -598,23 +727,30 @@ async fn hub_unavailable_during_nonce_reissue_stops_maintenance() {
     let raw = hub.client().unwrap();
 
     *issuer.sign_refusal.lock().unwrap() = Some("ckbus_credential_revoked");
-    raw.force_reconnect().await.unwrap();
-    assert!(tokio::time::timeout(TIMEOUT, changes.changed())
-        .await
-        .unwrap()
-        .is_err());
+    raw.drain().await.unwrap();
+    tokio::time::timeout(TIMEOUT, async {
+        while !matches!(hub.client(), Err(Error::HubUnavailable)) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("hub reports the nonce reissue refusal");
     assert!(matches!(hub.client(), Err(Error::HubUnavailable)));
-    let calls = issuer.calls.lock().unwrap();
-    assert_eq!(
-        calls
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "ckbus.hub_credential",
-            "ckbus.nonce_sign",
-            "ckbus.nonce_sign",
-            "ckbus.hub_credential"
-        ]
-    );
+    assert!(matches!(hub.jetstream(), Err(Error::HubUnavailable)));
+    assert!(matches!(
+        hub.watch_bucket("fixture").await,
+        Err(Error::HubUnavailable)
+    ));
+    wait_for_refused_reissues(&issuer, &changes, 2).await;
+    assert!(!changes.has_changed().unwrap());
+    *issuer.reissue_refusal.lock().unwrap() = None;
+
+    tokio::time::timeout(TIMEOUT, changes.changed())
+        .await
+        .expect("maintenance publishes the recovered connection")
+        .expect("maintenance remains alive");
+    assert_eq!(*changes.borrow(), 1);
+    hub.client().unwrap().flush().await.unwrap();
+    assert!(hub.jetstream().is_ok());
+    assert_eq!(server.observed.lock().unwrap().auth[1]["jwt"], "hub-jwt-1");
 }

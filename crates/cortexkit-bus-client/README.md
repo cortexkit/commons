@@ -113,11 +113,12 @@ against its own consumer and bucket, and reports bucket resets as described belo
 The hub connection renews independently, with the same bounded NATS reconnect
 behavior as the box connection.
 
-`Error::HubUnavailable` means to try again when the module next needs the hub;
-`Error::HubNotGranted` means the module is not allowed to use it. The client
-does not retry either refusal. If a refusal stops maintenance, the change watch
-closes and requesting a new snapshot returns the typed error. To retry after
-`HubUnavailable`, call `HubClient::connect` again.
+If the first `HubClient::connect` returns `Error::HubUnavailable`, retry when the
+module next needs the hub. An established client recovers from that refusal in
+the background. While it recovers, `client()`, `jetstream()`, and `watch_bucket()`
+return `HubUnavailable`. An open bucket watch that loses its connection waits
+for the replacement and resumes on it. `Error::HubNotGranted` is terminal and
+stops maintenance, closing the connection change watch.
 
 ## Publishing and reading rules
 

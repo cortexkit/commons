@@ -39,7 +39,8 @@ use credentials::{CredentialManager, REPLACED_CREDENTIAL};
 pub enum Error {
     #[error("ck-bus refused the request: {0}")]
     Refused(String),
-    /// Retry when the module next needs the hub.
+    /// ck-bus cannot reach the hub. Retry initial connect when needed; an
+    /// established hub client recovers in the background.
     #[error("ck-bus refused the hub credential: hub_unavailable")]
     HubUnavailable,
     /// This module is not allowed to use the hub. Do not retry.
@@ -142,12 +143,14 @@ impl BusClient {
 impl ManagedConnection {
     async fn connect(manager: Arc<CredentialManager>, timeout: Duration) -> Result<Self> {
         let mut revisions = manager.revisions();
-        let (connection, lifetime) = loop {
-            revisions.borrow_and_update();
-            manager.check_hub_refusal()?;
+        let (connection, lifetime, recovered_at) = loop {
+            let revision = *revisions.borrow_and_update();
+            revision.check_hub_availability()?;
             let credential = manager.credential().await;
             match connect_current(manager.clone(), &credential, timeout).await {
-                Ok(current) if !revisions.has_changed().unwrap_or(false) => break current,
+                Ok((connection, lifetime)) if !revisions.has_changed().unwrap_or(false) => {
+                    break (connection, lifetime, revision.recovered_at);
+                }
                 Ok((connection, mut lifetime)) => {
                     lifetime.retire(&connection).await;
                 }
@@ -155,14 +158,14 @@ impl ManagedConnection {
                     if manager.credential().await.credential_public
                         != credential.credential_public => {}
                 Err(error) => {
-                    manager.check_hub_refusal()?;
+                    manager.revision().check_hub_availability()?;
                     return Err(error);
                 }
             }
         };
         let connection = Arc::new(RwLock::new(connection));
         let shared = connection.clone();
-        let (changes, receiver) = watch::channel(0);
+        let (changes, receiver) = watch::channel(recovered_at);
         let task = tokio::spawn(async move {
             // Renewal is a request to ck-bus that can wait or retry while
             // async-nats has already given up on the connection. Run both
@@ -172,7 +175,7 @@ impl ManagedConnection {
                 () = renew_credentials(&manager) => {}
                 () = replace_connections(&manager, &shared, &changes, revisions, lifetime, timeout) => {}
             }
-            if manager.check_hub_refusal().is_err() {
+            if manager.revision().check_hub_grant().is_err() {
                 let _ = snapshot(&shared).close(Duration::from_millis(50)).await;
             }
         });
@@ -200,10 +203,19 @@ async fn renew_credentials(manager: &CredentialManager) {
     let mut revisions = manager.revisions();
     let mut retry = None;
     loop {
-        if manager.check_hub_refusal().is_err() {
+        let revision = *revisions.borrow_and_update();
+        if revision.check_hub_grant().is_err() {
             return;
         }
-        revisions.borrow_and_update();
+        if revision.hub_unavailable() {
+            // Connection maintenance is reissuing the credential. Do not keep
+            // trying to renew the old lease while ck-bus cannot reach the hub.
+            retry = None;
+            if revisions.changed().await.is_err() {
+                return;
+            }
+            continue;
+        }
         let delay = match retry.take() {
             Some(delay) => delay,
             None => credentials::renewal_delay(manager.credential().await.exp),
@@ -216,7 +228,10 @@ async fn renew_credentials(manager: &CredentialManager) {
             () = tokio::time::sleep(delay) => {}
         }
         if let Err(error) = manager.renew().await {
-            if matches!(error, Error::HubUnavailable | Error::HubNotGranted) {
+            if matches!(error, Error::HubUnavailable) {
+                continue;
+            }
+            if matches!(error, Error::HubNotGranted) {
                 return;
             }
             if credentials::transient(&error) || matches!(error, Error::Transport(_)) {
@@ -242,14 +257,14 @@ async fn replace_connections(
     manager: &Arc<CredentialManager>,
     connection: &RwLock<NatsConnection>,
     changes: &watch::Sender<u64>,
-    mut revisions: watch::Receiver<u64>,
+    mut revisions: watch::Receiver<credentials::CredentialRevision>,
     mut lifetime: ConnectionLifetime,
     timeout: Duration,
 ) {
     loop {
         let credential_changed = tokio::select! {
             result = revisions.changed() => {
-                if result.is_err() || manager.check_hub_refusal().is_err() { return; }
+                if result.is_err() || manager.revision().check_hub_grant().is_err() { return; }
                 true
             }
             _ = &mut lifetime.ended => {
@@ -272,33 +287,49 @@ async fn replace_connections(
         let mut backoff = Duration::from_millis(250);
         loop {
             let revision = *revisions.borrow_and_update();
-            if manager.check_hub_refusal().is_err() {
+            if revision.check_hub_grant().is_err() {
                 return;
             }
             let credential = manager.credential().await;
-            match connect_current(manager.clone(), &credential, timeout).await {
-                Ok((replacement, mut replacement_lifetime)) => {
-                    if revisions.has_changed().unwrap_or(false) {
-                        replacement_lifetime.retire(&replacement).await;
-                        continue;
-                    }
-                    *connection
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = replacement;
-                    lifetime = replacement_lifetime;
-                    changes.send_replace(revision);
-                    break;
+            if revisions.has_changed().unwrap_or(false) {
+                continue;
+            }
+            if revision.hub_unavailable() {
+                if manager.reissue(&credential.credential_public).await.is_ok() {
+                    continue;
                 }
-                Err(_) => {
-                    tokio::select! {
-                        result = revisions.changed() => {
-                            if result.is_err() { return; }
-                            backoff = Duration::from_millis(250);
-                        }
-                        () = tokio::time::sleep(backoff) => {
-                            backoff = (backoff * 2).min(Duration::from_secs(30));
-                        }
-                    }
+            } else if let Ok((replacement, mut replacement_lifetime)) =
+                connect_current(manager.clone(), &credential, timeout).await
+            {
+                if revisions.has_changed().unwrap_or(false) {
+                    replacement_lifetime.retire(&replacement).await;
+                    continue;
+                }
+                *connection
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = replacement;
+                lifetime = replacement_lifetime;
+                changes.send_replace(revision.number);
+                break;
+            }
+
+            let recovering_hub = matches!(
+                manager.revision().check_hub_connection(*changes.borrow()),
+                Err(Error::HubUnavailable)
+            );
+            tokio::select! {
+                // A new key normally wakes replacement immediately. During a
+                // hub outage, do not reset backoff on failed authentication
+                // with a newly issued key, or issue and connect can spin.
+                result = revisions.wait_for(|latest| {
+                    latest.check_hub_grant().is_err()
+                        || (!recovering_hub && latest.number != revision.number)
+                }) => {
+                    if !matches!(result, Ok(latest) if latest.check_hub_grant().is_ok()) { return; }
+                    backoff = Duration::from_millis(250);
+                }
+                () = tokio::time::sleep(backoff) => {
+                    backoff = (backoff * 2).min(Duration::from_secs(30));
                 }
             }
         }

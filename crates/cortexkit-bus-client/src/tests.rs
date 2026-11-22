@@ -180,7 +180,7 @@ async fn concurrent_reissue_is_single_flight() {
         "one initial issue and one shared re-issue"
     );
     assert_eq!(manager.credential().await.credential_public, "UKEY1");
-    assert_eq!(*manager.revisions().borrow(), 1);
+    assert_eq!(manager.revisions().borrow().number, 1);
 }
 
 #[tokio::test]
