@@ -80,10 +80,22 @@ async fn keep_warm_ignoring_off_is_rejected() {
 }
 
 #[tokio::test]
-async fn keep_warm_changed_provider_bytes_are_rejected() {
-    for fault in ["bytes", "prefix"] {
-        rejects(IDLE, fault, "last real request's bytes and prefix").await;
-    }
+async fn keep_warm_changed_prefix_is_rejected() {
+    rejects(IDLE, "prefix", "last real request's cache prefix").await;
+}
+
+#[tokio::test]
+async fn keep_warm_capping_the_answer_outside_the_prefix_passes() {
+    // A warm may cap the answer (output tokens, thinking, streaming); only
+    // the cached prefix has to match the last real request.
+    let report = run(&subject(Some((IDLE, "output_cap")))).await;
+    assert_eq!(
+        report.outcome(IDLE),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
 }
 
 #[tokio::test]

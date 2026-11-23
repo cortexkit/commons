@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.83
+
+- Track llm-runner `=0.9.2`. `keep_warm_auto_warms_idle_session` compares only
+  an idle warm's cache prefix with the last real request, so a warm that caps
+  the answer passes.
+
 ## 0.17.82
 
 - Track llm-runner `=0.9.1`.

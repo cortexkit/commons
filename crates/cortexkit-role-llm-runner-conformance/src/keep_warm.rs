@@ -103,11 +103,10 @@ fn validate_idle(
         {
             return Err("idle request did not touch the cache before its lifetime ended".into());
         }
-        if request.request_bytes != real.request_bytes || request.cache_prefix != real.cache_prefix
-        {
-            return Err(
-                "idle request did not resend the last real request's bytes and prefix".into(),
-            );
+        // A warm keeps the cached prefix byte for byte but may cap the answer
+        // (output tokens, thinking, streaming), so only the prefix is compared.
+        if request.cache_prefix != real.cache_prefix {
+            return Err("idle request did not resend the last real request's cache prefix".into());
         }
         if request.usage != fixture_usage() {
             return Err(format!(

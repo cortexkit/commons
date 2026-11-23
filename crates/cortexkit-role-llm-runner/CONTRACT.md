@@ -4243,8 +4243,12 @@ A runner that declares `retract` serves `session.retract`.
   `cache::check_plan` and `cache::check_send_value` also decode raw policy
   values so a non-string key is refused with the same exact field.
   Zone validity belongs to the runner, not the crate's shape checks.
-- [pinned] Every warm resends the **last real request's bytes**, under the
-  view already applied. It is a cache touch, never a step, a notice or
+- [pinned] Every warm resends the last real request's **cache prefix** byte
+  for byte, under the view already applied. Outside that prefix a warm may
+  change only members that limit the answer or how it is returned: the
+  output token cap (zero where the route allows it), thinking, reasoning or
+  reasoning-summary settings, streaming, and provider fallbacks. A warm
+  never asks for a full answer. It is a cache touch, never a step, a notice or
   `last_prompt_tokens`. A warm never reopens an ended session; warming stops
   when the session ends. These rules apply to every mode other than `off`.
 - [informative] Recommended timing: first warm at

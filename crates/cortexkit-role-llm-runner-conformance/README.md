@@ -142,8 +142,9 @@ where `step_events` is available. Plan cases additionally need a plan fixture.
 The four `keep_warm_*` cases additionally require an idle-warming fixture:
 
 - `keep_warm_auto_warms_idle_session`: a provider request arrives before the
-  cache lifetime ends, resending the last real request without changing the
-  transcript or counting another real step.
+  cache lifetime ends, resending the last real request's cache prefix without
+  changing the transcript or counting another real step. Members outside the
+  prefix, such as the output cap, may differ.
 - `keep_warm_auto_stops_at_one_rewrite`: exactly one rewrite's worth of cache
   touches is sent, rejecting both early stopping and an extra warm.
 - `keep_warm_auto_rearms_after_real_request`: a second kit-driven real request

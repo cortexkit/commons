@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2
+
+- Contract text only (§9.3.5): a keep-warm request resends the last real
+  request's cache prefix byte for byte. Outside the prefix it may change only
+  members that cap the answer or how it is returned: the output token cap,
+  thinking, reasoning or reasoning-summary settings, streaming, and provider
+  fallbacks. A warm never asks for a full answer.
+
 ## 0.9.1
 
 - Contract text only: `session.subscribe` is the only surface for `tool_changed`, and its frame may carry a unit such as the message boundary of the refused call.

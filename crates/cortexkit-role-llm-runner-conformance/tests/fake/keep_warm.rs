@@ -115,7 +115,9 @@ pub(super) fn advance(module: &Module, by: std::time::Duration) {
             }
             let mut request = last.clone();
             request.at_ms = at;
-            if state.defect == Some("bytes") {
+            // Bytes outside the cached prefix change, as they do when a warm
+            // caps the answer.
+            if state.defect == Some("output_cap") {
                 request.request_bytes.push(b' ');
             }
             if state.defect == Some("prefix") {
