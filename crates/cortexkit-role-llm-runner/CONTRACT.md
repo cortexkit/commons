@@ -1737,6 +1737,18 @@ display-ready row for an app's reader on a runner declaring
   equals that code's `*_TEXT` byte for byte: never on a substring, never on
   another role, never from a guess. The vocabulary stays open; readers fall
   back to the text for an unknown code.
+  `SAFETY_STOP_NOTE` (`safety_stop_note`, added in 0.9.4) identifies Claude
+  Code's own note after a safety classifier stopped a reply, which it writes
+  as a separate user entry. Its four `SAFETY_STOP_NOTE_*_TEXT` constants, listed
+  in `SAFETY_STOP_NOTE_TEXTS`, contain Claude Code 2.1.330's exact text bytes
+  with no trailing newline: the base note, the base note with an exception for
+  a tool call that was running at the stop, and each of those followed by a
+  request to accept the stop. A runner sets this code only on the text part of
+  a native user entry that Claude Code flags as a companion of a refused reply
+  (`isMeta`, `turnCompanion`, and a `refusedMessageId` naming an assistant entry
+  in the same session), and only when that part's whole text equals one of the
+  four constants byte for byte. Claude Code's tool-result texts for calls cut
+  by the stop are tool results, not host text, and carry no code.
 - [pinned] Readers draw a host part as a host note or hide it, never as the
   sender's or model's words, including on an assistant row. A reader quoting
   a user entry as the person's words MUST omit host parts; a reader quoting

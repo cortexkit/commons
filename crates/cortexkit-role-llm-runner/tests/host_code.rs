@@ -504,6 +504,31 @@ fn host_code_opencode_continuation_constants_pin_exact_bytes() {
 }
 
 #[test]
+fn host_code_safety_stop_note_constants_pin_exact_bytes() {
+    // Claude Code 2.1.330's four whole notes, decoded from its bundle; the
+    // dash is U+2014 and none ends in a newline.
+    assert_eq!(host_codes::SAFETY_STOP_NOTE, "safety_stop_note");
+    host_codes::check(true, Some(host_codes::SAFETY_STOP_NOTE)).unwrap();
+    let expected: [&[u8]; 4] = [
+        b"Your response above was stopped by a safety classifier \xe2\x80\x94 this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded.",
+        b"Your response above was stopped by a safety classifier \xe2\x80\x94 this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded. Exception: a tool call whose result reads \"Interrupted\" was already running when the response was stopped; it may have partially or fully completed.",
+        b"Your response above was stopped by a safety classifier \xe2\x80\x94 this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded. Assume the stop was right. Tell the person that an automated safety check stopped the response and don't guess why it happened.",
+        b"Your response above was stopped by a safety classifier \xe2\x80\x94 this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded. Exception: a tool call whose result reads \"Interrupted\" was already running when the response was stopped; it may have partially or fully completed. Assume the stop was right. Tell the person that an automated safety check stopped the response and don't guess why it happened. You can still check how far the interrupted call got.",
+    ];
+    for (text, bytes) in host_codes::SAFETY_STOP_NOTE_TEXTS.iter().zip(expected) {
+        assert_eq!(text.as_bytes(), bytes);
+    }
+    assert_eq!(
+        host_codes::SAFETY_STOP_NOTE_TEXTS[0],
+        host_codes::SAFETY_STOP_NOTE_TEXT
+    );
+    assert_eq!(
+        host_codes::SAFETY_STOP_NOTE_TEXTS[3],
+        host_codes::SAFETY_STOP_NOTE_INTERRUPTED_CALL_ACCEPT_TEXT
+    );
+}
+
+#[test]
 fn host_parts_assistant_reasoning_and_tag_answer_round_trip() {
     let raw = json!({"role":"assistant", "text":"", "parts":[{
         "type":"reasoning", "part":"0", "text":"\u{2060}",

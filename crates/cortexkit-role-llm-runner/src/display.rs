@@ -415,6 +415,25 @@ pub mod host_codes {
     /// Exact whole text for [`CONTINUED_AFTER_RESTART`], with no trailing newline.
     pub const CONTINUED_AFTER_RESTART_TEXT: &str = "The server restarted while you were working. Continue from where you left off without repeating completed work.";
 
+    /// Claude Code's own user-role note after a safety classifier stopped a
+    /// reply. It has four whole-text forms; [`SAFETY_STOP_NOTE_TEXTS`] lists them.
+    pub const SAFETY_STOP_NOTE: &str = "safety_stop_note";
+    /// The base note, used when no tool call was running at the stop.
+    pub const SAFETY_STOP_NOTE_TEXT: &str = "Your response above was stopped by a safety classifier — this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded.";
+    /// The base note plus the exception for a tool call that was running at the stop.
+    pub const SAFETY_STOP_NOTE_INTERRUPTED_CALL_TEXT: &str = "Your response above was stopped by a safety classifier — this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded. Exception: a tool call whose result reads \"Interrupted\" was already running when the response was stopped; it may have partially or fully completed.";
+    /// The base note plus the request to accept the stop without guessing its cause.
+    pub const SAFETY_STOP_NOTE_ACCEPT_TEXT: &str = "Your response above was stopped by a safety classifier — this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded. Assume the stop was right. Tell the person that an automated safety check stopped the response and don't guess why it happened.";
+    /// The running-call note plus the request to accept the stop.
+    pub const SAFETY_STOP_NOTE_INTERRUPTED_CALL_ACCEPT_TEXT: &str = "Your response above was stopped by a safety classifier — this is not a tool or API error. The rest of it was withheld, and tool calls in it that had not finished did not run. Do not produce that content again, even reworded. Exception: a tool call whose result reads \"Interrupted\" was already running when the response was stopped; it may have partially or fully completed. Assume the stop was right. Tell the person that an automated safety check stopped the response and don't guess why it happened. You can still check how far the interrupted call got.";
+    /// Every exact whole text for [`SAFETY_STOP_NOTE`], each with no trailing newline.
+    pub const SAFETY_STOP_NOTE_TEXTS: [&str; 4] = [
+        SAFETY_STOP_NOTE_TEXT,
+        SAFETY_STOP_NOTE_INTERRUPTED_CALL_TEXT,
+        SAFETY_STOP_NOTE_ACCEPT_TEXT,
+        SAFETY_STOP_NOTE_INTERRUPTED_CALL_ACCEPT_TEXT,
+    ];
+
     /// Bookkeeping parts written by the host's fallback-model plugin, not the model.
     pub const SERVER_FALLBACK: &str = "server_fallback";
     /// From the plugin's documented stored form: match only at the start of a

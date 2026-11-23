@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.4
+
+- Add host code `display::host_codes::SAFETY_STOP_NOTE` (`safety_stop_note`)
+  with its four exact `SAFETY_STOP_NOTE_*_TEXT` constants and the
+  `SAFETY_STOP_NOTE_TEXTS` list: Claude Code's own note after a safety
+  classifier stops a reply, matched only as the whole text of the flagged
+  companion user entry (§4.7).
+
 ## 0.9.3
 
 - Contract text only (new §9.3.6, and the rebuild points in §10.2): an effort

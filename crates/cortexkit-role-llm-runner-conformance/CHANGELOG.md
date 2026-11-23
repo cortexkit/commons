@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.86
+
+- Track llm-runner `=0.9.4`.
+
 ## 0.17.85
 
 - Track llm-runner `=0.9.3`.
