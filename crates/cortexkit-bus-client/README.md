@@ -27,6 +27,13 @@ hub records, `ckdel.{box}.{module}`. The bus module must not serve the new prefi
 until readers run bus-client 0.1.7 or later with bus-nats 0.5.4 or later.
 Nonces are signed through `ckbus.nonce_sign`; the module never receives a seed.
 
+If the daemon refuses to open the credential route on initial connect,
+`Error::RouteRefused { code, expected_back }` preserves its refusal code and
+verdict. `Some(false)` means ck-bus needs operator action; watch the daemon's
+module catalog for ck-bus to become available instead of polling the route.
+`Some(true)` means ck-bus is restarting, and `None` means its return is unknown.
+Internal retry behavior is unchanged.
+
 `inbox_prefix()` returns an owned copy of the current connection's prefix. It
 changes after credential re-issue for the per-credential form and stays stable
 for the `ckdel` form. `box_id()` returns the computer's box id from the

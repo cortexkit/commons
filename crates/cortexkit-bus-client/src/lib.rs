@@ -46,6 +46,22 @@ pub enum Error {
     /// This module is not allowed to use the hub. Do not retry.
     #[error("ck-bus refused the hub credential: hub_not_granted")]
     HubNotGranted,
+    /// The daemon refused to open a route to ck-bus; the request was not sent.
+    #[error("ck-bus route refused: {code} ({verdict})", verdict = match expected_back {
+        Some(true) => "ck-bus is expected back after restart",
+        Some(false) => "ck-bus requires operator action",
+        None => "unknown whether ck-bus is expected back",
+    })]
+    RouteRefused {
+        /// The daemon's refusal code.
+        code: String,
+        /// `Some(true)` means ck-bus is restarting and a later retry may work.
+        /// `Some(false)` means ck-bus will not return without operator action;
+        /// callers can watch the daemon's module catalog for ck-bus to become
+        /// available instead of polling the route.
+        /// `None` means the daemon gave no usable verdict.
+        expected_back: Option<bool>,
+    },
     #[error("ck-bus request failed: {0}")]
     Transport(String),
     #[error("invalid ck-bus reply: {0}")]
@@ -234,7 +250,9 @@ async fn renew_credentials(manager: &CredentialManager) {
             if matches!(error, Error::HubNotGranted) {
                 return;
             }
-            if credentials::transient(&error) || matches!(error, Error::Transport(_)) {
+            if credentials::transient(&error)
+                || matches!(error, Error::Transport(_) | Error::RouteRefused { .. })
+            {
                 retry = Some(Duration::from_secs(5));
                 continue;
             }

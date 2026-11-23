@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-client"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -433,6 +433,7 @@ dependencies = [
  "serde_json",
  "subc-client-rs",
  "subc-protocol 0.37.1",
+ "subc-transport",
  "tempfile",
  "thiserror",
  "tokio",

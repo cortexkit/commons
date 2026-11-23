@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.16
+
+- Report daemon refusals to open a route to ck-bus as `Error::RouteRefused`, with
+  the refusal code and optional `expected_back` verdict. Internal retries and
+  backoff are unchanged.
+
 ## 0.1.15
 
 - `EventReader` discards pull deliveries that do not match its bound EVENT

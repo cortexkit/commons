@@ -91,7 +91,17 @@ impl CredentialTransport for SubcTransport {
             .await
             .map_err(|error| match error {
                 subc_client_rs::CallError::Module(body) => Error::Refused(body.code),
-                other => Error::Transport(other.to_string()),
+                other => match other.route_open_refusal() {
+                    Some(body) => Error::RouteRefused {
+                        code: body.code.clone(),
+                        expected_back: body
+                            .detail
+                            .as_ref()
+                            .and_then(|detail| detail.get("expected_back"))
+                            .and_then(Value::as_bool),
+                    },
+                    None => Error::Transport(other.to_string()),
+                },
             })?;
         let value: Value =
             serde_json::from_slice(&body).map_err(|_| Error::Reply("response is not JSON"))?;
@@ -525,6 +535,147 @@ mod tests {
 
     const BOX: &str = "0123456789abcdef0123456789abcdef";
     const DELIVER: &str = "ckdel.0123456789abcdef0123456789abcdef.example-module_2";
+
+    #[tokio::test]
+    async fn route_refusal_preserves_daemon_code_and_boolean_verdict() {
+        use subc_client_rs::SubcConsumer;
+        use subc_protocol::{ErrorBody, Flags, Frame, FrameType, Priority};
+        use subc_transport::{
+            authenticate_server, generate_daemon_id, generate_key, read_frame, write_atomic,
+            write_frame, ConnectionInfo, Endpoint, SCHEMA_VERSION,
+        };
+        use tokio::net::TcpListener;
+
+        const CODE: &str = "route_rejected";
+        let cases = [
+            (Some(json!({"expected_back": false})), Some(false)),
+            (Some(json!({"expected_back": true})), Some(true)),
+            (Some(json!({"expected_back": "false"})), None),
+            (Some(json!({})), None),
+            (None, None),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connection.json");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let conn = ConnectionInfo {
+            schema: SCHEMA_VERSION,
+            wire_version: None,
+            endpoints: vec![Endpoint {
+                host: "127.0.0.1".into(),
+                port: listener.local_addr().unwrap().port(),
+            }],
+            key: generate_key().unwrap(),
+            daemon_id: generate_daemon_id().unwrap(),
+            pid: std::process::id(),
+            daemon_ver: "0.40.3".into(),
+        };
+        write_atomic(&path, &conn).unwrap();
+        let refusals = cases.clone().map(|(detail, _)| detail);
+        let daemon = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            authenticate_server(
+                &mut stream,
+                &conn.key,
+                &conn.daemon_id,
+                &conn.daemon_ver,
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+            let mut refusals = refusals.into_iter().peekable();
+            while refusals.peek().is_some() {
+                let request = read_frame(&mut stream).await.unwrap().unwrap();
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let (kind, body) = match body["op"].as_str() {
+                    Some("server.describe") => (
+                        FrameType::Response,
+                        serde_json::to_vec(&json!({
+                            "op": "server.describe", "protocol_ver": subc_protocol::PROTOCOL_VERSION,
+                            "subc_ops": ["route.open"], "capabilities": [], "connected_clients": 1,
+                        }))
+                        .unwrap(),
+                    ),
+                    Some("route.open") => (
+                        FrameType::Error,
+                        serde_json::to_vec(&ErrorBody {
+                            code: CODE.into(),
+                            message: "route refused by test daemon".into(),
+                            detail: refusals.next().unwrap(),
+                        })
+                        .unwrap(),
+                    ),
+                    _ => panic!("unexpected daemon request {body}"),
+                };
+                let response = Frame::build(
+                    kind,
+                    Flags::new(false, Priority::Interactive, false),
+                    0,
+                    0,
+                    request.header.corr,
+                    body,
+                )
+                .unwrap();
+                write_frame(&mut stream, &response).await.unwrap();
+            }
+        });
+        let consumer = Arc::new(
+            SubcConsumer::connect(&path, Default::default())
+                .await
+                .unwrap(),
+        );
+        let transport = SubcTransport::new(consumer, "example-module", Duration::from_secs(5));
+        for (detail, verdict) in cases {
+            let error = transport
+                .call("ckbus.credential", json!({}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&error, Error::RouteRefused { code, expected_back }
+                    if code == CODE && *expected_back == verdict),
+                "refusal with detail {detail:?} mapped to {error:?}"
+            );
+        }
+        daemon.await.unwrap();
+    }
+
+    #[derive(Default)]
+    struct RenewalTransport {
+        attempts: Mutex<Vec<tokio::time::Instant>>,
+    }
+
+    #[async_trait]
+    impl CredentialTransport for RenewalTransport {
+        async fn call(&self, method: &str, _: Value) -> Result<Value> {
+            match method {
+                "ckbus.credential" => Ok(reply("_INBOX.UKEY0", &format!("box_{BOX}"))),
+                "ckbus.credential_renew" => {
+                    let mut attempts = self.attempts.lock().await;
+                    attempts.push(tokio::time::Instant::now());
+                    match attempts.len() {
+                        1 => Err(Error::RouteRefused {
+                            code: "route_rejected".into(),
+                            expected_back: Some(false),
+                        }),
+                        2 => Err(Error::Refused("ckbus_generation_not_live".into())),
+                        _ => panic!("renewal retried after a terminal module refusal"),
+                    }
+                }
+                _ => panic!("unexpected method {method}"),
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn route_refusal_keeps_renewal_retry_delay() {
+        let transport = Arc::new(RenewalTransport::default());
+        let manager = CredentialManager::start(transport.clone()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), crate::renew_credentials(&manager))
+            .await
+            .expect("renewal stops after the terminal module refusal");
+        let attempts = transport.attempts.lock().await;
+        assert_eq!(attempts.len(), 2, "renewal must retry a route refusal");
+        assert_eq!(attempts[1] - attempts[0], Duration::from_secs(5));
+    }
 
     fn reply(prefix: &str, acct: &str) -> Value {
         json!({"jwt":"jwt", "exp":1234, "credential_public":"UKEY0",
