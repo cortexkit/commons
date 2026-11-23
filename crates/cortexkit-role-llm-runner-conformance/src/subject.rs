@@ -2542,6 +2542,17 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// The prompt-cache lifetime, in milliseconds, that `session`'s model
+    /// requests already carry in this fixture, for a runner that takes its
+    /// lifetimes from the vendor's cache policy and cannot carry an arbitrary
+    /// one. When this returns `Some`, the keep-warm cases skip
+    /// `set_observed_cache_lifetime` and size every clock step and expiry
+    /// check from the returned lifetime (2 ms to 24 h). `None` keeps the kit's
+    /// own 10 s lifetime, set through `set_observed_cache_lifetime`.
+    async fn fixture_cache_lifetime(&self, _session: &str) -> Result<Option<u64>, HarnessError> {
+        Ok(None)
+    }
+
     /// Install the supplied cache prices in the runner's scripted model fixture
     /// before the session's first send. Return the prices actually used, read
     /// back from the fixture, not an echo of the arguments. The fixture must

@@ -76,7 +76,14 @@ impl KeepWarmRequests {
     }
 }
 
+/// The fixture's cache lifetime when the subject leaves it to the kit
+/// (`fixture_cache_lifetime` returns `None`).
 const TTL_MS: u64 = 10_000;
+/// Bounds on a subject-supplied fixture lifetime: the idle case advances by
+/// `lifetime - 1`, which must stay positive, and a day covers every vendor's
+/// longest prompt-cache lifetime.
+const MIN_FIXTURE_TTL_MS: u64 = 2;
+const MAX_FIXTURE_TTL_MS: u64 = 86_400_000;
 const CACHED_TOKENS: u64 = 1_000;
 
 fn fixture_usage() -> ScriptedUsage {
@@ -89,6 +96,7 @@ fn validate_idle(
     real: &KeepWarmRequest,
     idle: &[KeepWarmRequest],
     until_ms: u64,
+    ttl_ms: u64,
     prices: &KeepWarmPrices,
     exhaust: bool,
 ) -> Result<(), String> {
@@ -99,7 +107,7 @@ fn validate_idle(
         if spent >= rewrite {
             return Err("provider received an extra warm after one rewrite's cost".into());
         }
-        if request.at_ms <= touched || request.at_ms - touched >= TTL_MS || request.at_ms > until_ms
+        if request.at_ms <= touched || request.at_ms - touched >= ttl_ms || request.at_ms > until_ms
         {
             return Err("idle request did not touch the cache before its lifetime ended".into());
         }
@@ -275,10 +283,28 @@ where
     if initial.next_cursor != 0 || !initial.requests.is_empty() {
         return Err("fresh session already has provider requests before a real send".into());
     }
-    case.subject
-        .set_observed_cache_lifetime(&session.name, Some(TTL_MS))
+    // A runner whose lifetimes come from the vendor's cache policy reports the
+    // lifetime its requests already carry; otherwise the kit sets its own.
+    let ttl_ms = match case
+        .subject
+        .fixture_cache_lifetime(&session.name)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+    {
+        Some(ms) if (MIN_FIXTURE_TTL_MS..=MAX_FIXTURE_TTL_MS).contains(&ms) => ms,
+        Some(ms) => {
+            return Err(format!(
+                "fixture cache lifetime {ms} ms is outside {MIN_FIXTURE_TTL_MS}..={MAX_FIXTURE_TTL_MS} ms"
+            ))
+        }
+        None => {
+            case.subject
+                .set_observed_cache_lifetime(&session.name, Some(TTL_MS))
+                .await
+                .map_err(|e| e.to_string())?;
+            TTL_MS
+        }
+    };
     let off = name == "keep_warm_off_sends_no_warms";
     let mode = if off { "off" } else { "auto" };
     let mut cursor = 0;
@@ -315,9 +341,9 @@ where
         }
         let before = snapshot(&session.route, &run_id).await?;
         let span = if name == "keep_warm_auto_warms_idle_session" {
-            TTL_MS - 1
+            ttl_ms - 1
         } else {
-            4 * TTL_MS
+            4 * ttl_ms
         };
         case.subject
             .advance_warm_clock(case.handle.inner(), Duration::from_millis(span))
@@ -337,6 +363,7 @@ where
                 request,
                 &idle.requests,
                 idle.now_ms,
+                ttl_ms,
                 &prices,
                 name != "keep_warm_auto_warms_idle_session",
             )?;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.84
+
+- New subject hook `fixture_cache_lifetime(session)`, default `Ok(None)`. A
+  runner whose cache lifetimes come from the vendor's cache policy reports the
+  lifetime its fixture requests already carry; the keep-warm cases then skip
+  `set_observed_cache_lifetime` and size every clock step and expiry check from
+  that value (2 ms to 24 h). `None` keeps the kit's own 10 s lifetime.
+
 ## 0.17.83
 
 - Track llm-runner `=0.9.2`. `keep_warm_auto_warms_idle_session` compares only

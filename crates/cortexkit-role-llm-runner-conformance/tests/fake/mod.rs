@@ -6563,6 +6563,9 @@ pub struct FakeSubject {
     pub turn_system_cleared: bool,
     pub cache_policy_zone: String,
     pub keep_warm_fixture: bool,
+    /// The cache lifetime this fixture's requests carry on their own, reported
+    /// through `fixture_cache_lifetime` (a runner using vendor lifetimes).
+    pub keep_warm_lifetime: Option<u64>,
     /// This adapter cannot create fetch-plan sessions.
     pub without_plans: bool,
     /// The adapter can give a session host history before its first send
@@ -6694,6 +6697,7 @@ impl FakeSubject {
             turn_system_cleared: false,
             cache_policy_zone: "Etc/UTC".into(),
             keep_warm_fixture: false,
+            keep_warm_lifetime: None,
             host_prefix_hook: false,
             seed_hook: false,
             host_prefix_everywhere: 0,
@@ -8423,6 +8427,19 @@ impl LlmRunnerSubject for FakeSubject {
             return Ok(None);
         }
         Ok(Some(keep_warm::requests(&self.world(), session, cursor)))
+    }
+
+    async fn fixture_cache_lifetime(&self, session: &str) -> Result<Option<u64>, HarnessError> {
+        let Some(ms) = self.keep_warm_lifetime else {
+            return Ok(None);
+        };
+        // The fixture's requests carry this lifetime without the kit setting it.
+        self.world()
+            .observed_cache_lifetimes
+            .lock()
+            .unwrap()
+            .insert(session.into(), Some(ms));
+        Ok(Some(ms))
     }
 
     async fn set_observed_cache_lifetime(

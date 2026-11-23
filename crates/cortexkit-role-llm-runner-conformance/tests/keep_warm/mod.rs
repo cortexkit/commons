@@ -105,6 +105,35 @@ async fn keep_warm_transcript_and_real_step_changes_are_rejected() {
 }
 
 #[tokio::test]
+async fn keep_warm_subject_lifetime_sizes_every_case() {
+    // A vendor-sized lifetime: the fake warms at half of it, so the cases pass
+    // only if the kit steps its clock by this lifetime and not its own 10 s.
+    let mut subject = subject(None);
+    subject.keep_warm_lifetime = Some(300_000);
+    let report = run(&subject).await;
+    for name in NAMES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn keep_warm_subject_lifetime_out_of_range_is_rejected() {
+    let mut subject = subject(None);
+    subject.keep_warm_lifetime = Some(1);
+    let report = run(&subject).await;
+    for name in NAMES {
+        assert!(failed(&report, name).contains("outside 2..=86400000 ms"));
+    }
+    assert_none_failed_but(&report, NAMES);
+}
+
+#[tokio::test]
 async fn keep_warm_uninstalled_prices_are_rejected() {
     rejects(CAP, "prices", "not fixture prices").await;
 }

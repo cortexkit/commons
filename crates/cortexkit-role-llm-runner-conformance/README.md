@@ -161,7 +161,11 @@ prefix bytes, and response usage. All three hooks default to `Ok(None)` (not
 applicable). Opt in only when the fixture supports idle warming; declaring
 `cache_policy` alone promises admission, not provider warming support. The
 fixture uses an explicit lifetime and integral prices so three cache reads cost
-exactly one rewrite. The checks allow any cadence that touches before expiry;
+exactly one rewrite. The kit sets a 10 s lifetime through
+`set_observed_cache_lifetime`, unless `fixture_cache_lifetime` reports the
+lifetime the subject's requests already carry (for a runner whose lifetimes come
+from the vendor's cache policy); the cases then size their clock steps from that
+value instead. The checks allow any cadence that touches before expiry;
 the recommended interval in §9.3.5 of the [runner contract](../cortexkit-role-llm-runner/CONTRACT.md)
 is informative, not a mandatory schedule.
 
