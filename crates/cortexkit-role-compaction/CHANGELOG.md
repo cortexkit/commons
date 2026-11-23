@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.10
+
+- Contract wording only (CONTRACT.md rule MV1, moving a session in): the first
+  view after a move-in cuts through the entry just before the newest, so the
+  newest entry stays in full, as providers already build it. The rule now says
+  it applies only when a session moves onto a runner of a different kind; a move
+  between computers on the same runner kind adopts the runner's applied view and
+  builds no first view.
+
 ## 0.4.9
 
 - Track llm-runner `0.9`.
