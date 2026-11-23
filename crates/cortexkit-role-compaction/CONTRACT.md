@@ -915,6 +915,7 @@ Causes:
 | `cache_expired` | The runner holds every cache touch since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. Unknown until a touch arrives after start or after a serving-model change, including a switch away and back; never for an `implicit` cache. After warming stops, use the last touch plus its lifetime (RD3). |
 | `chain_reset` | It is about to start a new request chain on a chained route (connection age or idle limit, a run starting without a kept connection). On a route whose model provider keeps a prefix cache apart from the connection, a new chain does not by itself lose the cached prefix. |
 | `model_change` | The next request uses a different model than the previous one, other than a one-step fallback (RD6). |
+| `effort_change` | The next request uses the same model with a different reasoning effort or thinking mode, and that change loses the cached prefix: a thinking-mode change always, an effort change unless the model keeps its cache across effort changes. `llm-runner/v1` §9.3.6 says when a runner sends it. |
 | `tier_change` | A different service tier. |
 | `account_change` | A different account. |
 | `surface_change` | A different system prompt or tool definitions. |

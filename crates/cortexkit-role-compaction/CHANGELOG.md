@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.11
+
+- New ride cause `effort_change` (`RideCause::EffortChange`; CONTRACT.md
+  W5.3, `compaction.ride`): the next request uses the same model with a
+  different reasoning effort or thinking mode, and that change loses the
+  cached prefix. A provider that predates it
+  decodes it as an unknown cause, which already counts as a lost cache.
+
 ## 0.4.10
 
 - Contract wording only (CONTRACT.md rule MV1, moving a session in): the first

@@ -4159,7 +4159,8 @@ A runner that declares `retract` serves `session.retract`.
   send without an explicit choice (§4.3). A changed plan choice appears as
   soon as acceptance is durable, before any run. Model or tier changes still
   use the compaction contract's existing `model_change` / `tier_change`
-  causes; this group defines no new cause or notice shape.
+  causes; this group defines no new cause or notice shape. Effort changes
+  follow §9.3.6.
 
 ### 9.3.5 `cache_policy`: session cache requests
 
@@ -4270,6 +4271,46 @@ A runner that declares `retract` serves `session.retract`.
   means only the `auto` cost cap.
   Real-time warming schedules, cost/count caps and local-time transitions
   are not exercised by the conformance kit.
+
+### 9.3.6 Effort changes and the prompt cache
+
+These rules apply to every runner that sends `compaction.ride`
+(`cortexkit-role-compaction/CONTRACT.md` W5.3). They decide when a change of
+reasoning effort tells the compaction provider that the cache is lost, and when
+it lets waiting plan changes apply.
+
+- [pinned] An effort change is a change of the reasoning effort (the model's
+  `variant`) between two requests of a session on the same provider and model.
+  A thinking-mode change is a change of the thinking mode the request sends,
+  for example adaptive, between tools or disabled. A change of provider or
+  model is a model switch (`model_change`), never an effort change.
+- [pinned] Whether an effort change keeps the provider's cached prefix is the
+  model catalog fact `capability.effort_change_cache` on the model entry the
+  run uses. The runner reads it when the run starts and keeps that value for
+  the whole run, so a resumed run decides the same way. An absent fact counts
+  as `false`: most providers have no way to change effort without losing the
+  cache.
+- [pinned] `true`: the runner sends the change in the provider's
+  cache-keeping form, such as a per-message effort or an in-conversation
+  configuration update, with the request-level effort, headers and thinking
+  mode that form requires, so the cached prefix is unchanged. It sends no
+  ride for the change, and the change is not a prefix, system or history
+  rebuild (§10.2): pending changes keep waiting. A request path that cannot
+  send the cache-keeping form yet is a defect of that path; the runner does
+  not ride in its place.
+- [pinned] `false` or absent: before rendering the first request with the
+  new effort, the runner rides `effort_change`. The change is a prefix,
+  system and history rebuild (§10.2), so pending changes apply in that same
+  step.
+- [pinned] A thinking-mode change rides `effort_change` and is a rebuild
+  point on every model, whatever the fact says, including when it comes with
+  an effort change.
+- [pinned] The runner reports the session's effort as `variant` in its
+  `ModelRef` (compaction contract W3.1), which it sends in Setup and in ride
+  and notice conditions. A provider may ignore it.
+- [pinned] No rollout gate is needed: a compaction provider that predates
+  `effort_change` decodes it as an unknown cause and counts it as a lost cache
+  (W1.5).
 
 ### 9.4 `structured_output`: schema-shaped run output
 
@@ -5441,6 +5482,11 @@ never less. This is the safe fallback because nothing gets hidden.
   `scope_admission`). Otherwise refuse
   `invalid_params {field: "speaks_for"}`. `notice` has no owner restriction.
   Every refusal happens before any write.
+- [pinned] A send with `notice: true` never creates a session or a new
+  incarnation. To a name with no session (never created, or deleted after
+  release or expiry) it is refused `unknown_session`, not retryable, and writes
+  nothing. To a released session whose deletion is pending it is refused
+  `session_released`, like any send.
 - [pinned] Store the marks with the send's new entry, or with its riding record
   for tool-result delivery. Serve them beside `sender` on opted-in
   `session.read` entries (`include_display_facts: true`), raw `session.history`
@@ -6062,6 +6108,17 @@ its host's file storage, not a second copy of the host's media store.
   or sessions predating the group) get the runner's configured policy, with
   `source: "runner"`. The first send or adopt carrying a policy replaces a
   runner-sourced policy exactly once. After that it is starter-sourced and frozen.
+- [pinned] Only the session's owner replaces a runner-sourced policy: the
+  principal that made the session's first send or adopt, as the daemon attested
+  it (the same owner `session.release` names). A send or adopt from any other
+  principal that carries `retention_policy` for such a session is refused
+  `scope_owner_mismatch` and writes nothing; one without `retention_policy` is
+  unaffected.
+- [pinned] A runner that chose a session's storage by its `backup` setting when
+  the session was created may refuse, at that one replacement, a policy whose
+  `backup` differs from the runner-sourced policy's: `backup_unsupported` with
+  `detail.reason: "backup_fixed_at_creation"`, writing nothing. Every other
+  member of the policy is replaced as above.
 - [pinned] `session.head` gains `retention_policy`, exactly as accepted or
   runner-assigned, and `retention_state: {source: "starter" | "runner",
   request_dumps_unsupported?: true, host_limited?: true}`. When dumps were
@@ -7310,7 +7367,9 @@ every request, answer and refusal.
   next run; `on_prefix_rebuild`,
   `on_system_rebuild` and `on_history_rebuild` at the first run that starts
   with the prefix, the system text or the history rebuilt (a compaction
-  fold, a model switch, a `session.flush_prefix`). Applying it moves
+  fold, a model switch, an effort change that rides `effort_change`, a
+  `session.flush_prefix`). An effort change that keeps the cache (§9.3.6) is
+  not a rebuild. Applying it moves
   `applied_generation` to its generation and sets `effective`, and clears
   `pending` (§10).
 - [pinned] A pending change whose fetched tools and system text are
@@ -7450,7 +7509,8 @@ every request, answer and refusal.
   change, and whenever applying any accepted refresh, the runner takes the
   current definition of each tool in the effective plan whose provider now
   serves the same major with a different version. These points include a
-  compaction fold or new view that changes the head, a model switch,
+  compaction fold or new view that changes the head, a model switch, an effort
+  change that rides `effort_change` (§9.3.6),
   `session.flush_prefix`, and lapse of the prompt cache. How the runner learns
   of the change is its own, for example a `tool.catalog {digest_only: true}`
   probe followed by a fresh catalog read, or watching the daemon catalog.
@@ -7913,7 +7973,7 @@ treats it as a terminal refusal of that one request.
 | `too_large` | the complete encoded `session.plan_view` reply exceeds the 4,194,304-byte transport frame limit, including its 21-byte header (§4.9) | — | no: never truncate the plan |
 | `template_part_gone` | a template send whose `part_tag` slot names a part the request that would carry it does not show (§9.7); a queued send meeting it later ends in the send state of the same name instead | `{slot}` (`errors::TemplatePartGoneDetail`) | no |
 | `unknown_send` | `session.send_status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
-| `unknown_session` | an upload into a session that does not exist (§9.12) | — | no |
+| `unknown_session` | an upload into a session that does not exist (§9.12), or a `notice: true` send to a name with no session (§9.7.3) | — | no |
 | `unknown_upload` | append, commit or send names an unknown upload (§9.12) | — | no |
 | `upload_not_committed` | a send names an open upload | — | no |
 | `upload_gone` | append, commit or send names a known lost/deleted upload | — | no |
@@ -7930,14 +7990,14 @@ treats it as a terminal refusal of that one request.
 | `retention_conflict` | policy differs from the starter's frozen policy (§9.14) | `frozen` (policy) | no |
 | `session_released` | send while ordinary release deletion is pending (§9.14) | — | **yes** |
 | `session_held_elsewhere` | start or steer a run after an agent-data move released this session here; no new incarnation under the same name until move-back activation (§9.14) | `holder?` (receiving computer's 32-hex box id) | no |
-| `backup_unsupported` | runner cannot back up a single session (§9.14) | `reason` | no |
+| `backup_unsupported` | runner cannot back up a single session, or keeps a session's `backup` setting fixed from its creation (§9.14) | `reason` | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
 | `request_id_reuse` | a `session.promote` `request_id` reused with another `send_id` (§9.24) | `field: "send_id"` | no |
 | `unsupported` | `session.promote` without `send_promote`, or on a harness without `steer` (§9.24) | — | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | a scoped session-creating send disallowed by §9's creation policy: a plain-scope non-owner, a run-scope owner, or an opener rejected by the runner's optional flow or run policy; or an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7; all subject to §9's frozen-send checks), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract` (except that submission's recorded daemon-attested sender on a `retract_own_send` runner, §9.2), `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
+| `scope_owner_mismatch` | a scoped session-creating send disallowed by §9's creation policy: a plain-scope non-owner, a run-scope owner, or an opener rejected by the runner's optional flow or run policy; or an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7; all subject to §9's frozen-send checks), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract` (except that submission's recorded daemon-attested sender on a `retract_own_send` runner, §9.2), `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10), or a `retention_policy` replacing a runner-sourced policy from anyone but the session's owner (§9.14) | the accepted identity | no |
 | `scope_sender_mismatch` | a later send's attested opener differs from the frozen sender (§9); checked before flow, run and agent | `{field: "sender"}` | no |
 | `scope_flow_id_mismatch` | a later send's flow id differs from the frozen value (§9); checked before run and agent | `{field: "flow_id"}` | no |
 | `scope_run_id_mismatch` | a later send's run id differs from the frozen value (§9); checked before agent | `{field: "run_id"}` | no |

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.85
+
+- Track llm-runner `=0.9.3`.
+
 ## 0.17.84
 
 - New subject hook `fixture_cache_lifetime(session)`, default `Ok(None)`. A

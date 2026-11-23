@@ -69,6 +69,10 @@ pub enum RideCause {
     /// The runner restarts its request chain (OpenAI chained requests).
     ChainReset,
     ModelChange,
+    /// Same model, different reasoning effort or thinking mode, and the change
+    /// loses the cached prefix. An older provider decodes it as `Unknown`,
+    /// which also counts as a lost cache.
+    EffortChange,
     TierChange,
     AccountChange,
     /// The system prompt or the tool definitions changed.
@@ -88,6 +92,7 @@ open_string! { RideCause {
     CacheExpired => "cache_expired",
     ChainReset => "chain_reset",
     ModelChange => "model_change",
+    EffortChange => "effort_change",
     TierChange => "tier_change",
     AccountChange => "account_change",
     SurfaceChange => "surface_change",

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.3
+
+- Contract text only (new §9.3.6, and the rebuild points in §10.2): an effort
+  change on a model whose catalog fact `capability.effort_change_cache` is
+  `true` is sent in the provider's cache-keeping form, sends no ride, and is not
+  a rebuild point, so pending plan changes keep waiting. On `false` or an
+  absent fact, the runner rides `effort_change` before the request and pending
+  changes apply in that step. A thinking-mode change always rides. The runner
+  reports the effort as `variant` in its compaction `ModelRef`.
+- Contract text only (§9.14, §9.7.3): only the session's owner may replace a
+  runner-sourced `retention_policy` (others are refused `scope_owner_mismatch`);
+  a runner that chose storage by `backup` at creation may refuse a different
+  `backup` at that replacement as `backup_unsupported` with
+  `reason: "backup_fixed_at_creation"`; and a `notice: true` send never creates
+  a session or incarnation (`unknown_session`, not retryable).
+
 ## 0.9.2
 
 - Contract text only (§9.3.5): a keep-warm request resends the last real
