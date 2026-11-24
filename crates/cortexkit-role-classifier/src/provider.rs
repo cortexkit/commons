@@ -31,7 +31,9 @@ pub mod catalog_ids {
 ///
 /// A runner serving a catalog row sends that row's pinned value, never a
 /// moving alias: an alias can start naming a newer model whose pricing and
-/// behaviour differ from the row's.
+/// behaviour differ from the row's. For a TypeSafe row the value is the
+/// catalog id's model part (row `typesafe/jev-1.14.0` sends `jev-1.14.0`), so
+/// a new Jev version needs no new constant here; `JEV_1_13_0` is one example.
 pub mod models {
     /// Cloudflare Workers AI `@cf/cloudflare/clef`.
     pub const CLEF: &str = "clef";

@@ -512,9 +512,10 @@ That group's additive defaults, attested namespace and selector rules are in §1
 - [pinned] `requirements` (required, an object):
   - For llm, `iq` (required, 0 to 100) and `eq` (optional, 0 to 100): task demand,
     which the provider maps onto its own model facts.
-    For a consumer whose router does not rank by iq (such as a classifier
-    consumer), callers send `0` and the router ignores it; it remains
-    required on the wire. `select_media` and `select_search` relax `iq` for
+    For a classifier consumer, `iq` is the bar on the catalog's
+    `quality.grade.decision`: the router answers the cheapest decision model
+    graded at or above it, and `0` means no bar (the cheapest by input
+    price). It remains required on the wire. `select_media` and `select_search` relax `iq` for
     their kinds (§16.4.1–§16.4.2); the llm request and answer are unchanged.
   - `context_window` and `max_output_tokens`: floors, in tokens.
   - `tools`: `"none"` (only runner and model pairs that run with no tools
