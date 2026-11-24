@@ -281,7 +281,10 @@ where
             }
         } else if spec.name.starts_with("call_yield_")
             && subject
-                .call_yield_call(spec.name != "call_yield_untagged_not_yieldable")
+                .call_yield_call(
+                    crate::call_yield::case_parts(spec.name).map(|(name, _)| name)
+                        != Some("call_yield_untagged_not_yieldable"),
+                )
                 .is_none()
         {
             CaseOutcome::Inapplicable {
@@ -432,7 +435,8 @@ where
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-            let tagged = name != "call_yield_untagged_not_yieldable";
+            let tagged = crate::call_yield::case_parts(name).map(|(name, _)| name)
+                != Some("call_yield_untagged_not_yieldable");
             let spec = self
                 .subject
                 .call_yield_call(tagged)

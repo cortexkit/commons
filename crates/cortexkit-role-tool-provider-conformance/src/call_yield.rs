@@ -10,6 +10,19 @@ use futures_util::future::{select, Either};
 use serde_json::{json, Value};
 use std::{future::Future, time::Duration};
 
+pub(crate) fn case_parts(name: &str) -> Option<(&str, &'static str)> {
+    name.strip_prefix("call_yield_")?;
+    let suffixed = crate::report::CALL_YIELD_REASONS
+        .iter()
+        .filter(|&&reason| reason != "person_message")
+        .find_map(|&reason| {
+            name.strip_suffix(reason)
+                .and_then(|prefix| prefix.strip_suffix('_'))
+                .map(|case| (case, reason))
+        });
+    suffixed.or(Some((name, "person_message")))
+}
+
 fn response(exchange: crate::Exchange) -> Result<Value, String> {
     match single_terminal(&exchange).map_err(|e| e.to_string())? {
         ObservedFrame::Response(value) => Ok(value.clone()),
@@ -28,6 +41,7 @@ pub(crate) async fn check<
     spec: CallSpec,
     ready: F,
 ) -> Result<(), String> {
+    let (name, reason) = case_parts(name).ok_or("unknown call-yield case reason")?;
     let call = carrier.request(json!({"name":spec.0,"arguments":spec.1,"call_key":key}));
     let mut call = Box::pin(call);
     match select(call.as_mut(), Box::pin(ready)).await {
@@ -39,7 +53,7 @@ pub(crate) async fn check<
     } else {
         carrier
     };
-    let body = json!({"name":"tool.yield","arguments":{"call_key":key,"reason":"person_message"}});
+    let body = json!({"name":"tool.yield","arguments":{"call_key":key,"reason":reason}});
     let yielding = route.request(body.clone());
     let (answer, early_final) = match select(call.as_mut(), Box::pin(yielding)).await {
         Either::Left((finished, yielding)) => (yielding.await, Some(finished)),
@@ -109,6 +123,7 @@ mod tests {
         Untagged,
         Repeat,
         NonCarrier,
+        PersonOnly,
     }
     struct Provider {
         open: AtomicBool,
@@ -139,6 +154,13 @@ mod tests {
                 if p.final_ready.load(Ordering::SeqCst) && !matches!(p.fault, Fault::Repeat) {
                     return reply(json!({"answer":"unknown_call"}));
                 }
+                if matches!(p.fault, Fault::PersonOnly)
+                    && body["arguments"]["reason"] != "person_message"
+                {
+                    return reply(
+                        json!({"answer":"not_yieldable","reason":"reason_not_supported"}),
+                    );
+                }
                 if !matches!(p.fault, Fault::NoFinal) {
                     p.final_ready.store(true, Ordering::SeqCst);
                 }
@@ -160,7 +182,7 @@ mod tests {
         let provider = Arc::new(Provider {
             open: AtomicBool::new(false),
             final_ready: AtomicBool::new(false),
-            tagged: name != "call_yield_untagged_not_yieldable",
+            tagged: case_parts(name).unwrap().0 != "call_yield_untagged_not_yieldable",
             fault,
         });
         let carrier = Route {
@@ -189,14 +211,65 @@ mod tests {
     }
     #[tokio::test]
     async fn call_yield_faulty_providers_fail_each_named_case() {
-        for (name, fault) in [
+        for (case, fault) in [
             ("call_yield_accepted_final_deadline", Fault::NoFinal),
             ("call_yield_untagged_not_yieldable", Fault::Untagged),
             ("call_yield_repeat_unknown_call", Fault::Repeat),
             ("call_yield_non_carrier_unknown_call", Fault::NonCarrier),
         ] {
-            run(name, Fault::None).await.unwrap();
-            assert!(run(name, fault).await.unwrap_err().starts_with(name));
+            for reason in crate::report::CALL_YIELD_REASONS {
+                let name = case_name(case, reason);
+                assert!(crate::CASES.iter().any(|spec| spec.name == name));
+                run(&name, Fault::None).await.unwrap();
+                assert!(run(&name, fault).await.unwrap_err().starts_with(&name));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn call_yield_reasons_reject_person_only_provider() {
+        for reason in ["person_message", "urgent_notice"] {
+            let name = case_name("call_yield_accepted_final_deadline", reason);
+            assert!(
+                crate::CASES.iter().any(|spec| spec.name == name),
+                "missing {name}"
+            );
+            run(&name, Fault::None).await.unwrap();
+            let result = run(&name, Fault::PersonOnly).await;
+            if reason == "person_message" {
+                result.unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.starts_with(&name), "{error}");
+                assert!(error.contains("reason_not_supported"), "{error}");
+            }
+        }
+    }
+
+    fn case_name(case: &str, reason: &str) -> String {
+        if reason == "person_message" {
+            case.to_owned()
+        } else {
+            format!("{case}_{reason}")
+        }
+    }
+
+    #[test]
+    fn call_yield_each_reason_has_all_cases() {
+        for reason in crate::report::CALL_YIELD_REASONS {
+            for case in [
+                "call_yield_accepted_final_deadline",
+                "call_yield_untagged_not_yieldable",
+                "call_yield_repeat_unknown_call",
+                "call_yield_non_carrier_unknown_call",
+            ] {
+                let name = case_name(case, reason);
+                assert!(
+                    crate::CASES.iter().any(|spec| spec.name == name),
+                    "missing {name}"
+                );
+                assert_eq!(case_parts(&name), Some((case, *reason)));
+            }
         }
     }
 }

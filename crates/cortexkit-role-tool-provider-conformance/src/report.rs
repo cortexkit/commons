@@ -35,6 +35,8 @@ const CRASH: &[Capability] = &[
     LateResults,
 ];
 
+pub(crate) const CALL_YIELD_REASONS: &[&str] = &["person_message", "urgent_notice"];
+
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
     CaseSpec { name: "session_notices_describe", requires: &[Capability::SessionNotices], checks: "a provider declaring session-notices/v1 has a well-formed role.describe answer; notice behavior is not checked" },
@@ -59,6 +61,10 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec { name: "call_yield_untagged_not_yieldable", requires: &[], checks: "a tool without the call.yield/v1 tag is not yielded" },
     CaseSpec { name: "call_yield_repeat_unknown_call", requires: &[], checks: "a repeated yield answers unknown_call" },
     CaseSpec { name: "call_yield_non_carrier_unknown_call", requires: &[], checks: "a different carrier cannot yield the call" },
+    CaseSpec { name: "call_yield_accepted_final_deadline_urgent_notice", requires: &[], checks: "an accepted yield sends the call's final frame within five seconds" },
+    CaseSpec { name: "call_yield_untagged_not_yieldable_urgent_notice", requires: &[], checks: "a tool without the call.yield/v1 tag is not yielded" },
+    CaseSpec { name: "call_yield_repeat_unknown_call_urgent_notice", requires: &[], checks: "a repeated yield answers unknown_call" },
+    CaseSpec { name: "call_yield_non_carrier_unknown_call_urgent_notice", requires: &[], checks: "a different carrier cannot yield the call" },
     CaseSpec {
         name: "system_text_default_served",
         requires: &[Capability::SystemTextDefault],
@@ -334,7 +340,6 @@ pub const CASES: &[CaseSpec] = &[
         checks: "killed at Authorized, before DispatchStarted, and restarted, the provider never runs the call, reports a not_started late result for it, and its withdraw answer guarantees it never runs",
     },
 ];
-
 /// How one case ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CaseOutcome {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.20
+
+- Checks call-yield for both defined reasons, `person_message` and
+  `urgent_notice`, when a waiting call hands back its result for later delivery.
+
 ## 0.15.19
 
 - Pin tool-provider `=0.15.18`; no new conformance checks.

@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.19"
+version = "0.15.20"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
