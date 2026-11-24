@@ -7555,8 +7555,11 @@ every request, answer and refusal.
   It is a short description of the change, not the full replacement system
   text, and has the same authority as the plan owner's system text. Its
   UTF-8 size is at most 8,192 bytes. Under `notes_until_rebuild` it is
-  required exactly when system text differs from the applied plan, and is
-  refused when system text is unchanged; absence when required, excess size,
+  required exactly when system text differs from the applied plan. When
+  system text is unchanged, a runner accepts it and ignores it: it records no
+  note and treats the refresh as if the member were absent. The joined system
+  text is the runner's own, so an owner can't always tell whether its change
+  altered it. Absence when required, excess size,
   or its presence under any other policy is `invalid_params {field:
   "system_note"}`. A runner without `plan_notes` refuses the member by that
   same name. No other note text is supplied by the owner.
@@ -8305,8 +8308,9 @@ above.
   not be repeated just to see it. No truncation or redispatch (§11.3.1).
 
 - [pinned] `outcome_unknown`: the call had a dispatch intent and no result at
-  a restart; it may or may not have run, and is never re-dispatched under
-  that key. `restart_survival` first resolves custody under §14.4 R7; only
+  a restart, or a daemon upgrade cut it off and its result couldn't be
+  recovered (§14.5); it may or may not have run, and is never re-dispatched
+  under that key. `restart_survival` first resolves custody under §14.4 R7; only
   Pure tools may be tried again under a fresh key there.
 - [pinned] `pre_tool_denied`, `pre_tool_unavailable`, `pre_tool_declined`,
   `pre_tool_expired`: the call was denied before it executed. No dispatch
@@ -8821,6 +8825,43 @@ to the session's whole length.
   `run.tool_calls` and live/history surfaces. The fresh attempt does not
   replace or reuse its key. Durable hook outputs still replay without
   re-invocation (§14 property 5).
+
+## 14.5 Calls cut off by a daemon upgrade
+
+The subc daemon can replace its program while its modules keep running. It
+announces this to each module that declared the module capability
+`live-upgrade/v1` with `module.upgrading`, closes the connection, and the
+module reconnects. Every route ends, so a tool call that was in flight on one
+is cut off, although its provider may still be running it. This section is
+what a runner owes for those calls. It applies only to a runner that declares
+`live-upgrade/v1` to the daemon, and only to calls cut off between
+`module.upgrading` and the reconnect. A route that ends without that
+announcement, and a runner restart, keep §14 property 4 and §14.4 R7.
+
+- [pinned] **Hold, don't settle.** On `module.upgrading` the runner keeps
+  every in-flight tool call open. None is settled because its route ended,
+  and the run stays active.
+- [pinned] **Never sent.** A call refused `module_reloading` was never
+  received by the provider. It is sent again once its route reopens, under
+  the same `call_key`, as after any `module_reloading` refusal.
+- [pinned] **Recover from custody.** After the reconnect, the runner resolves
+  each cut-off call's custody exactly as §14.4 R7 resolves a call in flight at
+  a restart: from the provider's kept reply under its `call_key`
+  (tool-provider `reply_custody`, built on `late_results` and `tool.withdraw`),
+  or, for a Pure call, by dispatching it again under a **fresh** key with a
+  separate call record. While a call waits on its provider, `run.status` lists
+  it in `held_calls` (§6.1) with reason `daemon_upgrade`.
+- [pinned] **Unrecoverable calls continue the turn.** A cut-off call that
+  custody doesn't resolve (its route has no `reply_custody`, or the provider
+  holds no reply for the key) is closed
+  `outcome_unknown` (§12.3), with `detail.cause: "daemon_upgrade"` where the
+  runner's result schema carries detail. Its error text says that a daemon
+  upgrade cut the call off and that it may have run, so the model checks
+  before acting on it again. The run is **not** ended: the runner makes its
+  next model call with that result, as for any failed tool call. The call is
+  never dispatched again under its key.
+- [pinned] A call whose result was already given to the model stays as
+  given and is never sent again.
 
 ## 15. Conformance suite
 

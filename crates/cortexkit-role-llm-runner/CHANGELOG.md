@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.5
+
+- Add §14.5: tool calls cut off by an in-place daemon upgrade. A runner that
+  declares the daemon's `live-upgrade/v1` module capability holds in-flight
+  calls on `module.upgrading`, resolves their custody after the reconnect as
+  §14.4 R7 does after a restart, and lists waiting calls in `held_calls` with
+  reason `daemon_upgrade`. A call custody doesn't resolve is closed
+  `outcome_unknown` with cause `daemon_upgrade`, its text says it may have run,
+  and the run continues to its next model call instead of ending.
+- `plan_notes` (§10.2): under `notes_until_rebuild`, a `system_note` sent when
+  the system text did not change is accepted and ignored instead of refused.
+  `plan_notes::check_refresh` and `PlanNotesRefreshRequest::check` follow.
+
 ## 0.9.4
 
 - Add host code `display::host_codes::SAFETY_STOP_NOTE` (`safety_stop_note`)

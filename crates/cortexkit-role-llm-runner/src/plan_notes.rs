@@ -46,6 +46,9 @@ pub fn check_policy<S: AsRef<str>>(policy: &str, groups: &[S]) -> Result<(), &'s
 
 /// Validate the note against the fetched applied/pending system-text diff.
 /// The owner supplies a short change description, never replacement text.
+/// A note is required when system text changed. When it didn't, a note is
+/// accepted and the runner ignores it, because only the runner can see the
+/// joined system text the owner's change produced.
 /// Validation failures name the `invalid_params` field and write nothing.
 pub fn check_refresh<S: AsRef<str>>(
     policy: &str,
@@ -60,7 +63,7 @@ pub fn check_refresh<S: AsRef<str>>(
     }
     check_policy(policy, groups)?;
     if policy == NOTES_UNTIL_REBUILD
-        && (system_note.is_some() != system_text_changed
+        && ((system_text_changed && system_note.is_none())
             || system_note.is_some_and(|note| note.len() > SYSTEM_NOTE_MAX))
     {
         return Err("system_note");
@@ -182,9 +185,11 @@ mod tests {
         assert_eq!(request.check::<&str>(&[], false), Err("policy"));
         let mut note = request.with_system_note("é".repeat(SYSTEM_NOTE_MAX / 2));
         assert_eq!(note.check(&groups, true), Ok(()));
-        assert_eq!(note.check(&groups, false), Err("system_note"));
+        // A note with unchanged system text is accepted; the runner ignores it.
+        assert_eq!(note.check(&groups, false), Ok(()));
         note.system_note.as_mut().unwrap().push('x');
         assert_eq!(note.check(&groups, true), Err("system_note"));
+        assert_eq!(note.check(&groups, false), Err("system_note"));
         note.system_note = Some("short".into());
         note.policy = crate::rungs::IMMEDIATELY.into();
         assert_eq!(note.check(&groups, true), Err("system_note"));

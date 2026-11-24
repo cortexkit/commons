@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.88
+
+- Require llm-runner 0.9.5.
+
 ## 0.17.87
 
 - Four cases (`message_marks_served`, `message_marks_retry_changed`,
