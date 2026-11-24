@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.19
+
+- Pin tool-provider `=0.15.18`; no new conformance checks.
+
 ## 0.15.18
 
 - Pin tool-provider `=0.15.17` and check versioned admission on a live provider route.

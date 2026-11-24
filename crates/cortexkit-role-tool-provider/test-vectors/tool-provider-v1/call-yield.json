@@ -6,6 +6,7 @@
   },
   "requests": [
     {"request":{"name":"tool.yield","arguments":{"call_key":"call-1","reason":"person_message"}},"valid":true},
+    {"request":{"name":"tool.yield","arguments":{"call_key":"call-1","reason":"urgent_notice"}},"valid":true},
     {"request":{"name":"tool.yield","arguments":{"call_key":"call-1","reason":"future_reason"}},"valid":true},
     {"request":{"name":"tool.yield","arguments":{"call_key":"bad key","reason":"person_message"}},"valid":false,"field":"arguments.call_key"},
     {"request":{"name":"tool.yield","call_key":"own-key","arguments":{"call_key":"call-1","reason":"person_message"}},"valid":false,"field":"call_key"},

@@ -75,6 +75,11 @@ pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-
 /// Providers must not withdraw it while serving a session without restarting.
 pub const COMPACTION_HOST_PARTS_PROVIDES: &str = "compaction-host-parts/v1";
 
+/// Additional provider manifest capability enabling `Entry.host_frame`.
+/// Runners capture it at every Setup and retain it until the next Setup.
+/// Providers must not withdraw it while serving a session without restarting.
+pub const COMPACTION_HOST_FRAME_PROVIDES: &str = "compaction-host-frame/v1";
+
 /// Additional provider manifest capability enabling tagless numbered-kind
 /// parts marked by `Entry.numbers_unknown`. Runners capture it at every Setup
 /// and retain it until the next Setup; providers must restart to withdraw it.
@@ -154,6 +159,14 @@ pub fn provides_host_parts(provides: &[String]) -> bool {
     provides
         .iter()
         .any(|capability| capability == COMPACTION_HOST_PARTS_PROVIDES)
+}
+
+/// Whether a provider's catalog capabilities declare host-frame support.
+/// Evaluate at Setup, not from the runner's own Setup request fields.
+pub fn provides_host_frame(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_HOST_FRAME_PROVIDES)
 }
 
 /// Whether a provider's catalog declares support for unknown part numbers.

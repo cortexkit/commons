@@ -9,12 +9,13 @@
 //! part. So is a step that died before any content. Which storage records
 //! that means on each host is the contract's table W4.2.
 
+use cortexkit_role_llm_runner::attribution;
 use serde::{Deserialize, Serialize};
 
 pub use cortexkit_role_llm_runner::message_marks::SpeaksFor;
 
 use crate::digest::Digest;
-use crate::part::Part;
+use crate::part::{Part, PartBody};
 use crate::view::AppliedView;
 
 /// Names a session: the key each side keeps it under. It is built from the
@@ -73,6 +74,11 @@ pub struct Entry {
     /// from every checksum. Use [`Self::with_host_parts`] to project the gate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_parts: Vec<HostPart>,
+    /// A person's mid-turn words wrapped in fixed host text in one stored
+    /// text part. Sent only to providers declaring `compaction-host-frame/v1`
+    /// and excluded from every checksum. Verify before use with [`HostFrame::words`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_frame: Option<HostFrame>,
     /// Numbered-kind parts have no tag because their numbers cannot be
     /// established, not because they take none. Sent only to providers
     /// declaring `compaction-numbers-unknown/v1`, on every such entry in
@@ -130,6 +136,8 @@ struct EntryFields {
     speaks_for: Option<SpeaksFor>,
     #[serde(default)]
     host_parts: Vec<HostPart>,
+    #[serde(default, deserialize_with = "present_host_frame")]
+    host_frame: Option<HostFrame>,
     #[serde(default)]
     numbers_unknown: bool,
     #[serde(deserialize_with = "crate::integer::required")]
@@ -150,6 +158,7 @@ impl<'de> Deserialize<'de> for Entry {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let entry = EntryFields::deserialize(deserializer)?;
         entry.check_host_parts().map_err(serde::de::Error::custom)?;
+        entry.check_host_frame().map_err(serde::de::Error::custom)?;
         Ok(entry)
     }
 }
@@ -192,17 +201,17 @@ impl HostPart {
 }
 
 fn check_host_code(code: Option<&str>) -> Result<(), &'static str> {
-    if let Some(code) = code {
-        if code.is_empty()
-            || code.len() > 64
-            || !code
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-        {
-            return Err("host_code must be 1-64 bytes of lowercase ASCII letters, digits or _");
-        }
+    if code.is_some_and(|code| !valid_host_code(code)) {
+        return Err("host_code must be 1-64 bytes of lowercase ASCII letters, digits or _");
     }
     Ok(())
+}
+
+fn valid_host_code(code: &str) -> bool {
+    (1..=64).contains(&code.len())
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 fn host_code<'de, D: serde::Deserializer<'de>>(
@@ -211,6 +220,98 @@ fn host_code<'de, D: serde::Deserializer<'de>>(
     let code = String::deserialize(deserializer)?;
     check_host_code(Some(&code)).map_err(serde::de::Error::custom)?;
     Ok(Some(code))
+}
+
+/// A recorded host frame around a person's words in one stored text part.
+/// The runner takes the fact from its intake record, never from matching text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct HostFrame {
+    /// Stable id of the text part in the entry.
+    pub part: String,
+    /// Frame code from llm-runner's `attribution::host_frames`.
+    #[serde(deserialize_with = "host_frame_code")]
+    pub code: String,
+    pub head_bytes: u32,
+    pub tail_bytes: u32,
+}
+
+impl HostFrame {
+    pub fn new(
+        part: impl Into<String>,
+        code: impl Into<String>,
+        head_bytes: u32,
+        tail_bytes: u32,
+    ) -> Self {
+        Self {
+            part: part.into(),
+            code: code.into(),
+            head_bytes,
+            tail_bytes,
+        }
+    }
+
+    /// Verify the recorded frame and return only the person's words. On a
+    /// mismatch or unknown code, read the entry as if the fact were absent.
+    pub fn words<'a>(&self, entry: &'a Entry) -> Option<&'a str> {
+        let text = self.text(entry).ok()?;
+        // Compaction uses a stable id; llm-runner's verifier checks the text
+        // and byte counts, not the part index.
+        let fact = attribution::HostFrame::new(0, &self.code, self.head_bytes, self.tail_bytes);
+        if !attribution::verify_host_frame(&fact, text) {
+            return None;
+        }
+        text.get(self.head_bytes as usize..text.len() - self.tail_bytes as usize)
+    }
+
+    fn text<'a>(&self, entry: &'a Entry) -> Result<&'a str, &'static str> {
+        if !matches!(entry.role, Role::User | Role::System) {
+            return Err("host_frame is allowed only on a user or system entry");
+        }
+        let part = entry
+            .parts
+            .iter()
+            .find(|part| part.id == self.part)
+            .ok_or("host_frame names an id not in the entry")?;
+        match &part.body {
+            PartBody::Text { text } => Ok(text.as_str()),
+            _ => Err("host_frame must name a text part"),
+        }
+    }
+}
+
+fn check_host_frame_code(code: &str) -> Result<(), &'static str> {
+    if valid_host_code(code) {
+        Ok(())
+    } else {
+        Err("host_frame code must be 1-64 bytes of lowercase ASCII letters, digits or _")
+    }
+}
+
+fn host_frame_code<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let code = String::deserialize(d)?;
+    check_host_frame_code(&code).map_err(serde::de::Error::custom)?;
+    Ok(code)
+}
+
+fn present_host_frame<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<HostFrame>, D::Error> {
+    struct FrameObject;
+
+    impl<'de> serde::de::Visitor<'de> for FrameObject {
+        type Value = Option<HostFrame>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a host_frame object")
+        }
+
+        fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+            HostFrame::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Some)
+        }
+    }
+
+    d.deserialize_map(FrameObject)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -390,7 +491,8 @@ pub struct Head {
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
 /// `generated_under`, reasoning counts, part `tokens` and delivered-item
-/// `tokens` and entry `speaks_for`, `host_parts` and `numbers_unknown` are not hashed.
+/// `tokens` and entry `speaks_for`, `host_parts`, `host_frame` and
+/// `numbers_unknown` are not hashed.
 /// Tags absent from the served parts never enter the checksum.
 /// Pass full parts: compact parts hash to a
 /// different value.
@@ -436,6 +538,7 @@ impl Entry {
             notice: None,
             speaks_for: None,
             host_parts: Vec::new(),
+            host_frame: None,
             numbers_unknown: false,
             written_at,
             completed_at: None,
@@ -498,6 +601,28 @@ impl Entry {
                 return Err("host_parts must be unique and in stored part order");
             }
             previous = Some(index);
+        }
+        Ok(())
+    }
+
+    /// Project the stored fact using the provider declaration captured at
+    /// Setup. Without the declaration, clear even a previously attached fact.
+    pub fn with_host_frame(
+        mut self,
+        fact: HostFrame,
+        provider_declared: bool,
+    ) -> Result<Self, &'static str> {
+        self.host_frame = provider_declared.then_some(fact);
+        self.check_host_frame()?;
+        Ok(self)
+    }
+
+    /// Check the fact's role, part and code shape as decoding does. To verify
+    /// the frame against the stored text before attribution, use [`HostFrame::words`].
+    pub fn check_host_frame(&self) -> Result<(), &'static str> {
+        if let Some(fact) = &self.host_frame {
+            check_host_frame_code(&fact.code)?;
+            fact.text(self)?;
         }
         Ok(())
     }

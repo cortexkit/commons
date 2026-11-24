@@ -31,6 +31,10 @@ fn call_yield_catalog_tag_is_distinct_from_route_capability() {
 #[test]
 fn call_yield_requests_answers_and_held_vectors() {
     let vectors: Value = serde_json::from_str(vectors::CALL_YIELD_JSON).unwrap();
+    assert_eq!(URGENT_NOTICE, "urgent_notice");
+    assert!(vectors["requests"].as_array().unwrap().iter().any(|case| {
+        case["request"]["arguments"]["reason"] == URGENT_NOTICE && case["valid"] == true
+    }));
     for case in vectors["requests"].as_array().unwrap() {
         let request: ToolCallRequest = serde_json::from_value(case["request"].clone()).unwrap();
         let parsed = parse_yield_request(&request);

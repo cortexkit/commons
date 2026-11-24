@@ -1338,8 +1338,12 @@ Neither the manifest declaration nor a bind declaration alone is enough.
 The request is `{name: "tool.yield", arguments: {call_key, reason}}`
 (`call_yield::YieldArguments`). It has no top-level `call_key`, just like
 `tool.withdraw`. `reason` is an open nonempty snake_case string;
-`person_message` means the person sent a steer. `parse_yield_request` reuses
-withdraw's envelope and target-key checks. Malformed requests receive terminal
+`person_message` means the person sent a steer. `urgent_notice` means the
+session's scope owner delivered a message it marked urgent (llm-runner §9.23).
+A provider answers both the same way: it may hand the waiting call back and
+deliver its result later as a late result. A provider that does not support a
+reason answers `not_yieldable`. `parse_yield_request` reuses withdraw's envelope and
+target-key checks. Malformed requests receive terminal
 `invalid_request` route errors naming the field.
 
 Only the call's carrier may yield: the attested principal that raised the

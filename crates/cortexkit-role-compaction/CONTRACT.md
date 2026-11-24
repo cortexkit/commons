@@ -33,7 +33,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | P2 | The part model covers every content type of the AI SDK's provider prompt (LanguageModelV4), so every model provider's history maps to it (W4.2 to W4.5, W4.10). |
 | P3 | A tool part is one item at the call's position, holding both call and result even when the host stores them apart. Dropping it removes both. |
 | P4 | Compact detail keeps what the provider plans with and leaves out the bulk (W4.8). Checksums use the full-detail projections defined in W7, minus the metadata W7 lists. |
-| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, stored `speaks_for` attribution or `host_parts` facts, none of which is a transcript change (W4.9, W7). Count metadata updates alone (W4.11) are not entry changes; an update that also includes a notice trigger still sends the notice normally. Any other change is a transcript change. Adopting unknown-number stretches is also not a transcript change (T9–T10, W7). |
+| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, stored `speaks_for` attribution, `host_parts` facts or a `host_frame` fact, none of which is a transcript change (W4.9, W7). Count metadata updates alone (W4.11) are not entry changes; an update that also includes a notice trigger still sends the notice normally. Any other change is a transcript change. Adopting unknown-number stretches is also not a transcript change (T9–T10, W7). |
 | P6 | Within a session, a message id is never given to a different message, even after a revert or branch switch; the same message keeps its id if it returns to the active path. A part's id is unique within its message, so within the session's state a provider identifies a part by `(mid, part id)` and keys durable part state on both. |
 
 ## A3. Tag numbers
@@ -67,7 +67,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. The only notice allowed without a change is one wake notice for a session whose read was refused `transient`, once the runner can answer it: the next `seq`, current conditions and applied view, and no entries or events (W5.2). N3 still applies. Adopting unknown-number stretches requires no notice (T9–T10, W7). |
+| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at`, stored `speaks_for` attribution, `host_parts` facts or a `host_frame` fact does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. The only notice allowed without a change is one wake notice for a session whose read was refused `transient`, once the runner can answer it: the next `seq`, current conditions and applied view, and no entries or events (W5.2). N3 still applies. Adopting unknown-number stretches requires no notice (T9–T10, W7). |
 | N2 | The provider answers at once and does the work afterwards. The runner never waits on that work. |
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
 | N4 | A notice is a convenience, not the source of truth. On every notice, the provider keeps its own position and reads any gap with `session.entries`. A conforming provider therefore needs nothing new to handle a content-free wake notice (N1). |
@@ -271,6 +271,15 @@ entries. `Entry::with_host_parts(facts, declared)` projects this gate, clearing
 previous marks when false. Direct field construction must apply the same gate.
 Deploy providers that apply the reading rules in W4.1 before runners emit the
 member: ignoring an unknown member is not host-part support.
+
+For `Entry.host_frame`, the provider declares `compaction-host-frame/v1`
+alongside `compaction-provider/v2` (`COMPACTION_HOST_FRAME_PROVIDES`;
+`provides_host_frame`), read and kept exactly as for `host_parts`. With the
+declaration, the runner MUST send a known host frame on that entry in full and
+compact `session.entries` pages and notices; without it, the runner MUST omit
+`host_frame`. `Entry::with_host_frame(fact, declared)` projects this gate.
+Deploy providers that apply the reading rules under "Host frames" in W4.1
+before runners emit the member.
 
 For `Entry.numbers_unknown`, the provider declares
 `compaction-numbers-unknown/v1` alongside `compaction-provider/v2`
@@ -543,6 +552,7 @@ An entry is every record on the active path that the model sees or that holds pa
 | `notice` | `NoticeOrigin`, optional | Origin of a user-role notice delivered by a module or the runner (a reminder, a wake, an automatic message). Independent of `speaks_for`; its absence does not prove the person wrote the entry. `sender`: the module id. `template`: the plan template it was rendered from, when it was. `keep`: boolean, defaults to false and is omitted when false. True means the session owner marked this notice as carrying the person's own words; a compaction provider never drops it automatically. An agent's own explicit drop still may. |
 | `speaks_for` | `{agent_id: string, name?: string}`, optional | The text is the named agent's words carried verbatim, never the person's words. Providers label it as that agent in summaries and context maps. `agent_id` is identity; `name` is only the agent's registry name as known when sent, never identity. The runner copies the id and name, when sent, from the stored llm-runner mark, subject to W1.4. Independent of `notice`: alone it is not a notice and is never swept automatically (for example a head's brief to its worker); with `notice` it may be swept like any other notice, subject to `notice.keep`. |
 | `host_parts` | `[{part: string, host_code?: string}]`, optional | Host-written parts of a `user` or `assistant` entry, in stored part order. `part` names a stable id in this entry's `parts`, never an index. Listing the id is the mark; no `host` member is needed. May be left out when empty; serializers omit it when empty. Subject to W1.4's provider declaration and the validation and reading rules below. |
+| `host_frame` | `{part: string, code: string, head_bytes: integer, tail_bytes: integer}`, optional | A person's words that the host stored inside fixed host text, in one `text` part of a `system` or `user` entry. `part` names that part's stable id. Subject to W1.4's provider declaration and the rules under "Host frames" below. |
 | `numbers_unknown` | boolean, optional | True means this entry's numbered-kind parts carry no `tag` because the runner cannot establish their numbers, never that they take none. Absent means false; serialize only when true. Sent only under W1.4's `compaction-numbers-unknown/v1` declaration, on every entry in the T9–T10 range holding at least one numbered-kind part, in `session.entries` answers and notices alike. Outside every W7 checksum and every part `body_digest`. |
 | `written_at` | integer | When the host first stored the message. It does not change when the entry is updated. For a message the runner did not store itself (history from before the runner, a moved session), the host's own write time. |
 | `completed_at` | integer, optional | When the host marked the message finished, from the host's own stamp, in epoch milliseconds under the same integer rules as `written_at` (W1.2). Absent while the entry is unfinished, when the host never marks that kind of message finished (for example a user message), or when imported history has no such stamp. Readers that need a time then use `written_at`. |
@@ -600,6 +610,35 @@ its ordinal and part ids. These facts do not change stored or model-bound
 bytes, identities, tag numbering, part digests or any W7 checksum. They are not
 `notice` origins or sender claims and do not by themselves permit automatic
 notice sweeping.
+
+**Host frames (added in 0.4.12).** Some hosts store a message the person sends
+during a running turn wrapped in fixed host text, before and after the words,
+as one text part; Claude Code stores it as a `system` entry. `host_frame`
+mirrors llm-runner's read fact of the same name (llm-runner §9.7.1.1) and uses
+its pinned frames: `code` names one of llm-runner's
+`attribution::host_frames`, whose head and tail bytes are the authority.
+
+- The runner sets it only on an entry whose llm-runner read carries the same
+  verified fact, from its own intake record, never by matching text. `part` is
+  the stored part's stable id.
+- Decoding refuses it on an `assistant` entry, on a part id absent from the
+  entry's `parts` or naming a part that is not `text`, and a `code` that is not
+  1–64 bytes of lowercase ASCII letters, digits and `_`. `null` is invalid. An
+  entry carries at most one host frame. `read::HostFrame` is the type, and
+  `Entry::check_host_frame` checks in-memory entries as decoding does.
+- A provider verifies the fact before using it: a known `code`, `head_bytes`
+  and `tail_bytes` equal to that frame's lengths, and the part's text starting
+  with exactly the head and ending with exactly the tail, without overlap.
+  `HostFrame::words(&entry)` checks this and returns the words. On any mismatch,
+  or an unknown code, the provider reads the entry as it would without the fact.
+- Verified words are the person's own words. Summaries, quotes and search
+  attribute them to the person; the head and tail are host text and are never
+  quoted as anyone's words. The words belong to the turn that was running: the
+  entry is not a new user turn and not a summary boundary. A provider never
+  drops a verified entry automatically, as for a notice marked `keep`; an
+  agent's own explicit drop still may.
+- The fact changes no stored or model-bound bytes, identities, tag numbering,
+  part digests or W7 checksum.
 
 **W4.2 Which records are entries, per host.** One rule (W4.1); the table says which storage records it means on each host. It differs from the standalone plugin's counting on several hosts, and the move converts stored ordinals (MV4).
 
@@ -731,7 +770,7 @@ keep their existing rules below.
 
 Adopting unknown-number stretches is also not a transcript change and needs no notice, even when entry digests change (T9–T10, W7).
 
-A stored entry may also gain a previously absent `completed_at`. That alone is not a transcript change: `completed_at` enters none of the W7 checksums, and adding it alone needs no notice. When the same update also changes a tool result or delivers a send, the rules above still apply and the notice carries the entry with its `completed_at`. A `completed_at` once served does not change. Likewise, previously stored `speaks_for` attribution may first appear under W1.4 without a transcript change or notice (W7); its identity and optional sent name never change. Known `host_parts` facts may likewise first appear on an already stored entry without a transcript change or notice (W7). If the same update also includes a notice trigger, the runner sends the notice normally.
+A stored entry may also gain a previously absent `completed_at`. That alone is not a transcript change: `completed_at` enters none of the W7 checksums, and adding it alone needs no notice. When the same update also changes a tool result or delivers a send, the rules above still apply and the notice carries the entry with its `completed_at`. A `completed_at` once served does not change. Likewise, previously stored `speaks_for` attribution may first appear under W1.4 without a transcript change or notice (W7); its identity and optional sent name never change. Known `host_parts` facts and a known `host_frame` fact may likewise first appear on an already stored entry without a transcript change or notice (W7). If the same update also includes a notice trigger, the runner sends the notice normally.
 
 Count metadata updates alone (W4.11) are not entry changes, never divergence, and require no notice; they enter none of the W7 checksums. A changed count under the same family is an update, not a transcript change. If the same update includes a notice trigger, the runner sends the notice normally.
 
@@ -861,7 +900,7 @@ Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
 ### W5.2 `compaction.notice` (provider)
 
-When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts, or count metadata updates alone, does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. If an update also includes a notice trigger, send the notice normally. Changes made while a notice is unanswered go into the next one (N3).
+When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at`, stored `speaks_for` attribution, `host_parts` facts or a `host_frame` fact, or count metadata updates alone, does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. If an update also includes a notice trigger, send the notice normally. Changes made while a notice is unanswered go into the next one (N3).
 
 Adopting unknown-number stretches requires no notice (T9–T10, W7).
 
@@ -1219,6 +1258,10 @@ view and is not a transcript change. It needs no notice by itself. Later reads
 and otherwise-triggered notices include the facts only under W1.4's
 `compaction-host-parts/v1` declaration. Stored and model-bound bytes do not
 change; these facts describe authorship, not a content edit.
+
+Entry `host_frame` is outside every W7 checksum and every part's
+`body_digest` in the same way, and is included only under W1.4's
+`compaction-host-frame/v1` declaration.
 
 Entry `numbers_unknown` is likewise outside every W7 checksum and every
 part's `body_digest`. The entry digest is computed over the parts as served,

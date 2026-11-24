@@ -9,6 +9,9 @@ use subc_protocol::ErrorBody;
 /// The documented reason for asking a waiting call to hand back.
 pub const PERSON_MESSAGE: &str = "person_message";
 
+/// The urgent notice reason for asking a waiting call to hand back (llm-runner §9.23).
+pub const URGENT_NOTICE: &str = "urgent_notice";
+
 /// Arguments of `tool.yield`; the route attests the carrier, never the body.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]

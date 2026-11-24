@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.12
+
+- Add `Entry.host_frame` for a person's mid-turn words stored inside host text
+  ([CONTRACT.md](CONTRACT.md), W4.1). Runners serve the fact only to providers declaring
+  `compaction-host-frame/v1` at Setup. `HostFrame::words` verifies the text
+  with llm-runner's host-frame verifier, without changing content or checksums.
+
 ## 0.4.11
 
 - New ride cause `effort_change` (`RideCause::EffortChange`; CONTRACT.md
