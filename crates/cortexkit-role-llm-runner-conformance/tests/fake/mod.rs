@@ -3884,6 +3884,7 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        let notice = params.get("notice") == Some(&Value::Bool(true));
         if let Some(reply) = not_delivered::intercept(self, stamp, session, &params)? {
             return Ok(reply);
         }
@@ -4555,6 +4556,12 @@ impl Module {
         } else {
             (false, Value::Null)
         };
+        // llm-runner 9.14: a completion notice never creates a session. A
+        // notice that would start one is refused here, after the parameter
+        // checks and before anything is written.
+        if admitted && notice {
+            return Ok(refuse("unknown_session", None));
+        }
         if admitted {
             let lineage = if old.is_some() && defect != RetentionDefect::ReuseLineage {
                 format!("lin-{session}-{}", self.world.now())

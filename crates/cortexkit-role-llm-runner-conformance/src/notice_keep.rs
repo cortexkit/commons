@@ -83,13 +83,15 @@ where
         };
         // Compare explicit false with an ordinary unmarked send as well as
         // checking omission. Absence must not acquire a keep mark either.
+        // A notice never creates a session, so the kept notice follows an
+        // ordinary send that does.
         let sends = if name == "notice_keep_false_absent" {
-            vec![json!({"keep":false}), json!({})]
+            vec![(json!({"keep":false}), json!({})), (json!({}), json!({}))]
         } else {
-            vec![expected.clone()]
+            vec![(json!({}), json!({})), (expected.clone(), expected)]
         };
         let mut previous_run = None;
-        for sent in sends {
+        for (sent, expected) in sends {
             let before = read_all(&session.route).await?.1;
             let prompt = case.mint.next("kept-words");
             let send_id = case.mint.next("kept-send");

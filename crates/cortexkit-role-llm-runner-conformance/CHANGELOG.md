@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.87
+
+- Four cases (`message_marks_served`, `message_marks_retry_changed`,
+  `notice_keep_owner_served`, `notice_with_speaks_for_served`) now open their
+  session with an ordinary send before any notice. llm-runner 0.9.3 says a
+  notice never creates a session, so a conforming runner refused their first send.
+
 ## 0.17.86
 
 - Track llm-runner `=0.9.4`.

@@ -83,17 +83,19 @@ where
         name,
         "message_marks_served" | "notice_with_speaks_for_served"
     ) {
+        // A notice never creates a session, so each list starts with a send
+        // that isn't one.
         let probes = if name == "notice_with_speaks_for_served" {
             vec![
+                json!({"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
                 json!({"notice":true,"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
                 json!({"notice":true,"speaks_for":{"agent_id":"agent-a"}}),
-                json!({"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
             ]
         } else {
             vec![
+                json!({}),
                 json!({"notice":true}),
                 json!({"speaks_for":{"agent_id":"agent-a"}}),
-                json!({}),
             ]
         };
         let mut previous_run = None;
@@ -226,6 +228,16 @@ where
                 .map_err(|e| e.to_string())?,
         )
     } else {
+        // The refused send may be a notice, and a notice never creates a
+        // session, so an ordinary send opens it first.
+        let send_id = case.mint.next("opening-send");
+        let params = case.params(&session, "opening", &send_id, None);
+        let reply: SendReply = decode(
+            name,
+            expect_ok(name, call(&session.route, ops::SESSION_SEND, params).await?)?,
+        )?;
+        wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+        session.first = Some((send_id, "opening".into()));
         None
     };
     let before = read_all(&session.route).await?;
@@ -302,14 +314,15 @@ where
             ),
         ]
     } else {
+        // The first send creates the session, and a notice never does.
         vec![
+            (json!({"notice": false}), json!({}), None),
             (json!({"notice": true}), json!({}), Some("notice")),
             (
                 json!({"speaks_for": {"agent_id": "agent-a"}}),
                 json!({"speaks_for": {"agent_id": "agent-b"}}),
                 Some("speaks_for"),
             ),
-            (json!({"notice": false}), json!({}), None),
         ]
     };
     if !named && case.declared.contains(&Capability::NoticeKeep) {
