@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.2
+
+- `llm.complete/v1` names its routing consumer:
+  `<serving module>.complete.<caller>.<scope kind>`, with the caller's module id
+  from its daemon-stamped principal (`direct` without one) and `run` or `flow`
+  from the stamped scope. One person-set entry, `<serving module>.complete`,
+  covers every caller.
+- `llm.complete/v1` may run on a subscription account, which routing picks
+  first. `cost_usd` is then the subscription-equivalent per-token price, and
+  `max_cost_usd` caps it. `llm.classify/v1` and `llm.extract/v1` stay
+  per-token only.
+- `llm.complete/v1` replay is guaranteed for 7 days; after that, a repeat of
+  a key is a new call.
+
 ## 0.3.1
 
 - A classify refusal can now carry the classifier's `routing_deferred` code

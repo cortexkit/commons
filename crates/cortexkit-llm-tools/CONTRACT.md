@@ -26,8 +26,10 @@ untrusted input. It grants nothing: it never stands in for a consent card or a
 grant. Neither prompt text nor returned data can grant authority.
 
 **Billing:** spend is billed to the daemon-stamped run or flow scope, never to
-the serving module. A flow is never treated as its owner agent. These tools
-route only to models priced per token, **never to subscription plans**. A model
+the serving module. A flow is never treated as its owner agent.
+`llm.classify/v1` and `llm.extract/v1` route only to models priced per token,
+**never to subscription plans**. `llm.complete/v1` may also run on a
+subscription account (below). For all three tools, a model
 with no known applicable per-token rate is refused before the call. Every
 request to any of the three tools requires a non-negative numeric `max_cost_usd`;
 the caller supplies its remaining budget as this per-call ceiling. The member
@@ -232,11 +234,10 @@ Input (`complete::Request`):
 
 - `demand` is required. `iq` and optional `eq` are integers in **0–100**.
   There is **no `model` member**: the module selects a model satisfying the
-  demand under the caller's class. These are caller-supplied routing demand
+  demand under the caller's routing consumer (below). These are caller-supplied routing demand
   scores, not measurements reported by a model. Their scoring scales and the
   interpretation of the two axes belong to daemon routing policy, not this
-  wire contract. The caller's class is its daemon-supplied routing category,
-  outside the tool arguments; a prompt cannot set or override that category.
+  wire contract.
   The prompt and optional system message are text-only in v1; completion may
   still return JSON when `output_schema` is supplied.
 - `prompt` is non-empty text; `system` is optional text.
@@ -252,7 +253,31 @@ Input (`complete::Request`):
 - `max_cost_usd` follows the common billing rule: a JSON decimal number, not a
   string. Check the estimate against
   this ceiling **before the call**; above it, refuse `cost_exceeded`. Never
-  route through a subscription or silently omit a rate/price check.
+  silently omit a rate/price check.
+
+**Routing consumer.** The serving module asks routing for a model under the
+consumer `<serving module>.complete.<caller>.<scope kind>`, for example
+`broca.complete.basal.flow`:
+
+- `<caller>` is the module id in the caller's daemon-stamped principal
+  (`reserved:<module id>`), or `direct` for a caller without one.
+- `<scope kind>` is `run` or `flow`, from the daemon-stamped scope.
+- Neither part ever comes from the tool arguments, the prompt or any other
+  caller-supplied field, so a prompt cannot choose its own routing.
+- The person's routing settings set one entry, `<serving module>.complete`,
+  which every caller's consumer inherits. A deeper entry, such as
+  `broca.complete.basal`, sets a policy for one caller.
+
+**Accounts.** Subscription accounts come first: when routing picks a
+subscription account, the call runs on it. Otherwise it runs on a per-token
+account. Either way `cost_usd` is the model's applicable per-token price for
+the call's usage. On a subscription that is the subscription-equivalent price,
+not a charge, and `max_cost_usd` caps it the same way.
+
+**Retention.** A serving module keeps each call's stored result or refusal
+for 7 days for replay under its `call_key`. Replay is guaranteed for 7 days.
+After that, a repeat of the key is a new call: it runs and is billed again. A
+caller that needs a result for longer keeps it itself.
 
 Result (`complete::Result`):
 
