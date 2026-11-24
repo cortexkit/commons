@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod fallback;
+pub use fallback::{Fallback, FallbackRound, RefusedAttempt};
+
 /// Publication policy advertised alongside the `step_events` capability.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -194,6 +197,9 @@ pub struct StepFinished {
     /// The run's routing decision (§9.3.3), absent when the run had none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route_decision_id: Option<String>,
+    /// Refusal that made a different model serve this step. See CONTRACT §14.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<Fallback>,
     pub started_at_ms: u64,
     pub finished_at_ms: u64,
 }
@@ -256,6 +262,7 @@ impl StepFinished {
             sent_to_last_content_ms: None,
             first_to_last_content_ms: None,
             route_decision_id: None,
+            fallback: None,
         }
     }
 
@@ -292,11 +299,10 @@ impl StepFinished {
         self
     }
 
-    /// Check only the identity rules, which a reader applies when decoding.
-    /// A reader doesn't apply the timing rule: it keeps an event whose
-    /// timings break the producer's ordering rule, so a measurement fault
-    /// never drops the step's usage.
-    fn check_identity(&self) -> Result<(), &'static str> {
+    /// Check facts that both the publisher and decoder validate. A reader
+    /// keeps the step's usage even if its cache or timing measurements violate
+    /// producer-side consistency rules.
+    fn check_shared(&self) -> Result<(), &'static str> {
         if self
             .attempt_id
             .as_deref()
@@ -334,15 +340,18 @@ impl StepFinished {
         {
             return Err("signed_floor");
         }
+        if let Some(fallback) = &self.fallback {
+            fallback.check(&self.model)?;
+        }
         Ok(())
     }
 
-    /// Check producer-side identity, cache consistency and timing containment before
-    /// publication: `first_to_last_content_ms` must not exceed
+    /// Check identity, fallback, cache consistency and timing before publication:
+    /// `first_to_last_content_ms` must not exceed
     /// `sent_to_last_content_ms` when both are present. Uniqueness and
     /// equality with the durable record are the runner's to enforce.
     pub fn check(&self) -> Result<(), &'static str> {
-        self.check_identity()?;
+        self.check_shared()?;
         if let Some(cache) = &self.cache {
             cache.check()?;
         }
@@ -397,6 +406,10 @@ impl StepFinished {
     }
     pub fn with_route_decision_id(mut self, value: impl Into<String>) -> Self {
         self.route_decision_id = Some(value.into());
+        self
+    }
+    pub fn with_fallback(mut self, fallback: Fallback) -> Self {
+        self.fallback = Some(fallback);
         self
     }
 }
@@ -492,7 +505,7 @@ pub fn decode_step_finished(
     };
     let event: StepFinished = serde_json::from_slice(body).map_err(StepEventDecodeError::Body)?;
     event
-        .check_identity()
+        .check_shared()
         .map_err(StepEventDecodeError::InvalidField)?;
     if event.runner != publisher {
         return Err(StepEventDecodeError::PublisherMismatch {
@@ -512,6 +525,8 @@ mod tests {
         PROVIDES, REQUIRED_OPS,
     };
     use serde_json::{json, Value};
+
+    const SUBJECT: &str = "ck.account_a.live.runner_a.step.finished.v1";
 
     fn vectors() -> Value {
         serde_json::from_str(crate::vectors::file("step-events.json").unwrap()).unwrap()
@@ -539,6 +554,176 @@ mod tests {
         zero["input_tokens"] = json!(0);
         let zero: StepFinished = serde_json::from_value(zero).unwrap();
         assert_eq!(zero.input_tokens, Some(0));
+    }
+
+    #[test]
+    fn refusal_fallback_step_round_trips_full_record() {
+        let wire = &vectors()["refusal_fallback"];
+        let step = decode_step_finished(SUBJECT, &serde_json::to_vec(wire).unwrap()).unwrap();
+        let refused_attempt = RefusedAttempt::new("model_a")
+            .with_input_tokens(12)
+            .with_cached_input_tokens(5)
+            .with_cache_write_tokens(3)
+            .with_cache_write_5m_tokens(1)
+            .with_cache_write_1h_tokens(2)
+            .with_output_tokens(2)
+            .with_reasoning_tokens(0);
+        let fallback = Fallback::new("client", "model_a", "sensitive_1-a", "refused_here")
+            .with_credited(true)
+            .with_refused_attempts(vec![refused_attempt, RefusedAttempt::new("model_a")])
+            .with_round(FallbackRound::new(3, 2));
+        assert_eq!(step.fallback.as_ref(), Some(&fallback));
+        assert_eq!(step.input_tokens, Some(100));
+        assert_eq!(step.model, "model_b");
+        assert_eq!(step.check(), Ok(()));
+        assert_eq!(
+            serde_json::to_value(step.with_fallback(fallback)).unwrap(),
+            *wire
+        );
+    }
+
+    #[test]
+    fn refusal_fallback_step_accepts_boundary_values_and_a_round_without_attempts() {
+        let mut step: StepFinished = serde_json::from_value(vectors()["minimal"].clone()).unwrap();
+        step.model = String::new();
+        for count in [1, 8] {
+            let fallback = Fallback::new("client", "requested/模型", "a", "refused_here")
+                .with_refused_attempts(vec![RefusedAttempt::new("requested/模型"); count])
+                .with_credited(false);
+            let step = step.clone().with_fallback(fallback);
+            assert_eq!(step.check(), Ok(()));
+            assert_eq!(
+                decode_step_finished(SUBJECT, &serde_json::to_vec(&step).unwrap()).unwrap(),
+                step
+            );
+        }
+        let fallback = Fallback::new("provider", "requested", "a0_-".repeat(16), "round")
+            .with_round(FallbackRound::new(u32::MAX, u32::MAX));
+        let step = step.with_fallback(fallback);
+        assert_eq!(step.check(), Ok(()));
+        assert_eq!(
+            decode_step_finished(SUBJECT, &serde_json::to_vec(&step).unwrap()).unwrap(),
+            step
+        );
+    }
+
+    #[test]
+    fn refusal_fallback_step_checks_name_invalid_fields() {
+        let valid = vectors()["refusal_fallback"].clone();
+        let assert_refused = |body: Value, field| {
+            let step: StepFinished = serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(step.check(), Err(field), "{body}");
+            assert!(
+                matches!(
+                    decode_step_finished(SUBJECT, &serde_json::to_vec(&body).unwrap()),
+                    Err(StepEventDecodeError::InvalidField(actual)) if field == actual
+                ),
+                "{body}"
+            );
+        };
+        for (key, value, field) in [
+            ("by", json!("host"), "fallback.by"),
+            ("cause", json!("retry"), "fallback.cause"),
+            ("requested_model", json!(""), "fallback.requested_model"),
+            (
+                "requested_model",
+                valid["model"].clone(),
+                "fallback.requested_model",
+            ),
+            ("by", json!("provider"), "fallback.credited"),
+            ("cause", json!("round"), "fallback.refused_attempts"),
+            ("refused_attempts", json!([]), "fallback.refused_attempts"),
+            (
+                "refused_attempts",
+                json!(vec![json!({"model": "model_a"}); 9]),
+                "fallback.refused_attempts",
+            ),
+            (
+                "refused_attempts",
+                json!([{"model": ""}]),
+                "fallback.refused_attempts[].model",
+            ),
+            (
+                "round",
+                json!({"steps": 2, "steps_left": 3}),
+                "fallback.round.steps_left",
+            ),
+        ] {
+            let mut body = valid.clone();
+            body["fallback"][key] = value;
+            assert_refused(body, field);
+        }
+        for category in ["", "Upper", "has space", "a.b", "é", &"a".repeat(65)] {
+            let mut body = valid.clone();
+            body["fallback"]["category"] = json!(category);
+            assert_refused(body, "fallback.category");
+        }
+        let mut missing_attempts = valid;
+        missing_attempts["fallback"]
+            .as_object_mut()
+            .unwrap()
+            .remove("refused_attempts");
+        assert_refused(missing_attempts, "fallback.refused_attempts");
+    }
+
+    #[test]
+    fn refusal_fallback_step_objects_are_closed_and_require_their_fields() {
+        let valid = vectors()["refusal_fallback"].clone();
+        for (path, required) in [
+            (
+                "/fallback",
+                &["by", "requested_model", "category", "cause"][..],
+            ),
+            ("/fallback/refused_attempts/0", &["model"][..]),
+            ("/fallback/round", &["steps", "steps_left"][..]),
+        ] {
+            for missing_or_extra in required.iter().copied().chain(["refusal_text"]) {
+                let mut body = valid.clone();
+                let object = body.pointer_mut(path).unwrap().as_object_mut().unwrap();
+                if missing_or_extra == "refusal_text" {
+                    object.insert(missing_or_extra.into(), json!("forbidden content"));
+                } else {
+                    object.remove(missing_or_extra).unwrap();
+                }
+                let error =
+                    decode_step_finished(SUBJECT, &serde_json::to_vec(&body).unwrap()).unwrap_err();
+                assert!(matches!(error, StepEventDecodeError::Body(_)));
+                assert!(
+                    error.to_string().contains(&format!("`{missing_or_extra}`")),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn refusal_fallback_step_preserves_old_body_bytes() {
+        let old = concat!(
+            r#"{"runner":"runner_a","session_ref":"runner_session_a","log_incarnation":"log_a","seq":43,"#,
+            r#""run_id":"run_a","step_id":"step_b","attempt":1,"terminal_status":"completed","#,
+            r#""attempt_id":"attempt_invented_b","harness":"host_a","session":"session_a","#,
+            r#""provider":"provider_a","model":"model_a","started_at_ms":1790000001001,"finished_at_ms":1790000002000}"#,
+        );
+        let step = decode_step_finished(SUBJECT, old.as_bytes()).unwrap();
+        assert_eq!(step.fallback, None);
+        assert_eq!(serde_json::to_string(&step).unwrap(), old);
+    }
+
+    #[test]
+    fn refusal_fallback_step_decodes_null_as_absent_and_omits_it_on_write() {
+        let mut body = vectors()["minimal"].clone();
+        body["fallback"] = Value::Null;
+        let step = decode_step_finished(SUBJECT, &serde_json::to_vec(&body).unwrap()).unwrap();
+        assert!(step.fallback.is_none());
+        body["fallback"] = json!({
+            "by": "provider", "requested_model": "requested", "category": "category", "cause": "round",
+            "credited": null, "refused_attempts": null, "round": null,
+        });
+        let step = decode_step_finished(SUBJECT, &serde_json::to_vec(&body).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(step).unwrap()["fallback"],
+            json!({"by": "provider", "requested_model": "requested", "category": "category", "cause": "round"})
+        );
     }
 
     #[test]

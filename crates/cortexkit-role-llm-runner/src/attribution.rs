@@ -22,6 +22,24 @@ use crate::capabilities;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// Exact stored frames, keyed by their wire codes.
+pub mod host_frames {
+    pub const CLAUDE_CODE_MID_TURN: &str = "claude_code_mid_turn";
+    pub const CLAUDE_CODE_MID_TURN_HEAD: &str =
+        "The user sent a new message while you were working:\n";
+    pub const CLAUDE_CODE_MID_TURN_TAIL: &str = "\n\nThis is how Claude Code surfaces \
+        messages the user sends mid-turn — within the running turn, often alongside the next tool \
+        result, rather than as a separate conversation turn. Address the message above as you \
+        continue this turn.";
+
+    pub(crate) fn get(code: &str) -> Option<(&'static str, &'static str)> {
+        match code {
+            CLAUDE_CODE_MID_TURN => Some((CLAUDE_CODE_MID_TURN_HEAD, CLAUDE_CODE_MID_TURN_TAIL)),
+            _ => None,
+        }
+    }
+}
+
 /// The closed set of sender attribution formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +54,74 @@ pub struct Attribution {
     pub part: u32,
     pub header_bytes: u32,
     pub module: String,
+}
+
+/// A host wrapper around one stored top-level text part, outside the stored body.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HostFrame {
+    pub part: u32,
+    #[serde(deserialize_with = "deserialize_frame_code")]
+    pub code: String,
+    pub head_bytes: u32,
+    pub tail_bytes: u32,
+}
+
+impl HostFrame {
+    /// Construct a candidate fact. Verify it against the stored text before serving it.
+    pub fn new(part: u32, code: impl Into<String>, head_bytes: u32, tail_bytes: u32) -> Self {
+        Self {
+            part,
+            code: code.into(),
+            head_bytes,
+            tail_bytes,
+        }
+    }
+
+    /// Build a fact only when the runner recorded during intake that it sent
+    /// the message into this wrapper. Never detect a frame from text alone.
+    pub fn verified(part: u32, code: &str, text: &str) -> Option<Self> {
+        let (head, tail) = host_frames::get(code)?;
+        let fact = Self::new(part, code, head.len() as u32, tail.len() as u32);
+        verify_host_frame(&fact, text).then_some(fact)
+    }
+}
+
+fn deserialize_frame_code<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let code = String::deserialize(d)?;
+    if (1..=64).contains(&code.len())
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    {
+        Ok(code)
+    } else {
+        Err(serde::de::Error::custom("invalid host_frame code"))
+    }
+}
+
+/// Check the code, exact non-overlapping frame bytes and both counts.
+pub fn verify_host_frame(fact: &HostFrame, text: &str) -> bool {
+    split_host_frame(fact, text).is_some()
+}
+
+pub(crate) fn split_host_frame<'a>(
+    fact: &HostFrame,
+    text: &'a str,
+) -> Option<(&'a str, &'a str, &'a str)> {
+    let (head, tail) = host_frames::get(&fact.code)?;
+    if fact.head_bytes as usize != head.len() || fact.tail_bytes as usize != tail.len() {
+        return None;
+    }
+    let words = text.strip_prefix(head)?.strip_suffix(tail)?;
+    Some((head, words, tail))
+}
+
+pub(crate) fn check_facts(attribution: bool, host_frame: bool) -> Result<(), &'static str> {
+    if attribution && host_frame {
+        return Err("attribution and host_frame are mutually exclusive");
+    }
+    Ok(())
 }
 
 /// The contract's exact bytes, including both trailing newline bytes.

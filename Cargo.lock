@@ -723,7 +723,7 @@ dependencies = [
 name = "cortexkit-role-agent-data"
 version = "0.3.4"
 dependencies = [
- "cortexkit-role-llm-runner 0.9.5",
+ "cortexkit-role-llm-runner 0.9.6",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -778,7 +778,7 @@ dependencies = [
 name = "cortexkit-role-compaction"
 version = "0.4.11"
 dependencies = [
- "cortexkit-role-llm-runner 0.9.5",
+ "cortexkit-role-llm-runner 0.9.6",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -856,13 +856,13 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.17.88"
+version = "0.17.89"
 dependencies = [
  "async-trait",
  "base64",
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-harness",
- "cortexkit-role-llm-runner 0.9.5",
+ "cortexkit-role-llm-runner 0.9.6",
  "cortexkit-role-tool-provider",
  "futures-util",
  "getrandom 0.4.3",
@@ -902,7 +902,7 @@ dependencies = [
 name = "cortexkit-role-routing"
 version = "0.7.40"
 dependencies = [
- "cortexkit-role-llm-runner 0.9.5",
+ "cortexkit-role-llm-runner 0.9.6",
  "cortexkit-role-media",
  "cortexkit-role-tool-provider",
  "serde",
@@ -927,7 +927,7 @@ dependencies = [
 name = "cortexkit-role-step-transform-provider"
 version = "0.5.1"
 dependencies = [
- "cortexkit-role-llm-runner 0.9.5",
+ "cortexkit-role-llm-runner 0.9.6",
  "serde",
  "serde_json",
 ]
@@ -1055,7 +1055,7 @@ name = "cortexkit-usage-steps"
 version = "0.2.9"
 dependencies = [
  "chrono",
- "cortexkit-role-llm-runner 0.9.5",
+ "cortexkit-role-llm-runner 0.9.6",
  "serde",
  "serde_json",
  "sha2 0.10.9",

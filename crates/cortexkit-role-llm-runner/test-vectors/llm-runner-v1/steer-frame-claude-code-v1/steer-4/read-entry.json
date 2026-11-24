@@ -1,0 +1,23 @@
+{
+  "client_message_id": "client-steer-4",
+  "delivered_as": {
+    "mode": "steer"
+  },
+  "message": {
+    "content": "The user sent a new message while you were working:\nThe user sent a new message while you were working:\nhello\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.",
+    "role": "system"
+  },
+  "mid": "721383fea7fcb3dc6e2efa9ff1ec2530365560a67d5085ae7f70f01fd65532da",
+  "ordinal": 16,
+  "role": "user",
+  "run": {
+    "episode": "1",
+    "final": false,
+    "run_id": "run_23d8d8a68a36e6c42c47ff94"
+  },
+  "send_id": "steer-4",
+  "sender": "chat-app",
+  "time": null,
+  "tool_calls": [],
+  "written_at": 1795515411791
+}

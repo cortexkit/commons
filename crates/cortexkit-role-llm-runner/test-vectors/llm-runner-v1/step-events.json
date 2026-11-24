@@ -73,6 +73,52 @@
     "started_at_ms": 1790000001001,
     "finished_at_ms": 1790000002000
   },
+  "refusal_fallback": {
+    "runner": "runner_a",
+    "session_ref": "runner_session_a",
+    "log_incarnation": "log_a",
+    "seq": 44,
+    "run_id": "run_a",
+    "step_id": "step_c",
+    "attempt": 1,
+    "terminal_status": "completed",
+    "attempt_id": "attempt_invented_c",
+    "message_id": "message_c",
+    "harness": "host_a",
+    "session": "session_a",
+    "provider": "provider_a",
+    "model": "model_b",
+    "input_tokens": 100,
+    "cached_input_tokens": 50,
+    "cache_write_tokens": 30,
+    "output_tokens": 20,
+    "reasoning_tokens": 7,
+    "cache_write_5m_tokens": 10,
+    "cache_write_1h_tokens": 20,
+    "fallback": {
+      "by": "client",
+      "requested_model": "model_a",
+      "category": "sensitive_1-a",
+      "cause": "refused_here",
+      "credited": true,
+      "refused_attempts": [
+        {
+          "model": "model_a",
+          "input_tokens": 12,
+          "cached_input_tokens": 5,
+          "cache_write_tokens": 3,
+          "cache_write_5m_tokens": 1,
+          "cache_write_1h_tokens": 2,
+          "output_tokens": 2,
+          "reasoning_tokens": 0
+        },
+        {"model": "model_a"}
+      ],
+      "round": {"steps": 3, "steps_left": 2}
+    },
+    "started_at_ms": 1790000002001,
+    "finished_at_ms": 1790000003000
+  },
   "refused_members": [
     {
       "future_member": 1

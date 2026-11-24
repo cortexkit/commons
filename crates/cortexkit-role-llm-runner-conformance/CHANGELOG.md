@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.89
+
+- Require llm-runner `=0.9.6`, whose step-event decoder accepts and validates
+  refusal fallback records.
+
 ## 0.17.88
 
 - Require llm-runner 0.9.5.

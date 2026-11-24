@@ -407,6 +407,7 @@ pub enum HistoryPageProblem {
 /// [`HistoryEntry::new`] and the `with_*` setters, [`HistoryEntry::from_read`],
 /// or decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "HistoryEntryWire")]
 #[non_exhaustive]
 pub struct HistoryEntry {
     /// As on a `session.read` entry.
@@ -469,9 +470,75 @@ pub struct HistoryEntry {
     /// Raw history has no display-facts request flag; message bytes stay whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<crate::attribution::Attribution>,
+    /// Verified wrapper around a person's words; message bytes stay whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_frame: Option<crate::attribution::HostFrame>,
+}
+
+// Match HistoryEntry's wire fields while ignoring unknown members. The
+// all-fields round-trip test catches known fields this decoder drops.
+#[derive(Deserialize)]
+#[serde(remote = "HistoryEntry", rename = "HistoryEntry")]
+struct HistoryEntryFields {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "descriptors::deserialize_digest"
+    )]
+    digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part_digests: Option<Vec<descriptors::PartDigest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part_keys: Option<Vec<String>>,
+    ordinal: u64,
+    mid: String,
+    written_at: u64,
+    #[serde(deserialize_with = "descriptors::deserialize_content")]
+    message: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<RunAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    originals: Option<Vec<Original>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<ToolCallAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivered_as: Option<crate::delivery_order::EntryDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    send_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    speaks_for: Option<crate::message_marks::SpeaksFor>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    notice: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    keep: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attribution: Option<crate::attribution::Attribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    host_frame: Option<crate::attribution::HostFrame>,
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct HistoryEntryWire(#[serde(with = "HistoryEntryFields")] HistoryEntry);
+
+impl TryFrom<HistoryEntryWire> for HistoryEntry {
+    type Error = &'static str;
+
+    fn try_from(wire: HistoryEntryWire) -> Result<Self, Self::Error> {
+        wire.0.check_frame_facts()?;
+        Ok(wire.0)
+    }
 }
 
 impl HistoryEntry {
+    fn check_frame_facts(&self) -> Result<(), &'static str> {
+        crate::attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+    }
+
     pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
         self.speaks_for = Some(speaks_for);
         self
@@ -518,13 +585,15 @@ impl HistoryEntry {
             notice: false,
             keep: false,
             attribution: None,
+            host_frame: None,
         }
     }
 
     /// The history entry for a message `session.read` serves as `read`:
     /// the same bytes, ordinal, part-digest rows and served part keys. `None` when `read` has
-    /// no `written_at`, which every history entry carries.
+    /// no `written_at`, which every history entry carries, or conflicting frame facts.
     pub fn from_read(read: ReadMessage) -> Option<Self> {
+        read.check_frame_facts().ok()?;
         Some(Self {
             digest: read.digest,
             part_digests: read.part_digests,
@@ -544,6 +613,7 @@ impl HistoryEntry {
             notice: read.notice,
             keep: read.keep,
             attribution: read.attribution,
+            host_frame: read.host_frame,
         })
     }
 

@@ -785,13 +785,28 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   `ReadMessage::with_host_parts`; `ReadMessage::check_host_parts` validates
   role, membership, uniqueness and order against the entry's known part keys,
   since its opaque body cannot be interpreted without a serializer profile.
-- [pinned] `model_fallback?: {requested: string, answered: string}` (added in
-  0.8.46) is an assistant-only reply fact, served only with
+- [pinned] `model_fallback?: {requested: string, answered: string, by?, category?,
+  cause?}` (added in
+  0.8.46; `by`, `category` and `cause` added in 0.9.6 with the meanings of
+  the step record's members of those names, §14.3) is an assistant-only reply fact, served only with
   `include_display_facts`, with the same value as the display row (§4.7).
   Both model ids are required, non-empty and different. Absent means no
-  claim, not that the requested model answered. The shared `display::ModelFallback`
+  claim, not that the requested model answered. The three later members are
+  optional, sent together or not at all, and a reader that doesn't know them
+  ignores them. The shared `display::ModelFallback`
   type validates the values; `ReadMessage::check_model_fallback` validates
   them against the known role without parsing the opaque body.
+- [pinned] `runner_entry?: {code: string}` (added in 0.9.6) marks an entry
+  that the runner wrote itself, not the model or the person. It is served
+  only with `include_display_facts`, with the same value as the display row
+  (§4.7), and absent otherwise. `code` is an open vocabulary of 1–64 bytes of
+  `[a-z0-9_]`, starting with `host_stored_no_reply`: the host stored no reply
+  for a finished model step, and the runner wrote this entry in its place,
+  so a reader can tell it from a model's own empty reply. A reader that
+  doesn't know a code shows the entry as written by the runner. A runner sets
+  it only from its own durable record of writing the entry, never by
+  inspecting text. Like `host_parts`, it changes no body bytes, and no
+  identity, digests, tag numbering, compaction or matching.
 - [pinned] A runner serving read facts and display history marks the same
   parts in both: a display part has `host: true`, with the same optional
   `host_code`, exactly when `host_parts` lists its key. A reader projecting
@@ -1670,8 +1685,8 @@ display-ready row for an app's reader on a runner declaring
   It follows every
   rule of §4.6, and `DisplayPage::check` checks the ones a page shows.
 - [pinned] A row (`display::DisplayRow`) is `{role, text, parts, model?,
-  model_fallback?, client_message_id?, sender?, speaks_for?, notice?}`. The optional marks are
-  those of §9.7.3; `notice` is served only when true.
+  model_fallback?, runner_entry?, client_message_id?, sender?, speaks_for?, notice?}`. The optional marks are
+  those of §9.7.3, and `runner_entry` is the read fact of the same name (§4.2); `notice` is served only when true.
   `parts` keeps the stored message's order; each part
   is `{type, part, ...}`, where `part` is the stored part's key (a content
   block's index for a producer choosing that key convention on
@@ -1777,8 +1792,12 @@ display-ready row for an app's reader on a runner declaring
   crate alone therefore emits nothing new. Claude Code marker detection
   belongs to its runner, not this crate.
 - [pinned] **Fallback reply note (added in 0.8.46).** An assistant display row
-  may carry `model_fallback?: {requested: string, answered: string}`, with the
-  same value as an opted-in read entry. Only assistant entries may carry it;
+  may carry `model_fallback?: {requested: string, answered: string, by?,
+  category?, cause?}`, with the
+  same value as an opted-in read entry. `by`, `category` and `cause` (added
+  in 0.9.6) come only from the step's own refusal fallback record (§14.3),
+  are sent together or not at all, and let readers say why another model
+  answered. Only assistant entries may carry it;
   validation refuses it on every other role. Both required, non-empty ids
   use exactly the same form as the row's own `model` member and must differ.
   If that form is provider-qualified, the runner qualifies both bare ids
@@ -3741,6 +3760,16 @@ including projections, snapshots and archives, within `delete_within_ms`.
 It must finish an interrupted deletion on restart. The tombstone survives
 deletion so expiry remains distinguishable from a session never written.
 
+**Calls still running at deletion.** Before it deletes a session's content,
+for any reason (this section's expiry, or any deletion under §9.14), the
+runner withdraws by `call_key` (tool-provider `tool.withdraw`) every call of
+that session whose result it still awaits from a provider: a held call, or a
+call closed by a yielded held reply (§9.21) whose late result hasn't arrived.
+It sends every withdrawal, then deletes. It never waits on a withdrawal that
+hasn't answered: an unanswered withdrawal never delays deletion past its own
+deadline. A late result that arrives after deletion is acknowledged and
+discarded, never written anywhere.
+
 Only content-free accounting and identity metadata may remain: identifiers
 of the session, runs, provider, model, credential and account; timestamps;
 token counts and cost; charge and billing classification; terminal status
@@ -5400,6 +5429,56 @@ say who may send and which texts are system text.
   the new fact still sees header-free display text. The apps that understand
   it show “via chat” rather than the trusted frame; they never cut raw text
   using an unverified byte count.
+
+#### 9.7.1.1 Host frames around a person's words (added in 0.9.6)
+
+Some hosts store a message the person sends during a running turn wrapped in
+fixed host text, before and after the person's words, inside a message whose
+native role is not `user`. Claude Code is the first. A host frame lets every
+reader show the person's words as the person's message and the fixed text as
+a host note.
+
+- [pinned] The optional read fact is `host_frame: {part: u32, code: string,
+  head_bytes: u32, tail_bytes: u32}` (`attribution::HostFrame`). `part` is the
+  zero-based stored top-level content-part index, as for `attribution`; a
+  native message whose content is one string has that string as part 0.
+  `code` names the frame: an open vocabulary of 1–64 bytes of `[a-z0-9_]`.
+  On `session.read` it is served only with `include_display_facts: true` on
+  a runner declaring `read_display_facts`, and absent otherwise, like
+  `attribution`. An entry carries at most one of `attribution` and
+  `host_frame`.
+- [pinned] Each code pins its exact head and tail bytes in the crate
+  (`attribution::host_frames`). The first code is `claude_code_mid_turn`:
+  head `attribution::host_frames::CLAUDE_CODE_MID_TURN_HEAD`, the 52 bytes
+  `The user sent a new message while you were working:` followed by one
+  newline byte, and tail `CLAUDE_CODE_MID_TURN_TAIL`, the 232 bytes
+  beginning with two newline bytes, `This is how Claude Code surfaces
+  messages the user sends mid-turn`, through `as you continue this turn.`
+  with no trailing newline. The constants in the crate are the authority for
+  every byte; this text only names them.
+- [pinned] A runner sets the fact only from its own durable intake record
+  that this entry is a send it delivered into that host's wrapper, never by
+  matching text alone. Before serving it, check that the part's text starts
+  with exactly the code's head and ends with exactly its tail, that
+  `head_bytes` and `tail_bytes` equal those lengths, and that the two don't
+  overlap. The person's words are exactly the bytes between them, even when
+  the words themselves contain the head or tail text. On any mismatch,
+  including an unknown code on the runner's side, omit the fact and serve
+  the whole text. `attribution::verify_host_frame(fact, text)` checks all of
+  this.
+- [pinned] A display row applying the fact has role `user`, whatever the
+  native role. Its `text` is the person's words alone. The words keep the
+  stored part's key, and the head and tail become two separate host parts
+  (`host: true`, `host_code` equal to the frame's `code`) whose keys the
+  runner derives deterministically from the stored part's key, distinct from
+  every other key of the entry and the same on every read, and publishes
+  with the entry's other keys. `display::project_with_facts` applies this to
+  each pinned profile (`project_with_attribution` remains, for `attribution`
+  alone). A reader projecting raw entries applies the
+  verified fact the same way, and on mismatch shows the whole text with no
+  fact. The fact changes no stored bytes, identity, digests, tag numbering,
+  compaction or `client_message_id` matching. A reader that doesn't know the
+  fact still sees the entry's served `user` role; it shows the whole text.
 
 ### 9.7.2 `notices`: reader facts for notices
 
@@ -8593,7 +8672,47 @@ to the session's whole length.
   | `sent_to_last_content_ms?`, `first_to_last_content_ms?` | Optional unsigned 64-bit milliseconds from sending the model request to its last content, and from its first to last content |
   | `route_decision_id?` | Optional string: the run's routing decision (§9.3.3), absent when the run had none |
   | `cache?` | Optional closed object: actual cache lifetime as `ttl_ms?` (u64 milliseconds) or `implicit?: true`, and optional session `warming?: {on: boolean, stop_reason?: string}` (§9.3.5). Missing members mean unknown, not zero or off. |
+  | `fallback?` | Optional closed object: a refusal made a different model serve this step (below). Absent when no fallback happened, including when a refusal stands |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
+
+- [pinned] **Refusal fallback (`fallback`).** The step carries `fallback`
+  (`step_events::Fallback`) when a refusal made a different model serve it:
+  either this step's first attempt was refused in a sensitive category and
+  another model answered inside the same reply, or the step ran on the
+  fallback model inside a recovery round that an earlier refusal started. It
+  is a closed object:
+
+  | Member | Wire type and meaning |
+  |---|---|
+  | `by` | Required closed string: `client` when the host's sign-in plugin retried on its fallback model, `provider` when the provider's own server-side fallback did |
+  | `requested_model` | Required non-empty model identifier the step was first sent to, in the same form as `model` and different from it |
+  | `category` | Required open string, the provider's refusal category id: 1–64 bytes of `[a-z0-9_-]` |
+  | `cause` | Required closed string: `refused_here` when this step's first attempt was refused, `round` when the step ran on the fallback model inside a recovery round that an earlier refusal started |
+  | `credited?` | Optional boolean, only with `by: "client"`: whether the retry presented the provider's fallback credit token. The token itself is never sent |
+  | `refused_attempts?` | Only with `cause: "refused_here"`, then required: 1–8 objects in attempt order, each `{model, input_tokens?, cached_input_tokens?, cache_write_tokens?, cache_write_5m_tokens?, cache_write_1h_tokens?, output_tokens?, reasoning_tokens?}` with a non-empty `model` and the same counter meanings as the step's own |
+  | `round?` | Optional `{steps: u32, steps_left: u32}`, `steps_left` ≤ `steps`: the recovery round in force after this step, if any. Absent when the round's length isn't known, as with a provider's own fallback that routes later turns to the fallback model for a time it doesn't publish (`by: "provider", cause: "round"` with no `round`) |
+
+  `model` stays the model that served the step. The step's own counters
+  cover the whole step, the refused attempts and the answer together, so a
+  reader that ignores `fallback` still sees the full usage; a reader wanting
+  the answering attempt alone subtracts `refused_attempts`. Spend is priced
+  from the runner's durable billing records, which must carry each refused
+  attempt's usage under its own model; `refused_attempts` here serves live
+  readers. The record carries no content: no refusal text, prompt or
+  answer. `StepFinished::check` and `decode_step_finished` enforce every rule
+  above, including the member combinations.
+- [pinned] On `session.read` with `include_display_facts: true`, an assistant
+  entry placed by such a step carries `model_fallback` (§4.7) with
+  `requested` and `answered` as before, plus the step record's `by`,
+  `category` and `cause`. The token counters, `credited` and `round` stay on
+  the step only. Apps show that the fallback model answered and why.
+- [pinned] **Readers first for 0.9.6:** every reader of `step.finished.v1`
+  must run runner contract 0.9.6 or later before any runner emits
+  `fallback`. Today's readers are the event durables and live-hint readers
+  listed in `cortexkit-bus-naming`'s `EVENT_CONSUMERS` and
+  `LIVE_HINT_READERS`. `StepFinished` refuses unknown members, so older
+  readers reject the new member. When it is absent, existing bodies remain
+  unchanged.
 
 - [pinned] **Readers first for 0.8.55:** every reader of `step.finished.v1`
   must run runner contract 0.8.55 or later before any runner emits

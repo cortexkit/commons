@@ -20,9 +20,12 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
+use std::{borrow::Cow, collections::HashSet};
 
+use crate::attribution::{self, Attribution, HostFrame};
 use crate::read::descriptors::Reference;
 use crate::serializer_profile::{ANTHROPIC_MESSAGES, OPENCODE_AISDK, OPENCODE_V2, PI};
+use crate::step_events::fallback::{valid_by, valid_category, valid_cause};
 
 /// Byte bounds on a display row's tool payloads, chosen by the caller of a
 /// display read or a live subscription. Strict: a misspelled member would
@@ -85,22 +88,26 @@ pub fn client_message_id_valid(id: &str) -> bool {
 /// Non-exhaustive: build one with [`DisplayRow::new`] (or a projection) and
 /// the `with_*` setters, or decode one.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "DisplayRowWire")]
 #[non_exhaustive]
 pub struct DisplayRow {
     /// Verified relay header hidden from this row's text, for a "via chat" label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<crate::attribution::Attribution>,
+    /// Verified wrapper shown as separate host parts, never with attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_frame: Option<crate::attribution::HostFrame>,
     /// Notices riding this row's tool results, in delivery order, outside checksums.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<crate::read::NoticeFact>,
     /// References captured when this message was stored, never added to its body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_refs: Option<crate::output_refs::Descriptor>,
-    /// Who spoke, as the stored body says: `user`, `assistant`, `tool`,
-    /// `system` or another runner value.
+    /// Who spoke, as the stored body says, or `user` for a verified host frame.
     pub role: String,
     /// The message's text parts, joined as `run.result` joins them
     /// ([`crate::run::join_text_parts`]). Reasoning is not part of it.
+    /// For a verified host frame, only the person's words appear here.
     pub text: String,
     /// Every projected part, in the stored message's order. Bookkeeping
     /// parts are dropped.
@@ -117,6 +124,9 @@ pub struct DisplayRow {
     /// no claim; outside stored bytes and digests. See CONTRACT §4.7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_fallback: Option<ModelFallback>,
+    /// The runner wrote this entry, as recorded when it did so. Never inferred from text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_entry: Option<RunnerEntry>,
     /// The `client_message_id` of the send that created this user message,
     /// kept by the runner beside the stored body, never inside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -150,7 +160,61 @@ pub struct DisplayRow {
     pub rich_ui: Option<crate::rich_ui::RichUiStamp>,
 }
 
+// Match DisplayRow's wire fields while ignoring unknown members. The
+// all-fields round-trip test catches known fields this decoder drops.
+#[derive(Deserialize)]
+#[serde(remote = "DisplayRow", rename = "DisplayRow")]
+struct DisplayRowFields {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attribution: Option<crate::attribution::Attribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    host_frame: Option<crate::attribution::HostFrame>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notices: Vec<crate::read::NoticeFact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    output_refs: Option<crate::output_refs::Descriptor>,
+    role: String,
+    text: String,
+    #[serde(default)]
+    parts: Vec<DisplayPart>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_fallback: Option<ModelFallback>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runner_entry: Option<RunnerEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    speaks_for: Option<crate::message_marks::SpeaksFor>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    notice: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    keep: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rich_ui: Option<crate::rich_ui::RichUiStamp>,
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct DisplayRowWire(#[serde(with = "DisplayRowFields")] DisplayRow);
+
+impl TryFrom<DisplayRowWire> for DisplayRow {
+    type Error = &'static str;
+
+    fn try_from(wire: DisplayRowWire) -> Result<Self, Self::Error> {
+        wire.0.check_frame_facts()?;
+        Ok(wire.0)
+    }
+}
+
 impl DisplayRow {
+    fn check_frame_facts(&self) -> Result<(), &'static str> {
+        crate::attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+    }
+
     pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
         self.speaks_for = Some(speaks_for);
         self
@@ -173,6 +237,7 @@ impl DisplayRow {
         }));
         Self {
             attribution: None,
+            host_frame: None,
             notices: Vec::new(),
             role: role.into(),
             output_refs: None,
@@ -180,6 +245,7 @@ impl DisplayRow {
             parts,
             model: None,
             model_fallback: None,
+            runner_entry: None,
             client_message_id: None,
             sender: None,
             speaks_for: None,
@@ -218,6 +284,18 @@ impl DisplayRow {
         Ok(())
     }
 
+    pub fn with_runner_entry(mut self, entry: RunnerEntry) -> Self {
+        self.runner_entry = Some(entry);
+        self
+    }
+
+    /// Validate the code on an in-memory row before serving it.
+    pub fn check_runner_entry(&self) -> Result<(), &'static str> {
+        self.runner_entry
+            .as_ref()
+            .map_or(Ok(()), RunnerEntry::check)
+    }
+
     pub fn with_client_message_id(mut self, id: impl Into<String>) -> Self {
         self.client_message_id = Some(id.into());
         self
@@ -239,6 +317,54 @@ impl DisplayRow {
     }
 }
 
+/// An entry the runner wrote itself, not the model or the person. A runner
+/// attaches this fact only from its own durable record, never from entry text.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "RunnerEntryWire")]
+#[non_exhaustive]
+pub struct RunnerEntry {
+    /// Open reason code. An unrecognized code still marks a runner-written entry.
+    pub code: String,
+}
+
+#[derive(Deserialize)]
+struct RunnerEntryWire {
+    code: String,
+}
+
+impl TryFrom<RunnerEntryWire> for RunnerEntry {
+    type Error = &'static str;
+
+    fn try_from(wire: RunnerEntryWire) -> Result<Self, Self::Error> {
+        Self::new(wire.code)
+    }
+}
+
+impl RunnerEntry {
+    /// The host stored no reply for a finished step, and the runner wrote this entry in its place.
+    pub const HOST_STORED_NO_REPLY: &str = "host_stored_no_reply";
+
+    pub fn new(code: impl Into<String>) -> Result<Self, &'static str> {
+        let entry = Self { code: code.into() };
+        entry.check()?;
+        Ok(entry)
+    }
+
+    pub fn check(&self) -> Result<(), &'static str> {
+        if !(1..=64).contains(&self.code.len())
+            || !self
+                .code
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        {
+            return Err(
+                "runner_entry.code must be 1-64 bytes of lowercase ASCII letters, digits or _",
+            );
+        }
+        Ok(())
+    }
+}
+
 /// An exactly recorded replacement of the requested model for an assistant reply.
 /// Both ids use the same form as [`DisplayRow::model`]; if provider-qualified,
 /// qualify both bare marker ids with the reply's own provider. Absence of the
@@ -250,19 +376,37 @@ impl DisplayRow {
 pub struct ModelFallback {
     pub requested: String,
     pub answered: String,
+    /// The step's refusal-fallback reason, if recorded. All three members travel together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ModelFallbackWire {
     requested: String,
     answered: String,
+    by: Option<String>,
+    category: Option<String>,
+    cause: Option<String>,
 }
 
 impl TryFrom<ModelFallbackWire> for ModelFallback {
     type Error = &'static str;
 
     fn try_from(wire: ModelFallbackWire) -> Result<Self, Self::Error> {
-        Self::new(wire.requested, wire.answered)
+        let fact = Self {
+            requested: wire.requested,
+            answered: wire.answered,
+            by: wire.by,
+            category: wire.category,
+            cause: wire.cause,
+        };
+        fact.check("assistant")?;
+        Ok(fact)
     }
 }
 
@@ -274,9 +418,20 @@ impl ModelFallback {
         let fact = Self {
             requested: requested.into(),
             answered: answered.into(),
+            by: None,
+            category: None,
+            cause: None,
         };
         fact.check("assistant")?;
         Ok(fact)
+    }
+
+    /// Copy the three reason members from the step that placed this reply.
+    pub fn with_reason(mut self, fallback: &crate::step_events::Fallback) -> Self {
+        self.by = Some(fallback.by.clone());
+        self.category = Some(fallback.category.clone());
+        self.cause = Some(fallback.cause.clone());
+        self
     }
 
     /// Validate constructed values as well as the entry's known role.
@@ -290,6 +445,25 @@ impl ModelFallback {
         if self.requested == self.answered {
             return Err("model_fallback model ids must differ");
         }
+        match (
+            self.by.as_deref(),
+            self.category.as_deref(),
+            self.cause.as_deref(),
+        ) {
+            (None, None, None) => {}
+            (Some(by), Some(category), Some(cause)) => {
+                if !valid_by(by) {
+                    return Err("model_fallback.by");
+                }
+                if !valid_category(category) {
+                    return Err("model_fallback.category");
+                }
+                if !valid_cause(cause) {
+                    return Err("model_fallback.cause");
+                }
+            }
+            _ => return Err("model_fallback requires by, category and cause together"),
+        }
         Ok(())
     }
 }
@@ -302,7 +476,8 @@ impl ModelFallback {
 /// sender's or model's words.
 /// Native `synthetic` rows are entirely host text, marked or not; marking is
 /// optional and useful only to attach a code.
-/// Shared projections never set it; runners opt in with [`Self::with_host`].
+/// Shared projections set it only for a verified host frame; runners can mark
+/// other recorded host parts with [`Self::with_host`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -326,6 +501,16 @@ impl DisplayPart {
             Self::ToolResult(part) => &part.part,
             Self::File(part) => &part.part,
             Self::Other(part) => &part.part,
+        }
+    }
+
+    fn part_mut(&mut self) -> &mut String {
+        match self {
+            Self::Text(part) | Self::Reasoning(part) => &mut part.part,
+            Self::ToolCall(part) => &mut part.part,
+            Self::ToolResult(part) => &mut part.part,
+            Self::File(part) => &mut part.part,
+            Self::Other(part) => &mut part.part,
         }
     }
 
@@ -971,17 +1156,70 @@ pub fn project_with_attribution(
     profile: &str,
     body: &Value,
     limits: Option<&Limits>,
-    attribution: Option<&crate::attribution::Attribution>,
+    attribution: Option<&Attribution>,
 ) -> Result<DisplayRow, ProjectionError> {
+    project_with_facts(
+        profile,
+        body,
+        limits,
+        &ProjectionFacts {
+            attribution,
+            ..ProjectionFacts::default()
+        },
+    )
+}
+
+/// Recorded display facts from beside the stored body, never inferred from it.
+#[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
+pub struct ProjectionFacts<'a> {
+    pub attribution: Option<&'a Attribution>,
+    pub host_frame: Option<&'a HostFrame>,
+    /// The runner's stored-order keys for host-frame projection, when served.
+    /// Prefer the keys from part digests to the envelope's `part_keys`.
+    /// Without these, the projection uses the profile's default keys.
+    pub part_keys: Option<&'a [String]>,
+}
+
+impl<'a> ProjectionFacts<'a> {
+    pub fn with_attribution(mut self, fact: &'a Attribution) -> Self {
+        self.attribution = Some(fact);
+        self
+    }
+
+    pub fn with_host_frame(mut self, fact: &'a HostFrame) -> Self {
+        self.host_frame = Some(fact);
+        self
+    }
+
+    pub fn with_part_keys(mut self, keys: &'a [String]) -> Self {
+        self.part_keys = Some(keys);
+        self
+    }
+
+    pub fn check(&self) -> Result<(), &'static str> {
+        attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+    }
+}
+
+/// Project a native body with its recorded facts. A mismatched frame leaves
+/// the native projection unchanged; conflicting frame facts are refused.
+/// A frame must name its own text part, not text grouped into a tool result.
+pub fn project_with_facts(
+    profile: &str,
+    body: &Value,
+    limits: Option<&Limits>,
+    facts: &ProjectionFacts<'_>,
+) -> Result<DisplayRow, ProjectionError> {
+    facts.check().map_err(ProjectionError::new)?;
+    if let Some(fact) = facts.host_frame {
+        if let Some(row) = project_host_frame(profile, body, limits, fact, facts.part_keys) {
+            return Ok(row);
+        }
+    }
     let mut row = project(profile, body, limits)?;
-    if let Some(fact) = attribution {
-        let content = match profile {
-            ANTHROPIC_MESSAGES => Some(body["content"].clone()),
-            OPENCODE_AISDK => Some(body["parts"].clone()),
-            OPENCODE_V2 => opencode_v2_display_content(body).ok().map(Value::Array),
-            PI => crate::serializer_profile::pi::projected_content(body).ok(),
-            _ => None,
-        };
+    if let Some(fact) = facts.attribution {
+        let content = stored_content(profile, body);
         let stored_text = content.as_ref().and_then(|content| {
             if fact.part == 0 && content.is_string() {
                 content.as_str()
@@ -1024,6 +1262,99 @@ pub fn project_with_attribution(
         }
     }
     Ok(row)
+}
+
+fn stored_content<'a>(profile: &str, body: &'a Value) -> Option<Cow<'a, Value>> {
+    match profile {
+        ANTHROPIC_MESSAGES => Some(Cow::Borrowed(&body["content"])),
+        OPENCODE_AISDK => Some(Cow::Borrowed(&body["parts"])),
+        OPENCODE_V2 => Some(Cow::Owned(Value::Array(
+            opencode_v2_display_content(body).ok()?,
+        ))),
+        PI => Some(Cow::Owned(
+            crate::serializer_profile::pi::projected_content(body).ok()?,
+        )),
+        _ => None,
+    }
+}
+
+fn project_host_frame(
+    profile: &str,
+    body: &Value,
+    limits: Option<&Limits>,
+    fact: &HostFrame,
+    part_keys: Option<&[String]>,
+) -> Option<DisplayRow> {
+    let content = stored_content(profile, body)?;
+    let index = fact.part as usize;
+    let (stored_text, part_count) = if let Some(text) = content.as_str().filter(|_| index == 0) {
+        (text, 1)
+    } else {
+        let parts = content.as_array()?;
+        let part = parts.get(index)?;
+        if part["type"] != "text" {
+            return None;
+        }
+        (part["text"].as_str()?, parts.len())
+    };
+    let (head, words, tail) = attribution::split_host_frame(fact, stored_text)?;
+    let keys = match part_keys {
+        Some(keys) if keys.len() == part_count => Cow::Borrowed(keys),
+        Some(_) => return None,
+        None => Cow::Owned(
+            (0..part_count)
+                .map(|i| {
+                    if profile == OPENCODE_AISDK {
+                        opencode_part_key(i, &content[i])
+                    } else {
+                        i.to_string()
+                    }
+                })
+                .collect(),
+        ),
+    };
+    let stored_key = keys.get(index)?;
+    let (head_key, tail_key) = host_frame_keys(stored_key, &keys);
+
+    let mut row = if profile == OPENCODE_AISDK {
+        opencode_aisdk_indexed(body, limits, true).ok()?
+    } else {
+        project(profile, body, limits).ok()?
+    };
+    let slot = index.to_string();
+    let position = row
+        .parts
+        .iter()
+        .position(|part| matches!(part, DisplayPart::Text(text) if text.part == slot))?;
+    for part in &mut row.parts {
+        *part.part_mut() = keys.get(part.part().parse::<usize>().ok()?)?.clone();
+    }
+    row.parts.splice(
+        position..=position,
+        [
+            DisplayPart::Text(TextPart::new(head_key, head)).with_host_code(&fact.code),
+            DisplayPart::Text(TextPart::new(stored_key, words)),
+            DisplayPart::Text(TextPart::new(tail_key, tail)).with_host_code(&fact.code),
+        ],
+    );
+    row.role = crate::read::role::USER.into();
+    row.text = words.into();
+    row.host_frame = Some(fact.clone());
+    Some(row)
+}
+
+fn host_frame_keys(part: &str, stored_keys: &[String]) -> (String, String) {
+    let used: HashSet<_> = stored_keys.iter().map(String::as_str).collect();
+    let key = |edge| {
+        // The stored key and edge keep the two identities stable across reads;
+        // extend the suffix if an opaque stored key already uses that spelling.
+        let mut key = format!("{part}#host_frame:{edge}");
+        while used.contains(key.as_str()) {
+            key.push('#');
+        }
+        key
+    };
+    (key("head"), key("tail"))
 }
 
 fn arguments_part(
@@ -1408,6 +1739,20 @@ pub fn opencode_aisdk(
     body: &Value,
     limits: Option<&Limits>,
 ) -> Result<DisplayRow, ProjectionError> {
+    opencode_aisdk_indexed(body, limits, false)
+}
+
+fn opencode_part_key(index: usize, part: &Value) -> String {
+    part.get("id")
+        .and_then(Value::as_str)
+        .map_or_else(|| index.to_string(), str::to_owned)
+}
+
+fn opencode_aisdk_indexed(
+    body: &Value,
+    limits: Option<&Limits>,
+    indexed: bool,
+) -> Result<DisplayRow, ProjectionError> {
     let info = body
         .get("info")
         .filter(|info| info.is_object())
@@ -1422,10 +1767,11 @@ pub fn opencode_aisdk(
         .ok_or_else(|| ProjectionError::new("an opencode-aisdk body has no parts"))?;
     let mut parts = Vec::new();
     for (index, part) in stored.iter().enumerate() {
-        let key = part
-            .get("id")
-            .and_then(Value::as_str)
-            .map_or_else(|| index.to_string(), str::to_owned);
+        let key = if indexed {
+            index.to_string()
+        } else {
+            opencode_part_key(index, part)
+        };
         let kind = str_of(part, "type");
         match kind {
             "redacted_reasoning" => parts.push(redacted_reasoning(key, part)),
@@ -1916,8 +2262,9 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct DisplayEntry {
-    /// The stored-order keys of the parts represented by this entry.
-    /// Required for an archive-pruning runner; no keys are invented by a reader.
+    /// The stored-order keys, including any display-only host frame keys.
+    /// Runners that can prune archived reasoning must publish these keys so
+    /// readers do not have to guess a part's identity after pruning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_keys: Option<Vec<String>>,
     /// Required one-based position on the active path, as on raw history.
@@ -1945,12 +2292,43 @@ impl DisplayEntry {
     /// The display entry for a raw history `entry`, with `row` in place of
     /// its body.
     pub fn from_history(entry: &crate::history::HistoryEntry, row: DisplayRow) -> Self {
+        let mut part_keys = entry
+            .part_digests
+            .as_ref()
+            .map(|rows| rows.iter().map(|row| row.part.clone()).collect::<Vec<_>>())
+            .or_else(|| entry.part_keys.clone());
+        if let Some(fact) = &row.host_frame {
+            if let Some(keys) = &mut part_keys {
+                let index = fact.part as usize;
+                if let Some(part) = keys.get(index) {
+                    let is_new_host_key = |part: &DisplayPart| {
+                        part.host_code() == Some(fact.code.as_str())
+                            && !keys.iter().any(|key| key == part.part())
+                    };
+                    if let Some([head, _, tail]) = row.parts.windows(3).find(|window| {
+                        window[1].part() == part
+                            && is_new_host_key(&window[0])
+                            && is_new_host_key(&window[2])
+                            && window[0].part() != window[2].part()
+                    }) {
+                        keys.insert(index + 1, tail.part().into());
+                        keys.insert(index, head.part().into());
+                    }
+                }
+            } else {
+                let mut seen = HashSet::new();
+                part_keys = Some(
+                    row.parts
+                        .iter()
+                        .map(DisplayPart::part)
+                        .filter(|key| seen.insert(*key))
+                        .map(str::to_owned)
+                        .collect(),
+                );
+            }
+        }
         Self {
-            part_keys: entry
-                .part_digests
-                .as_ref()
-                .map(|rows| rows.iter().map(|row| row.part.clone()).collect())
-                .or_else(|| entry.part_keys.clone()),
+            part_keys,
             ordinal: entry.ordinal,
             mid: entry.mid.clone(),
             written_at: entry.written_at,

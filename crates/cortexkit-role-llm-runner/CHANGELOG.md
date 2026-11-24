@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.6
+
+- `step.finished.v1` can carry a content-free refusal fallback record (§14.3),
+  with the requested model, refusal reason, refused-attempt usage, and recovery
+  round. Opted-in assistant reads and display rows can carry the reason in
+  `model_fallback`. Update closed step-event readers before runners emit
+  `fallback`; bodies without the new members keep their previous bytes.
+- `runner_entry` on display rows and opted-in reads marks a runner-written
+  entry, not model or person text. `host_stored_no_reply` marks an entry the
+  runner wrote because the host stored no reply for a finished model step.
+  Other valid codes still identify runner-written entries. The fact changes
+  neither stored message bytes nor digests.
+- A verified `host_frame` on opted-in reads and display rows separates Claude
+  Code's mid-turn wrapper from the person's words without changing stored bytes.
+- Contract text only (§9.1, "Calls still running at deletion"): before deleting
+  a session's content, withdraw every provider call still awaiting a result by
+  its `call_key`. An unanswered withdrawal never delays deletion past its
+  deadline. Acknowledge and discard results that arrive after deletion.
+
 ## 0.9.5
 
 - Add §14.5: tool calls cut off by an in-place daemon upgrade. A runner that

@@ -469,6 +469,7 @@ impl ReadPage {
 /// };
 /// ```
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "ReadMessageWire")]
 #[non_exhaustive]
 pub struct ReadMessage {
     /// Write-time content identity over the original full inline message.
@@ -594,6 +595,10 @@ pub struct ReadMessage {
     /// The message bytes remain whole; display rows hide the verified prefix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<crate::attribution::Attribution>,
+    /// Verified wrapper around a person's words, only with `include_display_facts`
+    /// on a runner declaring `read_display_facts`. Mutually exclusive with attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_frame: Option<crate::attribution::HostFrame>,
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
@@ -609,6 +614,90 @@ pub struct ReadMessage {
     /// Outside stored bytes and digests; validate with [`Self::check_model_fallback`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_fallback: Option<crate::display::ModelFallback>,
+    /// Recorded authorship of an entry the runner wrote itself. Served only
+    /// with `include_display_facts`, beside the raw body and outside all digests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_entry: Option<crate::display::RunnerEntry>,
+}
+
+// Match ReadMessage's wire fields while ignoring unknown members. The
+// all-fields round-trip test catches known fields this decoder drops.
+#[derive(Deserialize)]
+#[serde(remote = "ReadMessage", rename = "ReadMessage")]
+struct ReadMessageFields {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "descriptors::deserialize_digest"
+    )]
+    digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part_digests: Option<Vec<descriptors::PartDigest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part_keys: Option<Vec<String>>,
+    ordinal: u64,
+    mid: String,
+    #[serde(deserialize_with = "descriptors::deserialize_content")]
+    message: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<RunAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    originals: Option<Vec<Original>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<ToolCallAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    written_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivered_as: Option<crate::delivery_order::EntryDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rich_ui: Option<crate::rich_ui::RichUiStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    send_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    speaks_for: Option<crate::message_marks::SpeaksFor>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    notice: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    keep: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completed_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    reasoning_summaries: Vec<ReasoningSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notices: Vec<NoticeFact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attribution: Option<crate::attribution::Attribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    host_frame: Option<crate::attribution::HostFrame>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tool_times: Vec<ToolTime>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    host_parts: Vec<HostPart>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_fallback: Option<crate::display::ModelFallback>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runner_entry: Option<crate::display::RunnerEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct ReadMessageWire(#[serde(with = "ReadMessageFields")] ReadMessage);
+
+impl TryFrom<ReadMessageWire> for ReadMessage {
+    type Error = &'static str;
+
+    fn try_from(wire: ReadMessageWire) -> Result<Self, Self::Error> {
+        wire.0.check_frame_facts()?;
+        Ok(wire.0)
+    }
 }
 
 /// A host-written part of a user, assistant or synthetic entry. Listing its key is the host mark;
@@ -891,6 +980,18 @@ impl ReadMessage {
         Ok(())
     }
 
+    pub fn with_runner_entry(mut self, entry: crate::display::RunnerEntry) -> Self {
+        self.runner_entry = Some(entry);
+        self
+    }
+
+    /// Validate the code on an in-memory entry without interpreting its raw body.
+    pub fn check_runner_entry(&self) -> Result<(), &'static str> {
+        self.runner_entry
+            .as_ref()
+            .map_or(Ok(()), crate::display::RunnerEntry::check)
+    }
+
     /// Validate host facts against the entry's known role and stored part keys.
     /// The opaque raw body cannot supply those keys without its serializer profile.
     pub fn check_host_parts(&self, role: &str, part_keys: &[&str]) -> Result<(), &'static str> {
@@ -937,6 +1038,17 @@ impl ReadMessage {
         self
     }
 
+    /// Attach a verified host frame beside the whole stored message.
+    /// The runner serves the entry's `user` role even when the fact is not requested.
+    pub fn with_host_frame(mut self, fact: crate::attribution::HostFrame) -> Self {
+        self.host_frame = Some(fact);
+        self
+    }
+
+    pub(crate) fn check_frame_facts(&self) -> Result<(), &'static str> {
+        crate::attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+    }
+
     pub fn new(ordinal: u64, mid: impl Into<String>, message: Value) -> Self {
         Self {
             ordinal,
@@ -963,9 +1075,11 @@ impl ReadMessage {
             reasoning_summaries: Vec::new(),
             notices: Vec::new(),
             attribution: None,
+            host_frame: None,
             tool_times: Vec::new(),
             host_parts: Vec::new(),
             model_fallback: None,
+            runner_entry: None,
         }
     }
 
