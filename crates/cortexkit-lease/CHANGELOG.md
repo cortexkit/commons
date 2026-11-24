@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8
+
+- Exclusive file lease holders can remove the lease file once its guarded
+  resource and data have been deleted. Removal resets the persisted fence epoch.
+- Shared and exclusive acquisition now recheck file identity after locking and
+  retry a bounded number of times if the path changed. This keeps an acquirer
+  that opened the file before removal from holding a lease on a detached file.
+  Windows removal uses POSIX delete semantics to unlink while other handles
+  remain open, and returns the OS error where those semantics are unavailable.
+
 ## 0.1.7
 
 - Windows private-file and directory operations now support paths beyond

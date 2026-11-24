@@ -2,10 +2,11 @@
 //! reparse point, and new directories receive their security at creation.
 
 use std::{
+    fs::{File, OpenOptions},
     io,
     mem::{size_of, zeroed},
     os::windows::{
-        fs::MetadataExt,
+        fs::{MetadataExt, OpenOptionsExt},
         io::{AsRawHandle, FromRawHandle},
     },
     path::Path,
@@ -30,10 +31,13 @@ use windows_sys::Win32::{
         UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
     Storage::FileSystem::{
-        CreateDirectoryW, CreateFileW, FlushFileBuffers, GetFileInformationByHandle, GetFileType,
-        MoveFileExW, BY_HANDLE_FILE_INFORMATION, CREATE_NEW, FILE_ALL_ACCESS,
-        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        CreateDirectoryW, CreateFileW, FileDispositionInfoEx, FileIdInfo, FlushFileBuffers,
+        GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType, MoveFileExW,
+        ReOpenFile, SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, CREATE_NEW, DELETE,
+        FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+        FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
         FILE_TYPE_DISK, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
         READ_CONTROL, WRITE_DAC, WRITE_OWNER,
     },
@@ -49,6 +53,68 @@ impl Drop for Handle {
         // SAFETY: Handle owns a valid handle returned by a successful Win32 call.
         unsafe { CloseHandle(self.0) };
     }
+}
+
+// A waiter that opened the file before locking must not prevent its removal.
+pub(super) const LEASE_FILE_SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+pub(super) fn lease_path_matches(file: &File, path: &Path) -> io::Result<bool> {
+    let entry = OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(LEASE_FILE_SHARE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let locked = file_id(file)?;
+    let entry = file_id(&entry)?;
+    Ok(locked.VolumeSerialNumber == entry.VolumeSerialNumber
+        && locked.FileId.Identifier == entry.FileId.Identifier)
+}
+
+fn file_id(file: &File) -> io::Result<FILE_ID_INFO> {
+    // SAFETY: FILE_ID_INFO is a plain Win32 output structure. The file and
+    // writable buffer of the requested size are live throughout the call.
+    let mut id: FILE_ID_INFO = unsafe { zeroed() };
+    if unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            (&mut id as *mut FILE_ID_INFO).cast(),
+            size_of::<FILE_ID_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(id)
+}
+
+pub(super) fn remove_locked_lease(file: &File) -> io::Result<()> {
+    // SAFETY: `file` owns a live handle. Reopening it targets the locked file,
+    // rather than looking up a name again, and only needs DELETE access.
+    let delete = unsafe { ReOpenFile(file.as_raw_handle(), DELETE, LEASE_FILE_SHARE, 0) };
+    if delete == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let delete = Handle(delete);
+    let disposition = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    };
+    // SAFETY: The delete handle and correctly sized disposition are live.
+    if unsafe {
+        SetFileInformationByHandle(
+            delete.0,
+            FileDispositionInfoEx,
+            (&disposition as *const FILE_DISPOSITION_INFO_EX).cast(),
+            size_of::<FILE_DISPOSITION_INFO_EX>() as u32,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // Closing the POSIX delete handle unlinks the name even if waiters still
+    // have it open. Use a separate delete handle so unlink precedes unlock.
+    drop(delete);
+    Ok(())
 }
 
 pub(super) fn durable_replace(temp: &Path, dest: &Path) -> io::Result<()> {

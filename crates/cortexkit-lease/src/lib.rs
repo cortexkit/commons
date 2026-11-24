@@ -485,8 +485,9 @@ impl LeaseKey {
 /// lifetime; a cloud impl would hold a lease record renewed against the cloud
 /// store.
 pub trait LeaseHandle: Send + Sync + std::fmt::Debug {
-    /// The CAS fence token for this writer: strictly greater than any prior
-    /// holder's. Durable writes carry it; a stale-epoch write must be rejected.
+    /// The compare-and-swap fence token for this writer: strictly greater than
+    /// any prior holder's unless the lease was [removed](Self::remove). Durable
+    /// writes carry it; a stale-epoch write must be rejected.
     fn epoch(&self) -> u64;
 
     /// The namespaced identity this lease was acquired for.
@@ -523,6 +524,28 @@ pub trait LeaseHandle: Send + Sync + std::fmt::Debug {
                 self.key().backend,
                 self.key().scope_key
             ),
+        )))
+    }
+
+    /// Remove the backing lease file while still holding the exclusive lock.
+    /// This consumes the handle and releases the lock on success or error.
+    /// Shared handles cannot remove the file. The default implementation
+    /// returns [`LeaseError::Io`] with [`io::ErrorKind::Unsupported`].
+    ///
+    /// Only call this after deleting the guarded resource and its stored data.
+    /// The file stores the fence epoch: removing it resets the next writer's
+    /// epoch to 1, which existing data with a higher epoch would reject as stale.
+    /// All acquirers must use a version that checks file identity after locking
+    /// (0.1.8 or newer). Do not rename or delete live lease files or their
+    /// parent directories outside this protocol.
+    ///
+    /// On Windows, removal requires filesystem support for POSIX delete
+    /// semantics. If the OS or filesystem refuses the operation, the file
+    /// stays in place and the OS error is returned.
+    fn remove(self: Box<Self>) -> Result<(), LeaseError> {
+        Err(LeaseError::Io(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this lease implementation does not support removal",
         )))
     }
 }
@@ -595,6 +618,102 @@ impl FileLeaseStore {
         self.base_dir
             .join(format!("{}.lease", fnv1a_hex(&key.identity())))
     }
+
+    fn acquire_with(
+        &self,
+        key: &LeaseKey,
+        exclusive: bool,
+        mut open: impl FnMut(&Path) -> io::Result<File>,
+    ) -> Result<Box<dyn LeaseHandle>, LeaseError> {
+        // Keep the same path if the caller changes the working directory
+        // between acquiring and removing the lease.
+        let path = std::path::absolute(self.lease_path(key)).map_err(LeaseError::Io)?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(LeaseError::Io)?;
+        }
+        for _ in 0..LEASE_OPEN_ATTEMPTS {
+            let mut file = open(&path).map_err(LeaseError::Io)?;
+            let lock = if exclusive {
+                file.try_lock_exclusive()
+            } else {
+                // Use fs2, not std's inherent method, for its contention error.
+                FileExt::try_lock_shared(&file)
+            };
+            match lock {
+                Ok(()) => {}
+                Err(e) if is_lock_contended(&e) => {
+                    return Err(LeaseError::Held { key: key.clone() });
+                }
+                Err(e) => return Err(LeaseError::Io(e)),
+            }
+
+            // An exclusive holder could have removed the file after we opened
+            // it. Closing this stale file releases its lock before we reopen the
+            // path. Never read or advance a fence epoch on a detached file.
+            if !lease_path_matches(&file, &path).map_err(LeaseError::Io)? {
+                continue;
+            }
+            // A world-writable lease file would let another user forge the
+            // persisted fence epoch. Protect existing files as well as new ones.
+            protect_file(&path).map_err(LeaseError::Io)?;
+
+            let epoch = if exclusive {
+                bump_epoch(&mut file)
+            } else {
+                read_epoch(&mut file)
+            }
+            .map_err(LeaseError::Io)?;
+            return Ok(Box::new(FileLeaseHandle {
+                epoch: std::sync::Mutex::new(epoch),
+                file,
+                key: key.clone(),
+                path,
+                exclusive,
+            }));
+        }
+        Err(LeaseError::Io(io::Error::other(format!(
+            "lease path {} changed during each of {LEASE_OPEN_ATTEMPTS} open attempts",
+            path.display()
+        ))))
+    }
+}
+
+const LEASE_OPEN_ATTEMPTS: usize = 8;
+
+fn open_lease_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(windows::LEASE_FILE_SHARE);
+    }
+    options.open(path)
+}
+
+fn lease_path_matches(file: &File, path: &Path) -> io::Result<bool> {
+    #[cfg(unix)]
+    let matches = || -> io::Result<bool> {
+        use std::os::unix::fs::MetadataExt;
+        let entry = std::fs::symlink_metadata(path)?;
+        let locked = file.metadata()?;
+        Ok(entry.dev() == locked.dev() && entry.ino() == locked.ino())
+    };
+    #[cfg(windows)]
+    let matches = || windows::lease_path_matches(file, path);
+    #[cfg(not(any(unix, windows)))]
+    let matches = || {
+        let _ = (file, path);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "lease file identity checking is unsupported",
+        ))
+    };
+
+    match matches() {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        result => result,
+    }
 }
 
 /// A file-backed held lease: holds the OS advisory lock (exclusive or shared)
@@ -608,6 +727,7 @@ struct FileLeaseHandle {
     /// Holds the OS advisory lock until dropped.
     file: File,
     key: LeaseKey,
+    path: PathBuf,
     /// Whether the OS lock is exclusive. Only an exclusive holder may write the
     /// persisted epoch.
     exclusive: bool,
@@ -637,6 +757,26 @@ impl LeaseHandle for FileLeaseHandle {
         *epoch = at_least;
         Ok(at_least)
     }
+
+    fn remove(self: Box<Self>) -> Result<(), LeaseError> {
+        if !self.exclusive {
+            return Err(LeaseError::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "a shared lease cannot remove the lease file",
+            )));
+        }
+        if !lease_path_matches(&self.file, &self.path).map_err(LeaseError::Io)? {
+            return Err(LeaseError::Io(io::Error::new(
+                io::ErrorKind::NotFound,
+                "the lease path no longer names the locked file",
+            )));
+        }
+        #[cfg(windows)]
+        let removed = windows::remove_locked_lease(&self.file);
+        #[cfg(not(windows))]
+        let removed = std::fs::remove_file(&self.path);
+        removed.map_err(LeaseError::Io)
+    }
 }
 
 impl Drop for FileLeaseHandle {
@@ -647,84 +787,11 @@ impl Drop for FileLeaseHandle {
 
 impl LeaseStore for FileLeaseStore {
     fn acquire(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError> {
-        std::fs::create_dir_all(&self.base_dir).map_err(LeaseError::Io)?;
-        let path = self.lease_path(key);
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(LeaseError::Io)?;
-        // The lease is the single-writer fence, so a world-WRITABLE lease file is
-        // an integrity question rather than a privacy one: anything able to write
-        // the persisted epoch can forge the fence token that readers use to
-        // detect a stale writer.
-        protect_file(&path).map_err(LeaseError::Io)?;
-
-        // Liveness gate: a live holder still owns the lock, so the try-lock fails
-        // with the OS "contended" error.
-        match file.try_lock_exclusive() {
-            Ok(()) => {}
-            Err(e) if is_lock_contended(&e) => {
-                return Err(LeaseError::Held { key: key.clone() });
-            }
-            Err(e) => return Err(LeaseError::Io(e)),
-        }
-
-        // We hold the lock: bump the persisted epoch (the CAS fence token).
-        let epoch = bump_epoch(&mut file).map_err(|e| {
-            let _ = file.unlock();
-            LeaseError::Io(e)
-        })?;
-
-        Ok(Box::new(FileLeaseHandle {
-            epoch: std::sync::Mutex::new(epoch),
-            file,
-            key: key.clone(),
-            exclusive: true,
-        }))
+        self.acquire_with(key, true, open_lease_file)
     }
 
     fn acquire_shared(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError> {
-        std::fs::create_dir_all(&self.base_dir).map_err(LeaseError::Io)?;
-        let path = self.lease_path(key);
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(LeaseError::Io)?;
-        protect_file(&path).map_err(LeaseError::Io)?;
-
-        // Shared liveness gate: only an exclusive holder contends; other shared
-        // holders coexist. On unix this is flock(LOCK_SH|LOCK_NB); on Windows,
-        // LockFileEx without LOCKFILE_EXCLUSIVE_LOCK (both via fs2).
-        // Fully-qualified call: std >= 1.89 has an inherent File::try_lock_shared
-        // (returning TryLockError) that would otherwise shadow the fs2 trait
-        // method this crate's error handling is built around.
-        match FileExt::try_lock_shared(&file) {
-            Ok(()) => {}
-            Err(e) if is_lock_contended(&e) => {
-                return Err(LeaseError::Held { key: key.clone() });
-            }
-            Err(e) => return Err(LeaseError::Io(e)),
-        }
-
-        // Read-only peek at the persisted writer epoch: shared holders are not
-        // writers, so the epoch is NOT bumped (it fences durable writes only).
-        let epoch = read_epoch(&mut file).map_err(|e| {
-            let _ = file.unlock();
-            LeaseError::Io(e)
-        })?;
-
-        Ok(Box::new(FileLeaseHandle {
-            epoch: std::sync::Mutex::new(epoch),
-            file,
-            key: key.clone(),
-            exclusive: false,
-        }))
+        self.acquire_with(key, false, open_lease_file)
     }
 }
 
@@ -981,6 +1048,130 @@ mod tests {
         assert!(g2.epoch() > e1, "epoch is monotonic across acquisitions");
         drop(g2);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn lease_removal_unlinks_and_resets_the_epoch() {
+        let (_, dir) = tmp_store();
+        // A valid lease path beyond MAX_PATH exercises Windows path handling
+        // for both the identity checks and removal.
+        let deep = dir
+            .join("long-directory-".repeat(10))
+            .join("child-".repeat(25));
+        let store = FileLeaseStore::new(deep);
+        let k = key("remove");
+        let path = store.lease_path(&k);
+        let held = store.acquire(&k).expect("exclusive lease");
+        held.raise_epoch(9).expect("raise the persisted epoch");
+        verify_private(&path).expect("lease was protected");
+
+        held.remove().expect("remove the locked file");
+        assert_eq!(
+            std::fs::symlink_metadata(&path).unwrap_err().kind(),
+            io::ErrorKind::NotFound,
+            "removal must unlink, not just unlock the file"
+        );
+        let fresh = store.acquire(&k).expect("acquire at the removed path");
+        assert_eq!(fresh.epoch(), 1, "the new file has a fresh epoch");
+        verify_private(&path).expect("replacement lease was protected");
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows_sys::Win32::{
+                Foundation::ERROR_SHARING_VIOLATION,
+                Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE},
+            };
+
+            // A foreign handle can refuse to share delete access. Propagate
+            // that OS error instead of claiming that the file was removed.
+            let foreign = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(&path)
+                .expect("open a handle that does not share delete access");
+            match fresh.remove() {
+                Err(LeaseError::Io(e)) => {
+                    assert_eq!(e.raw_os_error(), Some(ERROR_SHARING_VIOLATION as i32));
+                }
+                other => panic!("expected the native sharing error, got {other:?}"),
+            }
+            drop(foreign);
+            let next = store.acquire(&k).expect("acquire after the failed unlink");
+            assert_eq!(next.epoch(), 2, "failed removal left the file intact");
+        }
+        #[cfg(not(windows))]
+        drop(fresh);
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_rejects_an_open_waiter_on_the_detached_file() {
+        let (store, dir) = tmp_store();
+        let k = key("stale");
+        let path = store.lease_path(&k);
+        for exclusive in [true, false] {
+            let original = store.acquire(&k).expect("lock original file");
+            let mut stale = Some(open_lease_file(&path).expect("open before removal"));
+            original.remove().expect("unlink while the waiter is open");
+            let replacement = store.acquire(&k).expect("lock replacement file");
+
+            let mut opens = 0;
+            let waiter = store.acquire_with(&k, exclusive, |path| {
+                opens += 1;
+                match stale.take() {
+                    Some(file) => Ok(file),
+                    None => open_lease_file(path),
+                }
+            });
+            assert!(
+                matches!(waiter, Err(LeaseError::Held { .. })),
+                "the waiter must contend on the replacement, not lock the detached file (exclusive={exclusive}): {waiter:?}"
+            );
+            assert_eq!(opens, 2, "the stale open must be retried once");
+            drop(replacement);
+        }
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_is_refused_for_a_shared_handle() {
+        let (store, dir) = tmp_store();
+        let k = key("shared-remove");
+        let writer = store.acquire(&k).expect("seed the epoch");
+        drop(writer);
+        let reader = store.acquire_shared(&k).expect("shared lease");
+
+        match reader.remove() {
+            Err(LeaseError::Io(e)) => assert_eq!(e.kind(), io::ErrorKind::PermissionDenied),
+            other => panic!("expected shared removal to be refused, got {other:?}"),
+        }
+        assert!(store.lease_path(&k).is_file());
+        let next = store.acquire(&k).expect("shared lock was released");
+        assert_eq!(next.epoch(), 2, "the reader did not reset the epoch");
+        drop(next);
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_bounds_retries_when_the_path_keeps_disappearing() {
+        let (store, dir) = tmp_store();
+        let k = key("repeated-remove");
+        let mut opens = 0;
+        let result = store.acquire_with(&k, true, |path| {
+            opens += 1;
+            assert!(opens <= LEASE_OPEN_ATTEMPTS, "too many open attempts");
+            let writer = store.acquire(&k).expect("lock file before opening");
+            let stale = open_lease_file(path)?;
+            writer.remove().expect("unlink before the waiter can lock");
+            Ok(stale)
+        });
+        assert!(
+            matches!(&result, Err(LeaseError::Io(e)) if e.kind() == io::ErrorKind::Other),
+            "expected retry exhaustion, got {result:?}"
+        );
+        assert_eq!(opens, LEASE_OPEN_ATTEMPTS);
+        std::fs::remove_dir_all(dir).expect("clean up leases");
     }
 
     #[test]
