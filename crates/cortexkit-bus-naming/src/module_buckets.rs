@@ -2,6 +2,10 @@ use std::collections::BTreeSet;
 
 use crate::{validate_token, AccountNames, NamingError, TokenKind};
 
+// Module buckets have only a handful of owner and reader watches. Cap each
+// bucket's consumers with room for more readers and watch overlap on reconnect.
+const MODULE_BUCKET_MAX_CONSUMERS: i32 = 32;
+
 /// A reviewed KV bucket. Only `owner` may write; listed modules may read.
 /// Limits describe stored values and retention, not transport overhead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +21,11 @@ pub struct ModuleBucket {
 }
 
 impl ModuleBucket {
+    /// Maximum JetStream consumers on this bucket's backing stream.
+    pub const fn max_consumers(&self) -> i32 {
+        MODULE_BUCKET_MAX_CONSUMERS
+    }
+
     /// `ttl` is in seconds; `None` retains values without an age limit.
     pub const fn new(
         owner: &'static str,

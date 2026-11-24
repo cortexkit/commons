@@ -31,7 +31,7 @@ pub use module_buckets::{
 pub use names::{
     root_credential_id, validate_tenancy_name, AccountNames, BucketNames, EventSubject,
     NamingExemption, NamingRule, RootCredentialKind, StreamNames, TenancyNameError,
-    CLOSED_NAMING_EXEMPTIONS,
+    CENSUS_MAX_CONSUMERS, CLOSED_NAMING_EXEMPTIONS,
 };
 pub use token::{
     validate_account_token, validate_event_version, validate_token, NamingError, TokenKind,

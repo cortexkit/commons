@@ -73,6 +73,8 @@ pub struct StreamSpec {
     pub max_bytes: u64,
     pub discard: DiscardPolicy,
     pub work_queue: bool,
+    /// Maximum JetStream consumers on this stream. `None` sets no stream-specific cap.
+    pub max_consumers: Option<i32>,
     /// The per-subject message cap (`max_msgs_per_subject`), or `None` to set
     /// none. With discard-old, the oldest message of a full subject is evicted
     /// first; a busy subject cannot evict another subject's history via this cap.
@@ -85,7 +87,7 @@ pub struct StreamSpec {
 }
 
 impl StreamSpec {
-    /// Starts a custom limits-retained stream with no age, byte or message cap.
+    /// Starts a custom limits-retained stream with no age, byte, message or consumer cap.
     /// Bootstrap must set its intended bounds before provisioning it.
     pub fn new(kind: StreamKind, name: String, subjects: Vec<String>) -> Self {
         Self {
@@ -97,6 +99,7 @@ impl StreamSpec {
             max_bytes: 0,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: None,
             duplicate_window: None,
@@ -234,6 +237,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::New,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: None,
             duplicate_window: None,
@@ -247,6 +251,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::New,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: None,
             duplicate_window: None,
@@ -260,6 +265,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::New,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: None,
             duplicate_window: None,
@@ -273,6 +279,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
             work_queue: true,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: Some(16 * 1024),
             duplicate_window: None,
@@ -286,6 +293,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 64 * MIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: None,
             duplicate_window: Some(DEAD_LETTER_DUPLICATE_WINDOW),
@@ -299,6 +307,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: GIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: Some(EVENT_MAX_MSGS_PER_SUBJECT),
             max_message_size: None,
             duplicate_window: None,
@@ -312,6 +321,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
             work_queue: true,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: Some(16 * 1024),
             duplicate_window: None,
@@ -325,6 +335,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 256 * MIB,
             discard: DiscardPolicy::New,
             work_queue: true,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: Some(16 * 1024),
             duplicate_window: None,
@@ -338,6 +349,7 @@ pub fn shipped_streams(account: &AccountNames) -> Vec<StreamSpec> {
             max_bytes: 64 * MIB,
             discard: DiscardPolicy::Old,
             work_queue: false,
+            max_consumers: None,
             max_msgs_per_subject: None,
             max_message_size: None,
             duplicate_window: Some(DEAD_LETTER_DUPLICATE_WINDOW),

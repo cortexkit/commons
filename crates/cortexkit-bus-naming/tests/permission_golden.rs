@@ -61,6 +61,41 @@ fn permission_model_is_allow_only_and_expands_all_streams() {
 }
 
 #[test]
+fn census_watches_get_only_unnamed_consumer_create() {
+    use cortexkit_bus_naming::Operation;
+    use std::collections::BTreeSet;
+
+    let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
+    let stream = &account.buckets().census_stream;
+    let bare = format!("$JS.API.CONSUMER.CREATE.{stream}");
+    let named = format!("{bare}.>");
+    let durable = format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.>");
+    let document = generate_permission_golden(PINNED_GOLDEN_FIXTURE).unwrap();
+    let readers = document
+        .allows()
+        .iter()
+        .map(|entry| entry.principal)
+        .filter(|principal| !matches!(principal, Principal::Bus | Principal::System))
+        .collect::<BTreeSet<_>>();
+
+    for principal in readers {
+        let create = document
+            .allows()
+            .iter()
+            .filter(|entry| {
+                entry.principal == principal
+                    && entry.operation == Operation::Publish
+                    && [&bare, &named, &durable]
+                        .iter()
+                        .any(|pattern| subjects_overlap(&entry.subject, pattern))
+            })
+            .map(|entry| entry.subject.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(create, [bare.as_str()], "{}", principal.as_str());
+    }
+}
+
+#[test]
 fn forbidden_permission_shapes_fail_the_build_validator() {
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.10
+
+- Remove `$JS.API.CONSUMER.CREATE.<census stream>.>` and
+  `$JS.API.CONSUMER.DURABLE.CREATE.<census stream>.>` from participant grants.
+  KV watches still use the bare `$JS.API.CONSUMER.CREATE.<census stream>`;
+  ck-bus alone retains the named and durable grants. The narrower grants apply
+  when ck-bus adopts this release.
+- Declare consumer caps of 32 per module bucket, 128 on the census stream, and
+  256 per hub stream so abandoned or excessive ephemeral consumers cannot exhaust
+  the account. Box workload streams, their dead-letter streams, and `FEDOUT`
+  get no cap. The caps take effect only after a separate ck-bus change maps
+  these settings into its NATS configuration.
+
 ## 0.5.9
 
 - Breaking API change: `hub_inbox_stream_name`, `hub_inbox_stream`, `hub_streams`,

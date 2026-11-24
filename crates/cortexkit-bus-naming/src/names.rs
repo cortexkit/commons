@@ -69,6 +69,11 @@ impl StreamNames {
     }
 }
 
+/// Maximum JetStream consumers on the census bucket's backing stream. Every
+/// module can watch the census, and a reconnect can briefly hold two consumers
+/// per watch, so this cap leaves room for both the active and retiring watches.
+pub const CENSUS_MAX_CONSUMERS: i32 = 128;
+
 /// The census KV bucket and its JetStream backing stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BucketNames {

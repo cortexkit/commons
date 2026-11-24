@@ -496,6 +496,8 @@ pub fn bus_permissions(
     for subject in [
         format!("$JS.API.STREAM.CREATE.{census_stream}"),
         format!("$JS.API.STREAM.UPDATE.{census_stream}"),
+        format!("$JS.API.CONSUMER.CREATE.{census_stream}.>"),
+        format!("$JS.API.CONSUMER.DURABLE.CREATE.{census_stream}.>"),
     ] {
         add(&mut entries, Principal::Bus, Operation::Publish, subject);
     }
@@ -1207,9 +1209,8 @@ fn add_census_read_permissions(
         format!("$JS.API.DIRECT.GET.{stream}.>"),
         format!("$JS.API.STREAM.MSG.GET.{stream}"),
         format!("$JS.API.STREAM.INFO.{stream}"),
+        // KV watches use unnamed consumers; named and durable create are bus-only.
         format!("$JS.API.CONSUMER.CREATE.{stream}"),
-        format!("$JS.API.CONSUMER.CREATE.{stream}.>"),
-        format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.>"),
         format!("$JS.API.CONSUMER.DELETE.{stream}.>"),
     ] {
         add(entries, principal, Operation::Publish, subject);

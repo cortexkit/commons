@@ -45,6 +45,10 @@ pub const CUTS_STREAM: &str = "OBJ_cuts";
 
 const VAULT_SHARED_LOGINS_MAX_MESSAGE_SIZE: i32 = 256 * 1024;
 
+// Bound consumers per hub stream without crowding out readers from multiple
+// computers, including overlapping consumers when those readers reconnect.
+const HUB_MAX_CONSUMERS: i32 = 256;
+
 const HUB_MEMORY_MODULE: &str = "magic-context";
 const HUB_ROOMS_MODULE: &str = "prefrontal";
 const HUB_ROOMS_MODULE_LEGACY: &str = "prefrontal-core";
@@ -246,7 +250,8 @@ pub struct HubStreamSpec {
 }
 
 impl HubStreamSpec {
-    pub fn new(stream: StreamSpec) -> Self {
+    pub fn new(mut stream: StreamSpec) -> Self {
+        stream.max_consumers = Some(HUB_MAX_CONSUMERS);
         Self {
             stream,
             replicas: None,

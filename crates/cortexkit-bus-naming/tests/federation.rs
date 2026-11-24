@@ -25,6 +25,36 @@ fn sample_hub() -> HubName {
 }
 
 #[test]
+fn consumer_limits_match_stream_families() {
+    use cortexkit_bus_naming::CENSUS_MAX_CONSUMERS;
+
+    for hub in [HubKind::SelfHosted, HubKind::Hosted] {
+        for spec in hub_streams(&sample_box(), &sample_hub(), hub) {
+            assert_eq!(spec.stream.max_consumers, Some(256), "{}", spec.stream.name);
+        }
+    }
+
+    let account = AccountNames::derive("box_limits").unwrap();
+    for spec in shipped_streams(&account)
+        .into_iter()
+        .chain([fedout_stream()])
+    {
+        assert_eq!(spec.max_consumers, None, "{}", spec.name);
+    }
+
+    for bucket in MODULE_BUCKETS {
+        assert_eq!(
+            bucket.max_consumers(),
+            32,
+            "{}/{}",
+            bucket.owner,
+            bucket.name
+        );
+    }
+    assert_eq!(CENSUS_MAX_CONSUMERS, 128);
+}
+
+#[test]
 fn federation_hub_name_validates_the_short_name_and_entire_pin() {
     let short = "0f1e2d3c4b5a6978";
     let parsed: HubName = short.parse().unwrap();
@@ -438,7 +468,7 @@ fn federation_leaf_grant_is_unique_scoped_and_has_no_effect_subject() {
 }
 
 fn base_stream_json(stream: &StreamSpec) -> Value {
-    json!({
+    let mut document = json!({
         "kind": match stream.kind {
             StreamKind::Room => "room",
             StreamKind::Wake => "wake",
@@ -466,7 +496,11 @@ fn base_stream_json(stream: &StreamSpec) -> Value {
         "max_msgs_per_subject": stream.max_msgs_per_subject,
         "max_message_size": stream.max_message_size,
         "duplicate_window_seconds": stream.duplicate_window.map(|duration| duration.as_secs()),
-    })
+    });
+    if let Some(max_consumers) = stream.max_consumers {
+        document["max_consumers"] = json!(max_consumers);
+    }
+    document
 }
 
 fn stream_json(spec: &HubStreamSpec) -> Value {
