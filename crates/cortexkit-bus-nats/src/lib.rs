@@ -13,7 +13,8 @@ mod stream;
 mod work_queue;
 
 pub use connection::{
-    CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionState, NatsPermissionViolations,
+    CloseOutcome, ConnectConfig, NatsConnection, NatsConnectionEvent, NatsConnectionState,
+    NatsPermissionViolations,
 };
 pub use register::{NatsRegister, NatsRegisterWatch, NatsRegisterWatchChange};
 pub use stream::{NatsStream, NatsStreamCursor, Pulled, Undecodable};

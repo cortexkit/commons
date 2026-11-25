@@ -6,6 +6,7 @@ mod credentials;
 mod events;
 mod hub;
 mod live;
+mod outage;
 
 pub use buckets::{Bucket, BucketEntry, BucketItem, BucketWatch};
 pub use events::{EventDelivery, EventItem, EventReader, MalformedDelivery, MalformedReason};
@@ -32,6 +33,12 @@ use subc_client_rs::SubcConsumer;
 use tokio::sync::{oneshot, watch};
 
 use credentials::{CredentialManager, REPLACED_CREDENTIAL};
+use outage::{ConnectionObservation, OutageLog};
+
+/// `EnvFilter` directives that replace async-nats connector diagnostics with
+/// this client's outage and error logs. Other async-nats warnings and errors
+/// remain enabled. See the crate's Logging section to restore connector details.
+pub const ASYNC_NATS_LOG_DIRECTIVE: &str = "async_nats=warn,async_nats::connector=off";
 
 /// Errors contain refusal codes, not credential JWTs or nonce signatures.
 #[derive(Debug, thiserror::Error)]
@@ -158,13 +165,15 @@ impl BusClient {
 
 impl ManagedConnection {
     async fn connect(manager: Arc<CredentialManager>, timeout: Duration) -> Result<Self> {
+        let outages = Arc::new(OutageLog::new());
         let mut revisions = manager.revisions();
         let (connection, lifetime, recovered_at) = loop {
             let revision = *revisions.borrow_and_update();
             revision.check_hub_availability()?;
             let credential = manager.credential().await;
-            match connect_current(manager.clone(), &credential, timeout).await {
+            match connect_current(manager.clone(), &credential, timeout, &outages).await {
                 Ok((connection, lifetime)) if !revisions.has_changed().unwrap_or(false) => {
+                    lifetime.ready(&outages);
                     break (connection, lifetime, revision.recovered_at);
                 }
                 Ok((connection, mut lifetime)) => {
@@ -189,7 +198,8 @@ impl ManagedConnection {
             // replacement never cancels a renewal that is still in flight.
             tokio::select! {
                 () = renew_credentials(&manager) => {}
-                () = replace_connections(&manager, &shared, &changes, revisions, lifetime, timeout) => {}
+                () = replace_connections(&manager, &shared, &changes, revisions, lifetime, timeout, &outages) => {}
+                () = outages.report_long_outages() => {}
             }
             if manager.revision().check_hub_grant().is_err() {
                 let _ = snapshot(&shared).close(Duration::from_millis(50)).await;
@@ -278,6 +288,7 @@ async fn replace_connections(
     mut revisions: watch::Receiver<credentials::CredentialRevision>,
     mut lifetime: ConnectionLifetime,
     timeout: Duration,
+    outages: &Arc<OutageLog>,
 ) {
     loop {
         let credential_changed = tokio::select! {
@@ -286,15 +297,15 @@ async fn replace_connections(
                 true
             }
             _ = &mut lifetime.ended => {
-                if !lifetime.diagnostics.stale.load(Ordering::Relaxed) {
-                    tracing::warn!("bus connection closed for good; replacing it");
-                }
+                let diagnostics = &lifetime.diagnostics;
+                let ended = (!diagnostics.stale.load(Ordering::Relaxed))
+                    .then_some((outages.as_ref(), diagnostics.server_url.as_str()));
+                diagnostics.observation.finish(ended);
                 false
             }
         };
-        // Only a superseded connection gets the "errors are expected" line. A
-        // connection that ended on its own (an outage that exhausted its
-        // reconnects) already logged a warning, and its errors are real.
+        // Only a superseded connection gets the "errors are expected" line;
+        // an exhausted reconnect budget does not end an ongoing outage.
         if credential_changed || lifetime.diagnostics.stale.load(Ordering::Relaxed) {
             lifetime.log_retirement();
         }
@@ -317,7 +328,7 @@ async fn replace_connections(
                     continue;
                 }
             } else if let Ok((replacement, mut replacement_lifetime)) =
-                connect_current(manager.clone(), &credential, timeout).await
+                connect_current(manager.clone(), &credential, timeout, outages).await
             {
                 if revisions.has_changed().unwrap_or(false) {
                     replacement_lifetime.retire(&replacement).await;
@@ -326,6 +337,7 @@ async fn replace_connections(
                 *connection
                     .write()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = replacement;
+                replacement_lifetime.ready(outages);
                 lifetime = replacement_lifetime;
                 changes.send_replace(revision.number);
                 break;
@@ -528,6 +540,7 @@ struct ConnectionDiagnostics {
     stale: AtomicBool,
     id: u64,
     server_url: String,
+    observation: ConnectionObservation,
 }
 
 impl ConnectionDiagnostics {
@@ -546,6 +559,12 @@ struct ConnectionLifetime {
 }
 
 impl ConnectionLifetime {
+    fn ready(&self, outages: &OutageLog) {
+        self.diagnostics
+            .observation
+            .ready(outages, &self.diagnostics.server_url);
+    }
+
     fn log_retirement(&self) {
         tracing::info!(
             connection_id = self.diagnostics.id,
@@ -556,6 +575,7 @@ impl ConnectionLifetime {
 
     async fn retire(&mut self, connection: &NatsConnection) {
         self.diagnostics.stale.store(true, Ordering::Relaxed);
+        self.diagnostics.observation.finish(None);
         // A connected handler can drain; a reconnecting one can't read that
         // command. It skips further backoff now that its key can never sign.
         let closed = tokio::time::timeout(Duration::from_secs(2), async {
@@ -577,12 +597,14 @@ async fn connect_current(
     manager: Arc<CredentialManager>,
     credential: &credentials::Credential,
     timeout: Duration,
+    outages: &Arc<OutageLog>,
 ) -> Result<(NatsConnection, ConnectionLifetime)> {
     let public = credential.credential_public.clone();
     let diagnostics = Arc::new(ConnectionDiagnostics {
         stale: AtomicBool::new(false),
         id: NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed),
         server_url: credential.server_url.clone(),
+        observation: ConnectionObservation::default(),
     });
     let auth_diagnostics = diagnostics.clone();
     let delay_diagnostics = diagnostics.clone();
@@ -647,17 +669,27 @@ async fn connect_current(
     .max_reconnects(MAX_RECONNECTS);
     let mut config = ConnectConfig::new(&credential.credential_public)?;
     config.request_timeout = timeout;
-    let connection = if credential.inbox_prefix == config.inbox_prefix() {
-        NatsConnection::connect(credential.server_url.as_str(), options, config).await
-    } else {
-        NatsConnection::connect_with_inbox_prefix(
-            credential.server_url.as_str(),
-            options,
-            config,
-            &credential.inbox_prefix,
-        )
-        .await
-    }
+    let inbox_prefix =
+        (credential.inbox_prefix != config.inbox_prefix()).then(|| credential.inbox_prefix.clone());
+    let observation = diagnostics.clone();
+    let outages = Arc::downgrade(outages);
+    let connection = NatsConnection::connect_observed(
+        credential.server_url.as_str(),
+        options,
+        config,
+        inbox_prefix,
+        move |event| {
+            if let Some(outages) = outages.upgrade() {
+                observation.observation.observe(
+                    event,
+                    &outages,
+                    &observation.server_url,
+                    observation.stale.load(Ordering::Relaxed),
+                );
+            }
+        },
+    )
+    .await
     .map_err(Error::from)?;
     Ok((connection, ConnectionLifetime { diagnostics, ended }))
 }

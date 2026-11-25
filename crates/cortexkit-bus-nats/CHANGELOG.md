@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.9
+
+- Add `NatsConnection::connect_observed` to observe NATS events and initial
+  connection failures without changing the state and permission watchers.
+
 ## 0.5.8
 
 - Add `NatsStreamCursor::next_or_undecodable` to let callers settle messages

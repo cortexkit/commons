@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::{Client, ConnectOptions, Event, Subscriber, ToServerAddrs};
+use async_nats::{Client, ConnectError, ConnectOptions, Event, Subscriber, ToServerAddrs};
 use async_trait::async_trait;
 use cortexkit_bus_trait::{
     AsyncPermissionViolation, BusError, BusResult, PermissionViolationSource,
@@ -68,6 +68,18 @@ pub enum NatsConnectionState {
     Closed,
 }
 
+/// A diagnostic observed while establishing or using a NATS connection.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum NatsConnectionEvent<'a> {
+    /// An event from the underlying client's event callback.
+    Event(&'a Event),
+    /// The initial connection failed before the client could deliver events.
+    ConnectFailed(&'a ConnectError),
+}
+
+type EventObserver = Arc<dyn Fn(NatsConnectionEvent<'_>) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct NatsConnection {
     client: Client,
@@ -85,7 +97,7 @@ impl NatsConnection {
         config: ConnectConfig,
     ) -> BusResult<Self> {
         let inbox_prefix = config.inbox_prefix();
-        Self::connect_inner(addrs, options, config, Some(inbox_prefix)).await
+        Self::connect_inner(addrs, options, config, Some(inbox_prefix), None).await
     }
 
     /// Connects using a supplied prefix for request replies and pushed deliveries.
@@ -101,7 +113,33 @@ impl NatsConnection {
     ) -> BusResult<Self> {
         let inbox_prefix = inbox_prefix.into();
         validate_inbox_prefix(&inbox_prefix)?;
-        Self::connect_inner(addrs, options, config, Some(inbox_prefix)).await
+        Self::connect_inner(addrs, options, config, Some(inbox_prefix), None).await
+    }
+
+    /// Connects with an observer installed before the first connection attempt.
+    ///
+    /// Pass `None` to use the credential-scoped inbox prefix, or supply a prefix
+    /// as in [`Self::connect_with_inbox_prefix`]. The observer runs inline with
+    /// event delivery (or before returning an initial connection error), so it
+    /// should return promptly. State watchers and permission-violation readers
+    /// continue to receive their usual updates.
+    pub async fn connect_observed<A: ToServerAddrs>(
+        addrs: A,
+        options: ConnectOptions,
+        config: ConnectConfig,
+        inbox_prefix: Option<String>,
+        observer: impl Fn(NatsConnectionEvent<'_>) + Send + Sync + 'static,
+    ) -> BusResult<Self> {
+        let inbox_prefix = inbox_prefix.unwrap_or_else(|| config.inbox_prefix());
+        validate_inbox_prefix(&inbox_prefix)?;
+        Self::connect_inner(
+            addrs,
+            options,
+            config,
+            Some(inbox_prefix),
+            Some(Arc::new(observer)),
+        )
+        .await
     }
 
     async fn connect_inner<A: ToServerAddrs>(
@@ -109,6 +147,7 @@ impl NatsConnection {
         options: ConnectOptions,
         config: ConnectConfig,
         custom_inbox_prefix: Option<String>,
+        observer: Option<EventObserver>,
     ) -> BusResult<Self> {
         validate_credential_public(&config.credential_public)?;
         let set_inbox_prefix = custom_inbox_prefix.is_some();
@@ -117,10 +156,15 @@ impl NatsConnection {
         let event_sender = events.clone();
         let (connection_state, _) = watch::channel(NatsConnectionState::Connected);
         let state_sender = connection_state.clone();
+        let event_observer = observer.clone();
         let options = options.event_callback(move |event| {
             let event_sender = event_sender.clone();
             let state_sender = state_sender.clone();
+            let observer = event_observer.clone();
             async move {
+                if let Some(observer) = observer {
+                    observer(NatsConnectionEvent::Event(&event));
+                }
                 match &event {
                     Event::Connected => {
                         state_sender.send_replace(NatsConnectionState::Connected);
@@ -141,7 +185,12 @@ impl NatsConnection {
         } else {
             options
         };
-        let client = options.connect(addrs).await.map_err(map_connect_error)?;
+        let client = options.connect(addrs).await.map_err(|error| {
+            if let Some(observer) = observer {
+                observer(NatsConnectionEvent::ConnectFailed(&error));
+            }
+            map_connect_error(error)
+        })?;
         Ok(Self {
             client,
             events,
@@ -330,7 +379,7 @@ impl NatsConnection {
         options: ConnectOptions,
         config: ConnectConfig,
     ) -> BusResult<Self> {
-        Self::connect_inner(addrs, options, config, None).await
+        Self::connect_inner(addrs, options, config, None, None).await
     }
 }
 

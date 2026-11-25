@@ -1,8 +1,9 @@
 use async_nats::{Event, ServerError};
 use cortexkit_bus_trait::{BusError, ConnectionFailure};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::error::{map_connect_error, permission_violation};
-use crate::{ConnectConfig, NatsConnection, ASYNC_NATS_VERSION_FLOOR};
+use crate::{ConnectConfig, NatsConnection, NatsConnectionEvent, ASYNC_NATS_VERSION_FLOOR};
 
 #[test]
 fn declared_async_nats_floor_is_not_below_the_specification() {
@@ -44,6 +45,77 @@ async fn custom_inbox_prefix_refuses_invalid_subjects_before_connecting() {
         .await;
         assert!(matches!(result, Err(BusError::Denied { .. })), "{prefix:?}");
     }
+}
+
+#[tokio::test]
+async fn observed_connection_delivers_first_disconnect_without_a_late_subscription() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        drop(listener);
+        socket.write_all(b"INFO {}\r\n").await.unwrap();
+        let mut incoming = BufReader::new(&mut socket);
+        let mut line = String::new();
+        incoming.read_line(&mut line).await.unwrap();
+        assert!(line.starts_with("CONNECT "));
+        line.clear();
+        incoming.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "PING\r\n");
+        socket.write_all(b"PONG\r\n").await.unwrap();
+        // Close immediately after the handshake; the caller has not attached
+        // any watcher or event receiver to the returned connection.
+    });
+    let (send, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let connection = NatsConnection::connect_observed(
+        format!("nats://{address}"),
+        async_nats::ConnectOptions::new().max_reconnects(1),
+        ConnectConfig::new("UABC234").unwrap(),
+        None,
+        move |event| {
+            if let NatsConnectionEvent::Event(event) = event {
+                let _ = send.send(event.clone());
+            }
+        },
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+    let first_events = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        (events.recv().await, events.recv().await)
+    })
+    .await
+    .expect("observer receives both handshake and disconnect");
+    assert_eq!(
+        first_events,
+        (Some(Event::Connected), Some(Event::Disconnected))
+    );
+    assert_eq!(
+        *connection.connection_state().borrow(),
+        crate::NatsConnectionState::Disconnected
+    );
+}
+
+#[tokio::test]
+async fn observed_connection_reports_the_initial_error_kind_before_returning() {
+    let (send, mut failures) = tokio::sync::mpsc::unbounded_channel();
+    let result = NatsConnection::connect_observed(
+        "nats://[",
+        async_nats::ConnectOptions::new(),
+        ConnectConfig::new("UABC234").unwrap(),
+        None,
+        move |event| {
+            if let NatsConnectionEvent::ConnectFailed(error) = event {
+                send.send(error.kind()).unwrap();
+            }
+        },
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(
+        failures.try_recv(),
+        Ok(async_nats::ConnectErrorKind::ServerParse)
+    );
 }
 
 #[test]

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17
+
+- Report bus outages once when they start and once when they end, with periodic
+  errors for longer outages. Export `ASYNC_NATS_LOG_DIRECTIVE` for modules to
+  suppress redundant reconnect logs while retaining other NATS warnings and errors.
+
 ## 0.1.16
 
 - Report daemon refusals to open a route to ck-bus as `Error::RouteRefused`, with

@@ -16,6 +16,29 @@ bus.publish_event("fact.created", 1, None, "fact-42", "public fact").await?;
 # Ok(()) }
 ```
 
+## Logging
+
+An outage logs one WARN when the connection is lost and one INFO when it is
+restored, with the elapsed time and the number of reported failed retries. An
+outage still open after 60 seconds logs an ERROR, then another every 10 minutes.
+
+Add `ASYNC_NATS_LOG_DIRECTIVE` to the module's `EnvFilter` to suppress the
+dependency's reconnect and handshake logs while keeping its other WARN and
+ERROR logs. The bus client still reports non-transient connection failures by
+kind, but async-nats does not pass the server's handshake details to the
+reconnect callback. Set `async_nats::connector=debug` in place of
+`async_nats::connector=off` when investigating those failures.
+
+```rust
+use cortexkit_bus_client::ASYNC_NATS_LOG_DIRECTIVE;
+use tracing_subscriber::EnvFilter;
+
+let mut filter = EnvFilter::from_default_env();
+for directive in ASYNC_NATS_LOG_DIRECTIVE.split(',') {
+    filter = filter.add_directive(directive.parse().expect("valid bus log directive"));
+}
+```
+
 ## Credential lifecycle
 
 The client calls `ckbus.credential` over a subc route whose caller identity the
