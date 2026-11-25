@@ -253,10 +253,12 @@ pub struct Usage {
     pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_tokens: Option<u64>,
+    /// One copy of the item's images, billed on every model call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_tokens: Option<u64>,
+    /// Forwarded as reported; this does not count model calls for billing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passes: Option<u64>,
     #[serde(flatten)]

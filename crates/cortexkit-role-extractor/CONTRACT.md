@@ -179,7 +179,7 @@ the provider under its own key names, in the caller's order.
   checked before the rest of the field. In a reply, types decode open (§5).
 - [pinned] `instructions`, when present, is a non-empty string of at most
   `limits.max_instruction_bytes` bytes. Clairic accepted 20,000 characters
-  (probe 10); its own bound above that is §12's.
+  (probe 10) and 60,000 (probe b08); its own bound above that is §12's.
 - [pinned] The role never reorders fields.
 - [pinned] Options, with the constraints the provider's schema states. An
   option outside this table, or on a type the table doesn't list for it, is
@@ -191,9 +191,9 @@ the provider under its own key names, in the caller's order.
   | `decimals` | number, duration, list (with `items: number`) | integer 0–6 |
   | `unit` | number, duration | a non-empty string; for duration one of `seconds minutes hours days weeks months years` |
   | `items` | list (required) | `text`, `number` or `date` |
-  | `min`, `max` | estimate, forecast (both required) | number, or on an estimate an ISO date `YYYY-MM-DD` (both or neither); `min < max` |
-  | `step` | estimate, forecast | positive number; on a date estimate `month` (required there) |
-  | `scale` | estimate, forecast | `linear` or `log`; `log` requires `min > 0`; not on a date estimate |
+  | `min`, `max` | estimate, forecast (both required) | number, or an ISO date `YYYY-MM-DD` (both or neither); `min < max` |
+  | `step` | estimate, forecast | positive number; on a date estimate `month` or `year` (required there); not on a date forecast |
+  | `scale` | estimate, forecast | `linear` or `log`; `log` requires `min > 0`; not on a date estimate or a date forecast |
   | `null_threshold` | all | number in (0, 1] |
   | `horizon` | forecast (required) | integer 1–64 |
   | `interval` | forecast (required) | `step minute hour day week month quarter year` |
@@ -202,8 +202,9 @@ the provider under its own key names, in the caller's order.
   type; `instructions`; each option in the order written, its name then its
   value; each option its type requires, in the table's order; then the
   options together: `min` and `max` both numbers or both dates (naming
-  `max`); for dates, `min < max` (naming `max`), `step: month` (naming
-  `step`) and no `scale` (naming `scale`); for numbers, `min < max`
+  `max`); for dates, `min < max` (naming `max`), on an estimate `step: month`
+  or `step: year` and on a forecast no `step` (naming `step`), and no
+  `scale` (naming `scale`); for numbers, `min < max`
   (naming `max`), `scale: log` with `min > 0` (naming `scale`) and no
   `step: month` (naming `step`); and `decimals` on a list only with
   `items: number` (naming `decimals`). Clairic applies `decimals` to a list
@@ -211,9 +212,14 @@ the provider under its own key names, in the caller's order.
 - [pinned] Required-ness of `horizon` and `interval` is the role's choice:
   the provider documents no default for either.
 - [pinned] A date estimate is an `estimate` with `min` and `max` as ISO
-  dates and `step: month`, the one step it was measured with (probe 04);
-  its answer is ISO dates throughout (§5). The `year` step, and date bounds
-  on a `forecast`, are refused until they are measured (§12).
+  dates and `step: month` (probe 04) or `step: year` (probe b01); its
+  answer is ISO dates throughout (§5). On the `year` step every statistic
+  is the first day of a year, which can fall before `min`: probe b01 was
+  bounded 2026-03-01 to 2027-03-01 and answered `p10` 2026-01-01. The
+  role forwards such answers as given.
+- [pinned] A date forecast is a `forecast` with `min` and `max` as ISO
+  dates and no `step` (probe b02); its answer is ISO dates throughout
+  (§5).
 
 ## 5. Reply and answers
 
@@ -275,6 +281,8 @@ The reply is (`ExtractReply`):
   - A date estimate (§4) answers ISO dates in every statistic and every
     quantile: `value`, `mean`, `median`, `p10`, `p90` and the 99
     `quantiles` (probe 04).
+  - A date forecast (§4) answers ISO dates in `value`, `median`, `p10` and
+    `p90` and in every statistic of every `steps[]` entry (probe b02).
 - [pinned] **Spans** count Unicode scalar values of the state, and `end` is
   exclusive: `span: [start, end]`, and `spans` an array of them. Probe 02
   put a precomposed é, an emoji outside the Basic Multilingual Plane and
@@ -386,23 +394,46 @@ say what is this role's own.
   call, with the shared conservative estimate of RULES §5 (`spend` module):
 
   ```
-  input tokens = schema + max_passes x (state + images x image_tokens_each + overhead)
+  input tokens = schema + max_calls x (state + images x image_tokens_each + overhead)
+  schema       = fields + (max_calls + images) x schema_tokens_each + images x image_tokens_each
   cost         = input tokens x input price
-  max_passes   = the number of fields in the request
+  max_calls    = the number of fields in the request
   ```
 
-  `state` is the item's state and `schema` the canonical JSON of the
+  `state` is the item's state and `fields` the canonical JSON of the
   batch's fields, each the byte bound unless the module passes exact
-  counts. `image_tokens_each` and `overhead` are the module's bounds
-  (`ModuleBounds`), required. The rule for `max_passes` is the role's:
-  Clairic runs a request's fields in one or more passes, never more passes
-  than fields, and bills the schema once and the state on every pass, with
-  no fixed overhead. Probe 05 sent 40 text fields: 40 passes,
-  `input_tokens` 29,888 = `schema_tokens` 26,488 + 40 x `state_tokens` 85.
-  Probe 01 sent nine fields of mixed types: two passes, 1,150 = 776 + 2 x
-  187. The per-pass budget (`pass_tokens`) does not predict the passes: it
-  predicts 4 for probe 05. Images and overhead are charged on every pass,
-  which can only overstate them (§12).
+  counts in the provider's tokenizer. `image_tokens_each`,
+  `schema_tokens_each` and `overhead` are the module's bounds
+  (`ModuleBounds`), required.
+- [pinned] The schema term bounds the provider's own prompt, not only the
+  caller's fields. (The probes cited here and below are listed in §10.) Clairic's `schema_tokens` holds text it adds per field
+  and per image, so it can exceed the fields' bytes: probe b02's one field
+  was 170 bytes and counted 455, probe 03's 123 bytes counted 262. An
+  image raises it too: the one-field body counted 911 alone (probe b10),
+  1,190 with a 512x512 image (b04, `image_tokens` 256) and 1,958 with a
+  1,024x1,024 one (b05, `image_tokens` 1,024). The added text has no
+  documented size and grew between the probes (the same 40 fields counted
+  26,488 on 22 Oct and 36,936 on 25 Nov), so the module bounds it:
+  `schema_tokens_each` covers the provider's text for one field or one
+  image. Measured against the fields' byte bound, the most the provider
+  added for one field is 285 tokens (probe b02). A module that passes an
+  exact `fields` count shrinks that term, so its `schema_tokens_each` must
+  cover more, by an amount nobody has measured.
+- [pinned] The form is the role's: Clairic answers a
+  request's fields in one or more model calls, and bills the schema once
+  and the state and the item's images on every call, with no fixed
+  overhead:
+  `input_tokens = schema_tokens + calls x (state_tokens + image_tokens)`.
+  `calls` is at least 1 and has never exceeded the field count, so
+  `max_calls` makes the estimate an upper bound. Every measured reply fits
+  the form: probe 05, 40 fields in 40 calls, 29,888 = 26,488 + 40 x 85;
+  probe 01, nine fields grouped into 2 calls, 1,150 = 776 + 2 x 187;
+  probe b09, the same 40 fields, 40,336 = 36,936 + 40 x 85; probe b10, one
+  field, 996 = 911 + 1 x 85; probe b03, the 40 fields with one image,
+  46,376 = 40,416 + 40 x (85 + 64). `calls` is not reported: on 22 Oct
+  `passes` equalled it, but on 25 Nov `passes` read 4 on both the 40-field
+  and the one-field bodies (probes b09 and b10), so the role reads
+  neither `passes` nor `pass_tokens` as a call count.
 - [pinned] An item that would cross the effective ceiling gets the
   per-item error `cost_exceeded` and is not sent (`check_before_call`). A
   state counted exactly at or past `pass_tokens` gets `invalid_item`. A
@@ -483,10 +514,33 @@ detail and class, and which codes are stored and stop the call are RULES
   provider's own name (`"clairic"`), not forwarded; `state_text` is present
   when `return_state_text` asked for it; `usage` is `{state_tokens,
   image_tokens, schema_tokens, input_tokens, output_tokens, passes}`, with
-  `output_tokens` 0 on every measured reply.
-- Billing, exact on every measured success: `input_tokens = schema_tokens
-  + passes x state_tokens + image_tokens`. Passes follow the fields, at
-  most one per field (§6.9).
+  `output_tokens` 0 on every 22 Oct reply and up to 160 on the 25 Nov
+  replies.
+- Billing. Every measured success fits `input_tokens = schema_tokens +
+  calls x (state_tokens + image_tokens)`, where `calls` is the number of
+  model calls Clairic made for the request, between 1 and the field count
+  (§6.9). `image_tokens` reports one copy of the item's images, and
+  `input_tokens` counts it once per call. `schema_tokens` is the
+  provider's own figure and changes with its prompt: the same 40 fields
+  counted 26,488 on 22 Oct (probe 05) and 36,936 on 25 Nov (probe b09).
+  It can exceed the fields' canonical bytes, and §6.9's
+  `schema_tokens_each` bounds the difference.
+- Cloudflare charges `input_tokens / 110` neurons, rounded to hundredths,
+  and nothing for `output_tokens` or for a field's `retry_input_tokens`:
+  each 25 Nov reply's `cf-ai-neurons` header matched exactly (probes b01 to
+  b08; b03 reported 160 output and 24,088 retry tokens and was charged
+  421.60 neurons for 46,376 input tokens). So `input_tokens` is the measure
+  of an item's spend, and §6.9 estimates it.
+- Images count on every call, like the state: probe b03's one 64x64
+  image reported `image_tokens` 64 and added 40 x 64 to `input_tokens`.
+  Measured `image_tokens`:
+  64 for a 64x64 image (probe 12), 256 for 512x512 (probe b04) and 1,024
+  for 1,024x1,024 (probe b05), so the provider resizes or tiles images.
+  The module's `image_tokens_each` bound (§6.9) must cover the largest
+  image it admits.
+- Image spellings: a `data:image/png;base64,...` string and the object form
+  are both accepted and billed the same (probes 12 and b06). Two images on
+  one item were accepted, 64 tokens each (probe b07).
 - Limits: 8,192 tokens per pass (`clairic_limits::PASS_TOKENS`), the
   documented budget, which the role uses only to refuse an exactly counted
   state that cannot fit; images 4 MiB each and 8 MiB in total; a request
@@ -517,7 +571,22 @@ detail and class, and which codes are stored and stop the call are RULES
   - `10-long-instructions`: 20,000 characters of `instructions` accepted
     (§4);
   - `12-one-image`: one 64x64 PNG, `image_tokens` 64 and 41 more
-    `schema_tokens` (§12).
+    `schema_tokens` (§9).
+- A second live probe of `@cf/cloudflare/clairic`, 2026-11-25: ten
+  requests, bodies and replies captured byte for byte, named `b01` to
+  `b10` in `provider-replies.json`:
+  - `b01-date-year-step`: a date estimate with the `year` step (§4, §5);
+  - `b02-forecast-date-bounds`: a forecast with ISO date bounds (§4, §5);
+  - `b03-multi-pass-image`: the 40-field body of probe 05 with one image,
+    the state and the image counted on each of 40 calls (§6.9, §9);
+  - `b04-image-512`, `b05-image-1024`: image token counts (§9);
+  - `b06-image-data-url`: the `data:` URL spelling (§9);
+  - `b07-two-images`: two images on one item (§9);
+  - `b08-long-instructions-60k`: 60,000 characters of `instructions`
+    (§4);
+  - `b09-control-multi-pass`, `b10-control-one-pass`: probe 05's 40-field
+    body and probe 06's one-field body with no image, which settle the
+    billing form and show `passes` no longer counts calls (§6.9, §9).
 
 ## 11. Vectors and conformance
 
@@ -558,17 +627,16 @@ detail and class, and which codes are stored and stop the call are RULES
 Each is not yet measured. Until it is, the role states nothing about it,
 and where a request would depend on it, the request is refused.
 
-1. The `year` step of a date estimate, and date bounds on a `forecast`;
-   both are refused (§4).
-2. Whether images bill once or on every pass. Images were measured in a
-   one-pass request only; the estimate charges them on every pass (§6.9).
-3. The tokens an image larger than 64x64 costs. One point is measured: a
-   64x64 PNG reported `image_tokens` 64 and raised `schema_tokens` by 41
-   (probe 12). The module supplies `image_tokens_each` as a bound covering
-   both.
-4. Which image spellings Clairic accepts (a `data:` URL, the object form,
-   or both), and how many images an item may carry; the module forwards an
-   image as the caller wrote it.
-5. The provider's own bound on `instructions` above 20,000 characters,
-   which it accepted (probe 10); `limits.max_instruction_bytes` is the
+1. Whether Clairic can make more model calls than a request has fields.
+   It never has (§6.9), and the provider documents nothing about it; if it
+   did, §6.9's estimate would no longer be an upper bound.
+2. The tokens an image costs above 1,024x1,024, and the largest image it
+   can cost; `image_tokens_each` is the module's bound (§9).
+3. The size of the text Clairic adds to `schema_tokens` per field and per
+   image. It is not documented and changed between the probes;
+   `schema_tokens_each` is the module's bound (§6.9).
+4. More than two images on one item. The module's `images.max` comes from
+   its own source, and two is the most measured (probe b07).
+5. The provider's own bound on `instructions` above 60,000 characters,
+   which it accepted (probe b08); `limits.max_instruction_bytes` is the
    module's.

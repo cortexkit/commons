@@ -44,7 +44,8 @@ pub mod hosts {
 
 /// Clairic's limits, from Cloudflare's documentation.
 pub mod clairic_limits {
-    /// The token budget of one pass; fields beyond it run in more passes.
+    /// The documented budget of one pass, used to check whether an exactly
+    /// counted state fits. It does not determine the number of model calls.
     pub const PASS_TOKENS: u64 = 8192;
     /// Largest request body, in bytes (16 MiB).
     pub const MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;

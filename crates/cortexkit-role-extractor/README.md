@@ -6,8 +6,15 @@ options, items, images, reply size, the pre-call spend check), batch
 identity, the Cloudflare Workers AI Clairic request mapping, and the reply
 side: the Workers AI envelope, every answer shape, spans, and reading a
 provider reply into an item. The answer types decode open and keep the
-provider's number text. The reply side is pinned from a live probe
-of Clairic, whose reply bodies ship as `provider-replies.json`.
+provider's number text. `provider-replies.json` includes Clairic's replies
+from 22 October and 25 November 2026, and the raw requests for the ten
+November probes.
+
+For the pre-call spend check, supply all three bounds in
+`spend::ModuleBounds`: the tokens per image, the provider's schema text
+tokens per field or image, and the per-call overhead. Pass the
+`ItemSpendInput` from `spend::item_cost_input` to `spend::check_before_call`.
+See [§6.9 of the contract](CONTRACT.md#69-spend-guard) for the estimate.
 
 The contract's §12 lists what is still open; requests that depend on it
 are refused.

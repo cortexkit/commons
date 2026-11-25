@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Require extractor `0.3.0`. The public `Field`, `Item`, `Options`, and
+  `Answer` re-exports now come from that release. The tool wire format is
+  unchanged.
+
 ## 0.3.2
 
 - `llm.complete/v1` names its routing consumer:

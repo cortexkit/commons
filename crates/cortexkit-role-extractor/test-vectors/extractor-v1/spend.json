@@ -1,7 +1,8 @@
 {
-  "about": "The check before each item's provider call, with the shared conservative estimate: input tokens = fields + field count x (state + images x image_tokens_each + overhead), the fields as the byte length of their canonical JSON, the state as its byte length, and the module's bounds (illustrative), at role-describe.json's input price. The field count bounds the provider's passes, and the state bills on every pass, so a batch of three fields bills the state three times. A state counted exactly at or past a pass's budget (pass_tokens, 8192) cannot fit and is invalid_item, with or without a ceiling. A state whose byte bound reaches the budget is not refused for it: it is estimated like any other, so under a ceiling it is sent while the estimate fits, and with no ceiling it is sent. An item is sent while recorded spend plus the estimate stays within the ceiling; estimated_input_tokens is the estimate of each item that is sent.",
+  "about": "The check before each item's provider request: input tokens = schema + max_calls x (state + images x image_tokens_each + overhead), where schema = fields + (max_calls + images) x schema_tokens_each + images x image_tokens_each. Fields and state use the byte lengths of canonical fields JSON and state unless counted exactly. The module's bounds are illustrative; costs use role-describe.json's input price. The field count is the call bound, so the estimate for a batch of three fields bills the state and any images three times, in addition to the one-time schema. A state counted exactly at or past a pass's budget (pass_tokens, 8192) cannot fit and is invalid_item, with or without a ceiling. A state whose byte bound reaches the budget is not refused for it: it is estimated like any other, so under a ceiling it is sent while the estimate fits, and with no ceiling it is sent. An item is sent while recorded spend plus the estimate stays within the ceiling; estimated_input_tokens is the estimate of each item that is sent.",
   "bounds": {
     "image_tokens_each": 1500,
+    "schema_tokens_each": 285,
     "overhead_tokens": 10000
   },
   "cases": [
@@ -47,7 +48,7 @@
         ],
         "max_cost_usd": 1
       },
-      "estimated_input_tokens": 18227,
+      "estimated_input_tokens": 18512,
       "outcome": "sent"
     },
     {
@@ -66,7 +67,7 @@
           }
         ]
       },
-      "estimated_input_tokens": 18227,
+      "estimated_input_tokens": 18512,
       "outcome": "sent"
     },
     {
@@ -84,9 +85,9 @@
             "state": "Invoice 7"
           }
         ],
-        "max_cost_usd": 0.00110396
+        "max_cost_usd": 0.00113531
       },
-      "estimated_input_tokens": 10036,
+      "estimated_input_tokens": 10321,
       "outcome": "sent"
     },
     {
@@ -104,18 +105,18 @@
             "state": "Invoice 7"
           }
         ],
-        "max_cost_usd": 0.00110395
+        "max_cost_usd": 0.001135309
       },
       "outcome": {
         "error": {
           "code": "cost_exceeded",
           "class": "permanent",
-          "message": "answering this item could cost 0.00110396 USD, crossing max_cost_usd 0.00110395 after 0 USD spent"
+          "message": "answering this item could cost 0.00113531 USD, crossing max_cost_usd 0.001135309 after 0 USD spent"
         }
       }
     },
     {
-      "name": "every_field_may_bill_the_state_again",
+      "name": "every_field_may_need_its_own_model_call",
       "request": {
         "batch_id": "spend-1",
         "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
@@ -141,7 +142,7 @@
         "error": {
           "code": "cost_exceeded",
           "class": "permanent",
-          "message": "answering this item could cost 0.00331144 USD, crossing max_cost_usd 0.0011 after 0 USD spent"
+          "message": "answering this item could cost 0.00340549 USD, crossing max_cost_usd 0.0011 after 0 USD spent"
         }
       }
     }

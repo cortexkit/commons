@@ -1,5 +1,5 @@
 {
-  "about": "Admitted requests and the Clairic request each item maps to: one provider call per item, carrying the item's state, images and reference_date as written, every field of the batch key by key in the caller's order, and the batch options under the provider's names, both always sent. The first request uses each of the nine field types once; the second sends an image with an empty state, which is allowed only because the item carries an image. The third is the date estimate Clairic answered with ISO dates in live probe 04 of 2026-10-22: min and max as dates, with the month step.",
+  "about": "Admitted requests and the Clairic request each item maps to: one provider call per item, carrying the item's state, images and reference_date as written, every field of the batch key by key in the caller's order, and the batch options under the provider's names, both always sent. The first request uses each of the nine field types once; the second sends an image with an empty state, which is allowed only because the item carries an image. The last three requests use ISO date bounds: a month-step estimate (probe 04), a year-step estimate (probe b01), and a forecast with neither step nor scale (probe b02).",
   "requests": [
     {
       "name": "every_field_type",
@@ -252,6 +252,94 @@
               "min": "2026-03-01",
               "max": "2027-03-01",
               "step": "month"
+            }
+          },
+          "options": {
+            "include_quantiles": true,
+            "return_state_text": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "date_estimate_year_step",
+      "request": {
+        "batch_id": "renovation-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "completion_date": {
+            "type": "estimate",
+            "instructions": "Date the kitchen renovation will be finished",
+            "min": "2026-03-01",
+            "max": "2027-03-01",
+            "step": "year"
+          }
+        },
+        "items": [
+          {
+            "state": "The kitchen renovation began on 2026-02-02. Demolition and plumbing were expected to take about six weeks. The cabinets were ordered on 2026-03-01, and the supplier says cabinets usually arrive about two months after ordering; fitting takes two more weeks."
+          }
+        ],
+        "options": {
+          "quantiles": true
+        }
+      },
+      "provider_requests": [
+        {
+          "model": "@cf/cloudflare/clairic",
+          "state": "The kitchen renovation began on 2026-02-02. Demolition and plumbing were expected to take about six weeks. The cabinets were ordered on 2026-03-01, and the supplier says cabinets usually arrive about two months after ordering; fitting takes two more weeks.",
+          "fields": {
+            "completion_date": {
+              "type": "estimate",
+              "instructions": "Date the kitchen renovation will be finished",
+              "min": "2026-03-01",
+              "max": "2027-03-01",
+              "step": "year"
+            }
+          },
+          "options": {
+            "include_quantiles": true,
+            "return_state_text": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "date_forecast",
+      "request": {
+        "batch_id": "renovation-1",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "fields": {
+          "completion_date": {
+            "type": "forecast",
+            "instructions": "Date the kitchen renovation will be finished",
+            "min": "2026-03-01",
+            "max": "2027-03-01",
+            "horizon": 3,
+            "interval": "month"
+          }
+        },
+        "items": [
+          {
+            "state": "The kitchen renovation began on 2026-02-02. Demolition and plumbing were expected to take about six weeks. The cabinets were ordered on 2026-03-01, and the supplier says cabinets usually arrive about two months after ordering; fitting takes two more weeks."
+          }
+        ],
+        "options": {
+          "quantiles": true
+        }
+      },
+      "provider_requests": [
+        {
+          "model": "@cf/cloudflare/clairic",
+          "state": "The kitchen renovation began on 2026-02-02. Demolition and plumbing were expected to take about six weeks. The cabinets were ordered on 2026-03-01, and the supplier says cabinets usually arrive about two months after ordering; fitting takes two more weeks.",
+          "fields": {
+            "completion_date": {
+              "type": "forecast",
+              "instructions": "Date the kitchen renovation will be finished",
+              "min": "2026-03-01",
+              "max": "2027-03-01",
+              "horizon": 3,
+              "interval": "month"
             }
           },
           "options": {

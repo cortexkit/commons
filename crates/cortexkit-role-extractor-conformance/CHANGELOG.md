@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Pin and re-export extractor `0.3.0`, which accepts year steps and date
+  forecast bounds and whose spend API requires a per-field and per-image
+  schema text bound. The suite's test fake supplies the bound and doesn't
+  send when preparing an item's spend input fails. The conformance checks
+  are unchanged.
+
 ## 0.4.2
 
 - Accept subc-protocol 0.37.

@@ -62,9 +62,9 @@ pub const DURATION_UNITS: &[&str] = &[
 pub const LIST_ITEM_TYPES: &[&str] = &[types::TEXT, types::NUMBER, types::DATE];
 /// `scale` values.
 pub const SCALES: &[&str] = &["linear", "log"];
-/// The only `step` a date estimate takes: the one Clairic was measured
-/// with. The `year` step is not yet measured, so it is refused.
+/// The monthly `step` for a date estimate.
 pub const DATE_STEP: &str = "month";
+const DATE_STEPS: &[&str] = &[DATE_STEP, "year"];
 /// A forecast's `interval` values.
 pub const INTERVALS: &[&str] = &[
     "step", "minute", "hour", "day", "week", "month", "quarter", "year",
@@ -252,18 +252,11 @@ fn option_value_problem(name: &str, kind: &FieldType, value: &Value) -> Option<S
             _ => value.as_str().is_some_and(|unit| !unit.is_empty()),
         },
         options::ITEMS => one_of(value, LIST_ITEM_TYPES),
-        // Numbers, or on an estimate ISO dates: Clairic answers a date
-        // estimate with ISO dates (CONTRACT.md §4). A date forecast is not
-        // measured, so a forecast takes numbers only.
-        options::MIN | options::MAX => {
-            value.is_number() || (*kind == FieldType::Estimate && is_date(value))
-        }
-        // A positive number of steps, or `month` on an estimate; whether
-        // the bounds agree with the step is checked with the options
-        // together. The `year` step is not measured, so it is refused.
+        options::MIN | options::MAX => value.is_number() || is_date(value),
+        // Check the step against the bounds after checking each option's value.
         options::STEP => {
             value.as_f64().is_some_and(|step| step > 0.0)
-                || (*kind == FieldType::Estimate && value.as_str() == Some(DATE_STEP))
+                || (*kind == FieldType::Estimate && one_of(value, DATE_STEPS))
         }
         options::SCALE => one_of(value, SCALES),
         options::NULL_THRESHOLD => value
@@ -284,12 +277,12 @@ fn option_value_problem(name: &str, kind: &FieldType, value: &Value) -> Option<S
         }
         options::UNIT => "unit is a non-empty string".into(),
         options::ITEMS => format!("items is one of {}", LIST_ITEM_TYPES.join(", ")),
-        options::MIN | options::MAX if *kind == FieldType::Estimate => {
-            format!("{name} is a number or a date YYYY-MM-DD")
-        }
-        options::MIN | options::MAX => format!("{name} is a number"),
+        options::MIN | options::MAX => format!("{name} is a number or a date YYYY-MM-DD"),
         options::STEP if *kind == FieldType::Estimate => {
-            format!("step is a positive number, or {DATE_STEP} with date bounds")
+            format!(
+                "step is a positive number, or {} with date bounds",
+                DATE_STEPS.join(" or ")
+            )
         }
         options::STEP => "step is a positive number".into(),
         options::SCALE => format!("scale is one of {}", SCALES.join(", ")),
@@ -314,11 +307,11 @@ fn option_value_problem(name: &str, kind: &FieldType, value: &Value) -> Option<S
 /// 5. each option the type requires, in the table's order
 ///    (`fields.<id>.<option>`);
 /// 6. the options together: `min` and `max` both numbers or both dates
-///    (`fields.<id>.max`); `min < max` (`fields.<id>.max`); with number
-///    bounds, `scale: log` only with `min > 0` (`fields.<id>.scale`) and no
-///    `step: month` (`fields.<id>.step`); with date bounds (a date
-///    estimate), `step: month` and no `scale` (`fields.<id>.step`,
-///    `fields.<id>.scale`); and `decimals` on a list only of `items:
+///    (`fields.<id>.max`); `min < max` (`fields.<id>.max`); with date
+///    bounds, `step: month` or `step: year` for an estimate and no `step`
+///    for a forecast (`fields.<id>.step`), then no `scale` (`fields.<id>.scale`);
+///    with number bounds, `scale: log` only with `min > 0` (`fields.<id>.scale`)
+///    and no calendar step (`fields.<id>.step`); and `decimals` on a list only of `items:
 ///    number` (`fields.<id>.decimals`).
 pub fn check_field(
     id: &str,
@@ -411,10 +404,10 @@ pub fn check_field(
                 "a log scale needs min above 0",
             ));
         }
-        if field.options.get(options::STEP).and_then(Value::as_str) == Some(DATE_STEP) {
+        if let Some(step) = field.options.get(options::STEP).and_then(Value::as_str) {
             return Err(Refusal::invalid_params(
                 at(options::STEP),
-                format!("step {DATE_STEP} needs date bounds"),
+                format!("step {step} needs date bounds"),
             ));
         }
     }
@@ -430,9 +423,8 @@ pub fn check_field(
     Ok(())
 }
 
-/// The joint checks of a date estimate: `min` and `max` both dates or both
-/// numbers, and with dates `min < max`, `step: month` and no `scale`. A
-/// date estimate is measured with exactly these options (CONTRACT.md §4).
+/// Check that the bounds use the same type, then check the options that
+/// depend on having date bounds.
 fn check_date_bounds(field: &Field, at: &dyn Fn(&str) -> String) -> Result<(), Refusal> {
     let (Some(min), Some(max)) = (
         field.options.get(options::MIN),
@@ -457,11 +449,21 @@ fn check_date_bounds(field: &Field, at: &dyn Fn(&str) -> String) -> Result<(), R
             "max is above min",
         ));
     }
-    if field.options.get(options::STEP).and_then(Value::as_str) != Some(DATE_STEP) {
-        return Err(Refusal::invalid_params(
-            at(options::STEP),
-            format!("a date estimate takes step: {DATE_STEP}"),
-        ));
+    let step = field.options.get(options::STEP);
+    match field.kind {
+        FieldType::Estimate if !step.is_some_and(|step| one_of(step, DATE_STEPS)) => {
+            return Err(Refusal::invalid_params(
+                at(options::STEP),
+                format!("a date estimate takes step: {}", DATE_STEPS.join(" or ")),
+            ));
+        }
+        FieldType::Forecast if step.is_some() => {
+            return Err(Refusal::invalid_params(
+                at(options::STEP),
+                "a date forecast does not take step",
+            ));
+        }
+        _ => {}
     }
     if field.options.contains_key(options::SCALE) {
         return Err(Refusal::invalid_params(
@@ -566,13 +568,6 @@ mod tests {
             refused(json!({"type": "estimate", "min": 0, "max": 5, "scale": "log"})),
             "fields.f.scale"
         );
-        // `json!` sorts keys, so `max` is the first option checked here.
-        assert_eq!(
-            refused(
-                json!({"type": "forecast", "min": "2026-01-01", "max": "2026-12-31", "horizon": 3, "interval": "month"})
-            ),
-            "fields.f.max"
-        );
         assert_eq!(
             refused(json!({"type": "list", "items": "text", "decimals": 2})),
             "fields.f.decimals"
@@ -587,10 +582,16 @@ mod tests {
     }
 
     #[test]
-    fn a_date_estimate_takes_the_month_step_only() {
-        // The field Clairic answered with ISO dates in live probe 04.
-        let probe_04 = json!({"type": "estimate", "min": "2026-03-01", "max": "2027-03-01", "step": "month", "instructions": "Date the kitchen renovation will be finished"});
-        assert!(check_field("f", &field_of(probe_04), &all(), 100).is_ok());
+    fn a_date_estimate_requires_a_calendar_step() {
+        for step in ["month", "year"] {
+            let field =
+                json!({"type": "estimate", "min": "2026-03-01", "max": "2027-03-01", "step": step});
+            assert!(check_field("f", &field_of(field), &all(), 100).is_ok());
+            assert_eq!(
+                refused(json!({"type": "estimate", "min": 1, "max": 9, "step": step})),
+                "fields.f.step"
+            );
+        }
         let dates = |extra: Value| {
             let mut field = json!({"type": "estimate", "min": "2026-03-01", "max": "2027-03-01"});
             field
@@ -600,7 +601,7 @@ mod tests {
             refused(field)
         };
         assert_eq!(dates(json!({})), "fields.f.step");
-        assert_eq!(dates(json!({"step": "year"})), "fields.f.step");
+        assert_eq!(dates(json!({"step": "week"})), "fields.f.step");
         assert_eq!(dates(json!({"step": 1})), "fields.f.step");
         assert_eq!(
             dates(json!({"step": "month", "scale": "linear"})),
@@ -621,10 +622,6 @@ mod tests {
                 json!({"type": "estimate", "min": "2026-02-30", "max": "2027-03-01", "step": "month"})
             ),
             "fields.f.min"
-        );
-        assert_eq!(
-            refused(json!({"type": "estimate", "min": 1, "max": 9, "step": "month"})),
-            "fields.f.step"
         );
     }
 

@@ -1,5 +1,5 @@
 {
-  "about": "invalid_params refusals, each naming the narrowest path that applies, in the order admission checks them: every object of the request is closed, a field's type is checked before the rest of the field, its options in the order written (the requests here are written with sorted keys), then the options its type requires, then the options together. A date estimate (min and max as dates) takes the month step, the one Clairic was measured with; the year step is refused until it is measured, and the month step needs date bounds. The words after the colon of malformed_base64 are the base64 decoder's own.",
+  "about": "invalid_params refusals, each naming the narrowest path that applies, in the order admission checks them: every object of the request is closed, a field's type is checked before the rest of the field, its options in the order written (the requests here are written with sorted keys), then the options its type requires, then the options together. A date estimate requires the month or year step, and a date forecast refuses a step before a scale. Calendar steps need date bounds. The words after the colon of malformed_base64 are the base64 decoder's own.",
   "catalog": [
     {
       "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
@@ -639,7 +639,7 @@
       }
     },
     {
-      "name": "date_estimate_without_the_month_step",
+      "name": "date_estimate_without_step",
       "request": {
         "batch_id": "paths-1",
         "fields": {
@@ -658,7 +658,7 @@
       },
       "refusal": {
         "code": "invalid_params",
-        "message": "a date estimate takes step: month",
+        "message": "a date estimate takes step: month or year",
         "detail": {
           "class": "permanent",
           "field": "fields.due.step"
@@ -666,15 +666,16 @@
       }
     },
     {
-      "name": "year_step_not_yet_measured",
+      "name": "date_forecast_with_mixed_bounds",
       "request": {
         "batch_id": "paths-1",
         "fields": {
           "due": {
+            "horizon": 3,
+            "interval": "month",
             "max": "2026-12-31",
-            "min": "2026-01-01",
-            "step": "year",
-            "type": "estimate"
+            "min": 1,
+            "type": "forecast"
           }
         },
         "items": [
@@ -686,10 +687,102 @@
       },
       "refusal": {
         "code": "invalid_params",
-        "message": "step is a positive number, or month with date bounds",
+        "message": "min and max are both numbers or both dates",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.max"
+        }
+      }
+    },
+    {
+      "name": "date_forecast_checks_range_before_step_and_scale",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "due": {
+            "horizon": 3,
+            "interval": "month",
+            "max": "2026-12-31",
+            "min": "2027-01-01",
+            "scale": "linear",
+            "step": 1,
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "max is above min",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.max"
+        }
+      }
+    },
+    {
+      "name": "date_forecast_checks_step_before_scale",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "due": {
+            "horizon": 3,
+            "interval": "month",
+            "max": "2026-12-31",
+            "min": "2026-01-01",
+            "scale": "linear",
+            "step": 1,
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a date forecast does not take step",
         "detail": {
           "class": "permanent",
           "field": "fields.due.step"
+        }
+      }
+    },
+    {
+      "name": "date_forecast_with_scale",
+      "request": {
+        "batch_id": "paths-1",
+        "fields": {
+          "due": {
+            "horizon": 3,
+            "interval": "month",
+            "max": "2026-12-31",
+            "min": "2026-01-01",
+            "scale": "linear",
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "scale applies to number bounds",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.scale"
         }
       }
     },

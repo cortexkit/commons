@@ -1,5 +1,5 @@
 {
-  "about": "One refusal per admission code, plus the kindless catalog row: a row with no kind is model_not_extractor without detail.kind, never model_unknown and never an invented kind. Each refusal writes nothing. invalid_params and the catalog codes come from admission's own checks against catalog; the rest come from state the request alone does not show: batch_id_reuse from a recorded batch whose fields differ, account_walled from the module's own spend guard, batch_in_progress from a call holding the batch, and the last four from the call's first provider call (a 401, a 404 or Workers AI 3042, Workers AI 3036, and 5035, 5016 or 3023). image_unavailable and image_source_unavailable come from a module that declares image_reference in role.describe, resolving an item image given as a reference: the handle is unknown, expired or not this caller's, or the module that issued it did not answer. Both name the image.",
+  "about": "One refusal per admission code, plus two invalid_params cases for date forecasts and the kindless catalog row: a row with no kind is model_not_extractor without detail.kind, never model_unknown and never an invented kind. Each refusal writes nothing. invalid_params and the catalog codes come from admission's own checks against catalog; the rest come from state the request alone does not show: batch_id_reuse from a recorded batch whose fields differ, account_walled from the module's own spend guard, batch_in_progress from a call holding the batch, and the last four from the call's first provider call (a 401, a 404 or Workers AI 3042, Workers AI 3036, and 5035, 5016 or 3023). image_unavailable and image_source_unavailable come from a module that declares image_reference in role.describe, resolving an item image given as a reference: the handle is unknown, expired or not this caller's, or the module that issued it did not answer. Both name the image.",
   "catalog": [
     {
       "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
@@ -37,6 +37,66 @@
         "detail": {
           "class": "permanent",
           "field": "fields.total.type"
+        }
+      }
+    },
+    {
+      "name": "date_forecast_with_step",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "due": {
+            "horizon": 3,
+            "interval": "month",
+            "max": "2026-12-31",
+            "min": "2026-01-01",
+            "step": 1,
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "a date forecast does not take step",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.step"
+        }
+      }
+    },
+    {
+      "name": "date_forecast_with_scale",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "due": {
+            "horizon": 3,
+            "interval": "month",
+            "max": "2026-12-31",
+            "min": "2026-01-01",
+            "scale": "linear",
+            "type": "forecast"
+          }
+        },
+        "items": [
+          {
+            "state": "Invoice 7: total 12.50 EUR"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "invalid_params",
+        "message": "scale applies to number bounds",
+        "detail": {
+          "class": "permanent",
+          "field": "fields.due.scale"
         }
       }
     },

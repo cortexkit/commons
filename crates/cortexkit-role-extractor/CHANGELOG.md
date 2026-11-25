@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0
+
+- Accept `year` steps on date estimates and ISO date bounds on forecasts.
+  Date forecasts take neither `step` nor `scale`.
+- Record the 25 November Clairic captures, ten requests with their
+  replies, and check every measured success against the billing form the
+  contract now states: the schema is billed once, and the state and the
+  item's images on each model call, with the field count bounding the
+  calls. The provider's reported `passes` no longer counts calls.
+- Bound the provider's own schema text, per field and per image, in the
+  spend estimate. The estimate also counts one copy of the image tokens
+  in the schema, apart from those billed on each possible model call.
+- Breaking Rust API change: `ModuleBounds` requires `schema_tokens_each`.
+  `item_cost_input` returns `ItemSpendInput` instead of the shared
+  `ItemCostInput`, so `check_before_call` can handle a schema overflow
+  like any other estimate overflow. The wire format is unchanged.
+
 ## 0.2.3
 
 - Accept subc-protocol 0.37.

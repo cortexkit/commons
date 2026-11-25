@@ -91,8 +91,8 @@ pub struct ModelEntry {
     pub max_fields: u64,
     /// The types `extract.run` accepts for this model, exactly.
     pub field_types: Vec<FieldType>,
-    /// The provider's per-pass token budget; fields beyond it run in more
-    /// passes.
+    /// The provider's per-pass token budget, used to check whether an
+    /// exactly counted state fits.
     pub pass_tokens: u64,
     /// The module's bound on one answer's encoded size, in bytes. The
     /// module never forwards a larger answer (`answer_too_large`), so the

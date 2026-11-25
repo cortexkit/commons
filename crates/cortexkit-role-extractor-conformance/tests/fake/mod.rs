@@ -29,7 +29,7 @@ use async_trait::async_trait;
 use cortexkit_role_extractor_conformance::{
     wire::{
         describe::{ImageLimits, ImageReferenceSupport, Limits, ModelEntry, Price, RoleDescribe},
-        errors::{ItemError, Refusal, PROVIDER_ERROR},
+        errors::{ItemError, Refusal, INVALID_ITEM, PROVIDER_ERROR},
         field::{types, FieldType},
         identity::{digest, BatchIdentity},
         image::{DecodedImage, ImageReference, ResolveFailure},
@@ -64,6 +64,7 @@ const MAX_ANSWER_BYTES: u64 = 65_536;
 const MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
 const BOUNDS: ModuleBounds = ModuleBounds {
     image_tokens_each: 1000,
+    schema_tokens_each: 285,
     overhead_tokens: 200,
 };
 
@@ -377,17 +378,25 @@ impl FakeModule {
         let mut items = Vec::new();
         let mut estimated_nanos = 0;
         for (index, item) in request.items.iter().enumerate() {
-            // `None` only for a batch with no fields, which a skipped count
-            // check let through.
-            let input = item_cost_input(&request, index, &model, BOUNDS, None, None).ok();
-            if let (false, Some(input)) = (self.defects.ceiling_ignored, &input) {
-                if let Err(error) = check_before_call(input, rate, 0, ceiling) {
+            let input = match item_cost_input(&request, index, &model, BOUNDS, None, None) {
+                Ok(input) => input,
+                Err(error) => {
+                    items.push(ItemResult::failed(
+                        index as u64,
+                        ItemError::for_code(INVALID_ITEM, error.to_string()),
+                    ));
+                    continue;
+                }
+            };
+            if !self.defects.ceiling_ignored {
+                if let Err(error) = check_before_call(&input, rate, 0, ceiling) {
                     items.push(ItemResult::failed(index as u64, error));
                     continue;
                 }
             }
-            estimated_nanos += input
-                .and_then(|input| check_before_call(&input, rate, 0, None).ok().flatten())
+            estimated_nanos += check_before_call(&input, rate, 0, None)
+                .ok()
+                .flatten()
                 .map_or(0, |estimate| estimate.cost_nanos);
             let mut body = ProviderRequest::for_item(&request, index, PROVIDER_MODEL)
                 .expect("the item exists");

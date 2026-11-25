@@ -8,14 +8,17 @@ use cortexkit_role_extractor::{
     errors::{self, ErrorClass, ItemError, Refusal},
     field::{types, Field, FieldType},
     identity::BatchIdentity,
-    image::ResolveFailure,
+    image::{Image, InlineImage, ResolveFailure},
     provider::{clairic_limits, models, read_reply, ProviderRequest},
     reply::{span_byte_range, Answer, ExtractReply, ItemResult},
     request::{
-        admit, estimated_reply_bytes, resolve_item_images, CatalogRow, ExtractRequest,
+        admit, estimated_reply_bytes, resolve_item_images, CatalogRow, ExtractRequest, Item,
         REPLY_FRAME_BYTES,
     },
-    spend::{check_before_call, item_cost_input, usd_to_nanos, ModuleBounds, Rounding},
+    spend::{
+        check_before_call, item_cost_input, usd_to_nanos, ItemSpendInput, ModuleBounds, Rounding,
+        TokenCount,
+    },
     vectors, IndexMap,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -159,7 +162,7 @@ fn every_path_refusal_is_what_admission_builds() {
 }
 
 #[test]
-fn one_admission_refusal_per_code_and_the_kindless_row() {
+fn admission_refusals_cover_every_code_and_date_forecast_options() {
     let file: Refusals = exact("admission-refusals.json");
     let describe = describe();
     let mut expected: Vec<&str> = errors::ADMISSION_CODES.to_vec();
@@ -168,6 +171,10 @@ fn one_admission_refusal_per_code_and_the_kindless_row() {
         .position(|code| *code == errors::MODEL_NOT_EXTRACTOR)
         .unwrap();
     expected.insert(at + 1, "model_not_extractor_kindless");
+    expected.splice(
+        1..1,
+        ["date_forecast_with_step", "date_forecast_with_scale"],
+    );
     let names: Vec<&str> = file
         .refusals
         .iter()
@@ -187,7 +194,9 @@ fn one_admission_refusal_per_code_and_the_kindless_row() {
             errors::INVALID_PARAMS
             | errors::MODEL_UNKNOWN
             | errors::MODEL_NOT_EXTRACTOR
-            | "model_not_extractor_kindless" => admitted.unwrap_err(),
+            | "model_not_extractor_kindless"
+            | "date_forecast_with_step"
+            | "date_forecast_with_scale" => admitted.unwrap_err(),
             errors::IMAGE_UNAVAILABLE | errors::IMAGE_SOURCE_UNAVAILABLE => {
                 // A module that does not declare image_reference refuses
                 // the reference as an unsupported image; one that declares
@@ -240,7 +249,12 @@ fn one_admission_refusal_per_code_and_the_kindless_row() {
         };
         assert_eq!(&built, refusal, "{name}");
     }
-    let kindless = &file.refusals[at + 1].refusal;
+    let kindless = &file
+        .refusals
+        .iter()
+        .find(|case| case.name == "model_not_extractor_kindless")
+        .unwrap()
+        .refusal;
     assert_eq!(kindless.code, errors::MODEL_NOT_EXTRACTOR);
     assert_eq!(kindless.detail.kind, None);
 }
@@ -371,6 +385,7 @@ struct Spend {
 #[derive(Deserialize, Serialize)]
 struct Bounds {
     image_tokens_each: u64,
+    schema_tokens_each: u64,
     overhead_tokens: u64,
 }
 
@@ -407,6 +422,7 @@ fn the_pre_call_check_sends_or_refuses_each_item() {
     assert_eq!(rate, Some(110_000_000));
     let bounds = ModuleBounds {
         image_tokens_each: file.bounds.image_tokens_each,
+        schema_tokens_each: file.bounds.schema_tokens_each,
         overhead_tokens: file.bounds.overhead_tokens,
     };
     for case in &file.cases {
@@ -436,7 +452,8 @@ fn the_pre_call_check_sends_or_refuses_each_item() {
                     "{}",
                     case.name
                 );
-                assert_eq!(estimate.max_passes, case.request.fields.len() as u64);
+                let max_calls = case.request.fields.len() as u64;
+                assert_eq!(estimate.max_passes, max_calls);
             }
             Outcome::Error(error) => {
                 assert_eq!(decided.as_ref().err(), Some(error), "{}", case.name);
@@ -497,6 +514,9 @@ struct ReplyCase {
     fields: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sent: Option<Sent>,
+    /// The raw request body, where the capture includes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request: Option<String>,
     body: String,
     item: ItemResult,
 }
@@ -530,8 +550,17 @@ fn text(raw: Option<&RawValue>) -> &str {
 #[test]
 fn every_provider_reply_reads_as_its_item() {
     let file = replies();
-    assert_eq!(file.replies.len(), 12, "every probe request has its reply");
+    assert_eq!(file.replies.len(), 22, "every probe request has its reply");
     for case in &file.replies {
+        if case.name.starts_with('b') {
+            let request: Value = serde_json::from_str(case.request.as_deref().unwrap()).unwrap();
+            assert_eq!(
+                request["fields"].as_object().unwrap().len() as u64,
+                case.fields,
+                "{}",
+                case.name
+            );
+        }
         let read = match read_reply(case.status, &case.body) {
             Ok(result) => result.into_item(0),
             Err(error) => ItemResult::failed(0, error),
@@ -548,43 +577,108 @@ fn every_provider_reply_reads_as_its_item() {
 }
 
 #[test]
-fn every_success_bills_the_schema_once_and_the_state_per_pass() {
+fn every_measured_success_bills_state_and_images_per_model_call() {
     let file = replies();
-    for case in file.replies.iter().filter(|case| case.status == 200) {
+    let describe = describe();
+    let model = &describe.models[0];
+    // Each row lists the observed call count, image count, and tokens for
+    // one image. The reported `passes` is not the call count.
+    let cases = [
+        ("01-all-types", 2, 0, 0),
+        ("02-span-offsets", 1, 0, 0),
+        ("03-list-decimals", 1, 0, 0),
+        ("04-date-estimate", 1, 0, 0),
+        ("05-multi-pass", 40, 0, 0),
+        ("06-one-pass-control", 1, 0, 0),
+        ("07-multi-pass-reversed", 40, 0, 0),
+        ("10-long-instructions", 1, 0, 0),
+        ("12-one-image", 1, 1, 64),
+        ("b01-date-year-step", 1, 0, 0),
+        ("b02-forecast-date-bounds", 1, 0, 0),
+        ("b03-multi-pass-image", 40, 1, 64),
+        ("b04-image-512", 1, 1, 256),
+        ("b05-image-1024", 1, 1, 1024),
+        ("b06-image-data-url", 1, 1, 64),
+        ("b07-two-images", 1, 2, 64),
+        ("b08-long-instructions-60k", 1, 0, 0),
+        ("b09-control-multi-pass", 40, 0, 0),
+        ("b10-control-one-pass", 1, 0, 0),
+    ];
+    assert!(
+        file.replies
+            .iter()
+            .filter(|case| case.status == 200)
+            .map(|case| case.name.as_str())
+            .eq(cases.iter().map(|&(name, ..)| name)),
+        "the billing table covers every measured success in capture order"
+    );
+    for (name, calls, images, image_tokens_each) in cases {
+        let case = reply(&file, name);
         let usage = case.item.usage.as_ref().expect("a success reports usage");
         let count =
             |n: Option<u64>| n.unwrap_or_else(|| panic!("{}: a count is absent", case.name));
-        let passes = count(usage.passes);
-        assert_eq!(
+        let max_calls = case.fields;
+        assert!((1..=max_calls).contains(&calls), "{name}: {calls} calls");
+        let (schema, state, image, input_tokens) = (
+            count(usage.schema_tokens),
+            count(usage.state_tokens),
+            count(usage.image_tokens),
             count(usage.input_tokens),
-            count(usage.schema_tokens)
-                + passes * count(usage.state_tokens)
-                + count(usage.image_tokens),
-            "{}",
-            case.name
         );
+        assert_eq!(input_tokens, schema + calls * (state + image), "{name}");
+        assert_eq!(image, images * image_tokens_each, "{name}");
+        if !name.starts_with('b') {
+            assert_eq!(usage.output_tokens, Some(0), "{name}");
+        }
+
+        // With exact token counts, only the number of fields and images
+        // matters; the estimator does not inspect their contents.
+        let fields = (0..max_calls)
+            .map(|n| (format!("f{n}"), Field::new(FieldType::Text)))
+            .collect();
+        let mut item = Item::new("");
+        if images != 0 {
+            item.images = Some(vec![
+                Image::Inline(InlineImage::new("image/png", ""));
+                images as usize
+            ]);
+        }
+        let request = ExtractRequest::new(name, &model.model, fields, vec![item]);
+        let bounds = ModuleBounds {
+            image_tokens_each,
+            schema_tokens_each: 0,
+            overhead_tokens: 0,
+        };
+        let input = item_cost_input(&request, 0, model, bounds, Some(state), Some(schema)).unwrap();
+        let ItemSpendInput::Estimable(cost) = input else {
+            panic!("{name}: the schema fits in the estimate");
+        };
+        let expected_schema = if image == 0 {
+            TokenCount::Exact(schema)
+        } else {
+            TokenCount::Bound(schema + image)
+        };
+        assert_eq!(cost.schema, expected_schema, "{name}");
+        let estimate = check_before_call(&input, None, 0, None).unwrap().unwrap();
+        assert_eq!(estimate.max_passes, max_calls, "{name}");
         assert!(
-            passes >= 1 && passes <= case.fields,
-            "{}: {passes} passes",
-            case.name
+            estimate.input_tokens >= input_tokens,
+            "{name}: estimate {} is below {input_tokens}",
+            estimate.input_tokens
         );
-        assert_eq!(usage.output_tokens, Some(0), "{}", case.name);
     }
-    // 40 fields ran in 40 passes, whichever order they were sent in.
+    // Field order changes neither answers nor usage for the 40-field probes.
     let forward = reply(&file, "05-multi-pass");
     let reversed = reply(&file, "07-multi-pass-reversed");
     assert_eq!(forward.item.usage, reversed.item.usage);
-    assert_eq!(forward.item.usage.as_ref().unwrap().passes, Some(40));
     assert_eq!(answers(forward), answers(reversed));
-    assert_eq!(
-        reply(&file, "01-all-types")
-            .item
-            .usage
-            .as_ref()
-            .unwrap()
-            .passes,
-        Some(2)
-    );
+    // Both controls report 4 passes despite taking different numbers of calls.
+    for name in ["b09-control-multi-pass", "b10-control-one-pass"] {
+        assert_eq!(
+            reply(&file, name).item.usage.as_ref().unwrap().passes,
+            Some(4)
+        );
+    }
     // One 64x64 PNG on probe 06's request: 64 image tokens, 41 schema tokens.
     let plain = reply(&file, "06-one-pass-control")
         .item
@@ -597,6 +691,220 @@ fn every_success_bills_the_schema_once_and_the_state_per_pass() {
         image.schema_tokens.unwrap() - plain.schema_tokens.unwrap(),
         41
     );
+}
+
+fn measured_spend_request(file: &ProviderReplies, case: &ReplyCase, model: &str) -> ExtractRequest {
+    #[derive(Deserialize)]
+    struct CapturedRequest {
+        fields: IndexMap<String, Field>,
+        #[serde(default)]
+        images: Vec<serde::de::IgnoredAny>,
+    }
+
+    let decode = |case: &ReplyCase| -> CapturedRequest {
+        serde_json::from_str(case.request.as_deref().expect("the request was captured")).unwrap()
+    };
+    let (fields, images) = if case.request.is_some() {
+        let captured = decode(case);
+        (captured.fields, captured.images.len())
+    } else if let Some(sent) = &case.sent {
+        (sent.fields.clone(), 0)
+    } else {
+        // The October captures without request bodies used the same fields
+        // as the November controls below. Canonical JSON ignores the field
+        // reversal in 07, and 12 added one image to 06's request.
+        match case.name.as_str() {
+            "05-multi-pass" | "07-multi-pass-reversed" => {
+                (decode(reply(file, "b09-control-multi-pass")).fields, 0)
+            }
+            "06-one-pass-control" | "12-one-image" => (
+                decode(reply(file, "b10-control-one-pass")).fields,
+                usize::from(case.name == "12-one-image"),
+            ),
+            name => panic!("{name}: no fields were recorded"),
+        }
+    };
+    assert_eq!(fields.len() as u64, case.fields, "{}", case.name);
+
+    // The test passes the measured state count; the estimate needs only
+    // the number of images, not their bytes.
+    let mut item = Item::new("");
+    if images != 0 {
+        item.images = Some(vec![
+            Image::Inline(InlineImage::new("image/png", ""));
+            images
+        ]);
+    }
+    ExtractRequest::new(&case.name, model, fields, vec![item])
+}
+
+#[test]
+fn measured_spend_covers_every_success_with_recorded_fields() {
+    let file = replies();
+    let describe = describe();
+    let model = &describe.models[0];
+    // The recorded or cross-referenced fields, in canonical JSON bytes.
+    let cases = [
+        ("01-all-types", 974),
+        ("02-span-offsets", 77),
+        ("03-list-decimals", 123),
+        ("04-date-estimate", 154),
+        ("05-multi-pass", 51_089),
+        ("06-one-pass-control", 1_272),
+        ("07-multi-pass-reversed", 51_089),
+        ("12-one-image", 1_272),
+        ("b01-date-year-step", 153),
+        ("b02-forecast-date-bounds", 170),
+        ("b03-multi-pass-image", 51_089),
+        ("b04-image-512", 1_272),
+        ("b05-image-1024", 1_272),
+        ("b06-image-data-url", 1_272),
+        ("b07-two-images", 1_272),
+        ("b08-long-instructions-60k", 60_050),
+        ("b09-control-multi-pass", 51_089),
+        ("b10-control-one-pass", 1_272),
+    ];
+    assert!(
+        file.replies
+            .iter()
+            .filter(|case| case.status == 200 && case.name != "10-long-instructions")
+            .map(|case| case.name.as_str())
+            .eq(cases.iter().map(|&(name, _)| name)),
+        "probe 10 is the only success whose fields were not recorded"
+    );
+    for (name, fields_bytes) in cases {
+        let case = reply(&file, name);
+        let request = measured_spend_request(&file, case, &model.model);
+        let usage = case.item.usage.as_ref().unwrap();
+        let images = request.items[0]
+            .images
+            .as_ref()
+            .map_or(0, |images| images.len() as u64);
+        let image_tokens = usage.image_tokens.unwrap();
+        let image_tokens_each = image_tokens.checked_div(images).unwrap_or(0);
+        assert_eq!(images * image_tokens_each, image_tokens, "{name}");
+        let bounds = ModuleBounds {
+            image_tokens_each,
+            schema_tokens_each: 285,
+            overhead_tokens: 0,
+        };
+        let state = usage.state_tokens.unwrap();
+        let input = item_cost_input(&request, 0, model, bounds, Some(state), None).unwrap();
+        let ItemSpendInput::Estimable(cost) = input else {
+            panic!("{name}: the schema fits in the estimate");
+        };
+        assert_eq!(
+            cost.schema,
+            TokenCount::Bound(fields_bytes + (case.fields + images) * 285 + image_tokens),
+            "{name}"
+        );
+        let estimate = check_before_call(&input, None, 0, None).unwrap().unwrap();
+        let reported = usage.input_tokens.unwrap();
+        let margin = estimate
+            .input_tokens
+            .checked_sub(reported)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name}: estimate {} is below {reported}",
+                    estimate.input_tokens
+                )
+            });
+        println!("{name}: {margin} tokens above reported input");
+    }
+}
+
+#[test]
+fn measured_spend_b02_needs_a_per_field_schema_bound() {
+    let file = replies();
+    let case = reply(&file, "b02-forecast-date-bounds");
+    let describe = describe();
+    let model = &describe.models[0];
+    let request = measured_spend_request(&file, case, &model.model);
+    let usage = case.item.usage.as_ref().unwrap();
+    let state = usage.state_tokens.unwrap();
+    let reported = usage.input_tokens.unwrap();
+    let estimate = |schema_tokens_each| {
+        let bounds = ModuleBounds {
+            image_tokens_each: 0,
+            schema_tokens_each,
+            overhead_tokens: 0,
+        };
+        let input = item_cost_input(&request, 0, model, bounds, Some(state), None).unwrap();
+        check_before_call(&input, None, 0, None)
+            .unwrap()
+            .unwrap()
+            .input_tokens
+    };
+    assert!(estimate(0) < reported, "fields alone underestimate b02");
+    let bounded = estimate(285);
+    assert!(
+        bounded >= reported,
+        "b02: estimate {bounded} is below {reported}"
+    );
+}
+
+#[test]
+fn november_neuron_headers_charge_only_reported_input_tokens() {
+    let file = replies();
+    // Cloudflare's `cf-ai-neurons` response headers, which report each request's
+    // charge, as captured and expressed in hundredths of a neuron.
+    for (name, hundredths, output_tokens) in [
+        ("b01-date-year-step", 274, 0),
+        ("b02-forecast-date-bounds", 474, 0),
+        ("b03-multi-pass-image", 42_160, 160),
+        ("b04-image-512", 1_392, 4),
+        ("b05-image-1024", 2_788, 4),
+        ("b06-image-data-url", 1_043, 4),
+        ("b07-two-images", 1_226, 4),
+        ("b08-long-instructions-60k", 11_058, 6),
+        ("b09-control-multi-pass", 36_669, 160),
+        ("b10-control-one-pass", 905, 4),
+    ] {
+        let usage = reply(&file, name).item.usage.as_ref().unwrap();
+        assert_eq!(usage.output_tokens, Some(output_tokens), "{name}");
+        let tokens = usage.input_tokens.unwrap();
+        assert_eq!((tokens * 100 + 55) / 110, hundredths, "{name}");
+    }
+}
+
+#[test]
+fn date_estimate_and_forecast_replies_keep_calendar_statistics() {
+    use cortexkit_role_extractor::request::is_calendar_date;
+
+    let file = replies();
+    let estimate = &answers(reply(&file, "b01-date-year-step"))["completion_date"];
+    assert_eq!(estimate.kind, FieldType::Estimate);
+    // The provider's year rounding can put a statistic before the lower bound.
+    assert_eq!(text(estimate.p10.as_deref()), r#""2026-01-01""#);
+    let is_year_start = |date: &str| is_calendar_date(date) && date.ends_with("-01-01");
+    for name in ["value", "mean", "median", "p10", "p90"] {
+        let date: String = serde_json::from_str(text(estimate.member(name))).unwrap();
+        assert!(is_year_start(&date), "{name}: {date}");
+    }
+    let dates: Vec<String> = serde_json::from_str(text(estimate.member("quantiles"))).unwrap();
+    assert_eq!(dates.len(), 99);
+    assert!(dates.iter().all(|date| is_year_start(date)));
+
+    let forecast = &answers(reply(&file, "b02-forecast-date-bounds"))["completion_date"];
+    assert_eq!(forecast.kind, FieldType::Forecast);
+    let steps: Vec<Value> = serde_json::from_str(text(forecast.member("steps"))).unwrap();
+    assert_eq!(steps.len(), 3);
+    for name in ["value", "median", "p10", "p90"] {
+        let dates: Vec<String> = serde_json::from_str(text(forecast.member(name))).unwrap();
+        assert_eq!(dates.len(), steps.len(), "{name}");
+        for (date, step) in dates.iter().zip(&steps) {
+            assert!(is_calendar_date(date), "{name}: {date}");
+            assert_eq!(step[name].as_str(), Some(date.as_str()));
+        }
+    }
+    for step in steps {
+        assert!(is_calendar_date(step["mean"].as_str().unwrap()));
+        let quantiles = step["quantiles"].as_array().unwrap();
+        assert_eq!(quantiles.len(), 99);
+        assert!(quantiles
+            .iter()
+            .all(|date| is_calendar_date(date.as_str().unwrap())));
+    }
 }
 
 #[test]

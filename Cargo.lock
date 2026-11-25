@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-llm-tools"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "cortexkit-model-batch",
  "cortexkit-role-classifier",
@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor-conformance"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-extractor",
