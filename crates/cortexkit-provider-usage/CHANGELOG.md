@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.0
+
+- `RateWindow` gains `model_scope`, serialized as `modelScope` and omitted when
+  unset: which of the account's models draw on the window, as far as the
+  upstream says. `all` means every model counts against it; `subset` means
+  only some do and the reading doesn't list them, so the window's identifier
+  and title are the only names for that group. Absence means the producer
+  didn't say, never `all`.
+- New `model_scope` vocabulary: `all`, `subset`. The list is open: an unknown
+  value decodes intact, and a consumer must handle it.
+- Minor bump: `RateWindow` gains a public field, so code that builds it with a
+  struct literal must add `model_scope`. A body from before this release still
+  decodes.
+
 ## 0.16.0
 
 - `SavedResets` gains `kinds`: the same saved resets grouped by what a reset
