@@ -237,6 +237,11 @@ nothing about that promise.
 
 ## Catalog capability filtering
 
+Version **0.15.21** pins provider **0.15.19**. `role_describe_shape` accepts
+a valid `tool_capabilities` tag index even when the provider does not advertise
+the deprecated catalog filter. The kit does not send `params.capabilities`
+to providers that do not advertise it.
+
 `catalog_capability_filter_matches_describe` runs only when the live
 `role.describe` answer advertises `tool-catalog-capability-filter/v1`; otherwise
 it is reported as a named skip. The case requests the full discovered

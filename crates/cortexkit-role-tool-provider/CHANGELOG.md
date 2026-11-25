@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.19
+
+- Accept a `tool_capabilities` tag index without `tool-catalog-capability-filter/v1`.
+  The filter is deprecated and will be removed in a later release. Providers
+  still advertising it must publish the index and serve filter requests as before.
+
 ## 0.15.18
 
 - Document `urgent_notice` as a call-yield reason and add its constant and vector.

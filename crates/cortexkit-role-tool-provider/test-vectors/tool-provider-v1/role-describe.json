@@ -1,5 +1,5 @@
 {
-  "_about": "role.describe answers for tool-provider/v1: {majors: [{version, ops, stability}], implementation_version, capabilities?, tool_capabilities?}. Filter-advertising providers list their sorted, unique served tags; `accepted` and `refused` name the consumer's check result.",
+  "_about": "role.describe answers for tool-provider/v1: {majors: [{version, ops, stability}], implementation_version, capabilities?, tool_capabilities?}. Any provider can list sorted, unique served tags; filter-advertising providers must list them. `accepted` and `refused` name the consumer's check result.",
   "accepted": [
     {
       "name": "minimal",
@@ -78,6 +78,14 @@
         "implementation_version": "1",
         "capabilities": ["tool-catalog-capability-filter/v1"],
         "tool_capabilities": ["code.edit/v1", "code.read/v1", "fake:effect/v1"]
+      }
+    },
+    {
+      "name": "served tool capabilities without filter advertisement",
+      "answer": {
+        "majors": [{"version": "tool-provider/v1", "ops": ["role.describe", "tool.catalog"], "stability": "alpha"}],
+        "implementation_version": "1",
+        "tool_capabilities": ["code.read/v1"]
       }
     }
   ],
@@ -211,7 +219,6 @@
       "answer": {
         "majors": [{"version": "tool-provider/v1", "ops": ["role.describe", "tool.catalog"], "stability": "alpha"}],
         "implementation_version": "1",
-        "capabilities": ["tool-catalog-capability-filter/v1"],
         "tool_capabilities": ["code.read/v1", "code.edit/v1"]
       },
       "problem": "unsorted_tool_capabilities"
@@ -221,7 +228,6 @@
       "answer": {
         "majors": [{"version": "tool-provider/v1", "ops": ["role.describe", "tool.catalog"], "stability": "alpha"}],
         "implementation_version": "1",
-        "capabilities": ["tool-catalog-capability-filter/v1"],
         "tool_capabilities": ["code.read/v1", "code.read/v1"]
       },
       "problem": "duplicate_tool_capabilities"
@@ -231,19 +237,9 @@
       "answer": {
         "majors": [{"version": "tool-provider/v1", "ops": ["role.describe", "tool.catalog"], "stability": "alpha"}],
         "implementation_version": "1",
-        "capabilities": ["tool-catalog-capability-filter/v1"],
         "tool_capabilities": ["not-a-valid-tag"]
       },
       "problem": "invalid_tool_capability_tag"
-    },
-    {
-      "name": "served tool capabilities without filter advertisement",
-      "answer": {
-        "majors": [{"version": "tool-provider/v1", "ops": ["role.describe", "tool.catalog"], "stability": "alpha"}],
-        "implementation_version": "1",
-        "tool_capabilities": ["code.read/v1"]
-      },
-      "problem": "tool_capabilities_without_filter"
     },
     {
       "name": "empty tool capability field without filter advertisement",
@@ -252,7 +248,7 @@
         "implementation_version": "1",
         "tool_capabilities": []
       },
-      "problem": "tool_capabilities_without_filter"
+      "problem": "missing_tool_capabilities"
     }
   ]
 }

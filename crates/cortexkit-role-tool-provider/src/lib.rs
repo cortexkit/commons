@@ -62,7 +62,8 @@ pub const VERSION: &str = "v1";
 pub const PROVIDES: &str = "tool-provider/v1";
 
 /// The optional `role.describe` capability for selecting catalog tools by
-/// their capability tags.
+/// their capability tags. The filter is deprecated and will be removed in a
+/// later release; providers may still publish `tool_capabilities` for discovery.
 pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
 
 /// The optional `role.describe` capability for accepting `params.model` on

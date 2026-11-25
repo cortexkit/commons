@@ -687,6 +687,7 @@ async fn catalog_capability_filter_is_skipped_when_role_describe_does_not_advert
         ..Defects::default()
     }))
     .await;
+    assert_passed(&report, "role_describe_shape");
     assert_eq!(
         report.outcome("catalog_capability_filter_matches_describe"),
         Some(&CaseOutcome::Skipped {

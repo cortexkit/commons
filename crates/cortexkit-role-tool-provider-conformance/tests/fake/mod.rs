@@ -500,7 +500,7 @@ impl Module {
     }
 
     fn describe(&self) -> Value {
-        let role = RoleDescribe::new(
+        let mut role = RoleDescribe::new(
             vec![Major {
                 version: "tool-provider/v1".into(),
                 ops: REQUIRED_OPS
@@ -516,11 +516,10 @@ impl Module {
                 stability: "alpha".into(),
             }],
             "fake-0",
-        );
-        let mut role = role;
+        )
+        .with_tool_capabilities(self.tool_capabilities());
         if !self.defects.omit_catalog_capability_filter {
             role.capabilities.push(CATALOG_CAPABILITY_FILTER.into());
-            role = role.with_tool_capabilities(self.tool_capabilities());
         }
         if !self.defects.omit_catalog_model {
             role.capabilities.push(CATALOG_MODEL.into());
@@ -616,6 +615,10 @@ impl Module {
             &request, &provides,
         )?;
         let filter_request = request.params.contains_key("capabilities");
+        assert!(
+            !filter_request || !self.defects.omit_catalog_capability_filter,
+            "a filtered catalog request requires a live filter advertisement"
+        );
         if filter_request && self.defects.accept_filter_model {
             request.params.remove("model");
         }

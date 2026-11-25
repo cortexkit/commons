@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.21
+
+- Pin tool-provider `=0.15.19`. `role_describe_shape` accepts a tag index
+  without the deprecated catalog filter; filter requests and cases still
+  require the live filter advertisement.
+
 ## 0.15.20
 
 - Checks call-yield for both defined reasons, `person_message` and

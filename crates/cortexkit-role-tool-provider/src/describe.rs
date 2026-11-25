@@ -20,8 +20,8 @@ use crate::{
 /// understands for a new session.
 ///
 /// Decoded leniently: unknown fields, majors, ops and capabilities are
-/// ignored. Only the presence of the `tool-provider/v1` major and its required
-/// ops are checked strictly, by [`check_describe`].
+/// ignored. [`check_describe`] checks the `tool-provider/v1` major, its required
+/// ops, and the rules for the tool capability index.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RoleDescribe {
@@ -33,8 +33,9 @@ pub struct RoleDescribe {
     /// catalog answer instead.
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// The provider's sorted, unique union of catalog tool capability tags,
-    /// present only when it advertises [`CATALOG_CAPABILITY_FILTER`].
+    /// The provider's sorted, unique index of catalog tool capability tags for
+    /// discovery. Any provider may publish it; providers advertising
+    /// [`CATALOG_CAPABILITY_FILTER`] must publish it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_capabilities: Vec<String>,
 }
@@ -101,7 +102,8 @@ impl RoleDescribe {
 /// Intersect a consumer's wanted tool tags with the provider's advertised
 /// tags. The result is sorted and deduplicated for `params.capabilities`; a
 /// provider that does not advertise [`CATALOG_CAPABILITY_FILTER`] returns
-/// `None` so the consumer can retain its existing catalog request behavior.
+/// `None`, even if it publishes its tag index. A consumer must not send
+/// `params.capabilities` to that provider.
 ///
 /// Run [`check_describe`] first. A provider that advertises the filter but
 /// lists no `tool_capabilities` (one built before this field existed) fails it
@@ -171,8 +173,8 @@ pub enum DescribeProblem {
     /// The answer carries a `tools` list. The catalog comes only from
     /// `tool.catalog`, so a describe answer stays cacheable.
     CarriesToolList,
-    /// The provider advertises capability filtering but does not list its
-    /// served tool capability tags.
+    /// The provider lists no tags in its index or advertises capability
+    /// filtering without an index.
     MissingToolCapabilities,
     /// Tool capability tags are not in bytewise sorted order.
     UnsortedToolCapabilities,
@@ -183,7 +185,12 @@ pub enum DescribeProblem {
         tag: String,
         problem: CapabilityTagProblem,
     },
-    /// The provider lists served tags without advertising capability filtering.
+    /// Not produced since 0.15.19: providers may publish tags for discovery
+    /// without supporting catalog filtering.
+    #[deprecated(
+        since = "0.15.19",
+        note = "tool capability indexes do not require a filter"
+    )]
     ToolCapabilitiesWithoutFilter,
 }
 
@@ -223,7 +230,7 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             .capabilities
             .iter()
             .any(|capability| capability == CATALOG_CAPABILITY_FILTER);
-        if advertises_filter {
+        if advertises_filter || object.contains_key("tool_capabilities") {
             if describe.tool_capabilities.is_empty() {
                 problems.push(DescribeProblem::MissingToolCapabilities);
             } else {
@@ -243,8 +250,6 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
                     }
                 }
             }
-        } else if object.contains_key("tool_capabilities") {
-            problems.push(DescribeProblem::ToolCapabilitiesWithoutFilter);
         }
         if problems.is_empty() {
             Ok(describe)
@@ -291,8 +296,9 @@ mod tests {
                     DescribeProblem::InvalidToolCapabilityTag { .. } => {
                         "invalid_tool_capability_tag"
                     }
+                    #[allow(deprecated)]
                     DescribeProblem::ToolCapabilitiesWithoutFilter => {
-                        "tool_capabilities_without_filter"
+                        unreachable!("a tag index does not require a filter")
                     }
                 })
                 .collect();
@@ -350,7 +356,10 @@ mod tests {
             ),
             Some(vec!["code.read/v1".into(), "zeta:tool/v1".into()])
         );
-        let legacy = RoleDescribe::new(Vec::new(), "test");
-        assert_eq!(select_tool_capabilities(&legacy, ["code.read/v1"]), None);
+        let index_only = describe.with_capabilities(Vec::new());
+        assert_eq!(
+            select_tool_capabilities(&index_only, ["code.read/v1"]),
+            None
+        );
     }
 }

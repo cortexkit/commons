@@ -100,26 +100,28 @@ same pair can never stop or list that work.
 - Decoded leniently: unknown fields, role majors, ops and module capabilities
   are ignored, except for the `tool-provider/v1` major and the known filter
   capability below. The v1 major and its required ops are checked strictly.
-  `capabilities` and `tool_capabilities` may be omitted when the filter is not
-  advertised. `stability` is `alpha`, `beta` or `stable`; an unknown level
-  decodes.
+  `capabilities` may be omitted. `stability` is `alpha`, `beta` or `stable`;
+  an unknown level decodes.
 - The answer describes the implementation, never the tools: it carries no
   tool list. It depends only on the module build, so a consumer may cache it
   for as long as it talks to the same module incarnation; two answers from one
   incarnation are identical.
-- The optional module-level catalog-filter capability is
-  `tool-catalog-capability-filter/v1` (`CATALOG_CAPABILITY_FILTER`). A consumer
-  sends `params.capabilities` only after `role.describe` advertises this token.
-  An advertising provider also returns `tool_capabilities`: the nonempty union
-  of capability tags on its catalog tools, sorted bytewise and without
-  duplicates. Every tag passes `check_capability_tag`. A provider that does not
-  advertise the filter omits `tool_capabilities` and is unchanged; the filter
-  is additive and opt-in. Session-level capabilities travel in the catalog
-  answer.
-- `tool_capabilities` is an index of tags, not a tool list. A consumer
-  intersects it with the tags it wants using
-  `describe::select_tool_capabilities`, then builds canonical `params` with
-  `catalog::params_for_capabilities`.
+- Any provider may publish `tool_capabilities` so consumers can find
+  providers by tag. It is an index, not a tool list: the nonempty union of
+  capability tags on the provider's catalog tools, sorted bytewise and without
+  duplicates. Every tag passes `check_capability_tag`.
+- The optional module-level catalog-filter capability,
+  `tool-catalog-capability-filter/v1` (`CATALOG_CAPABILITY_FILTER`), is
+  deprecated and will be removed in a later release. A provider may stop
+  advertising it and stop answering `params.capabilities` requests without
+  dropping its tag index. A provider that still advertises the token must
+  publish `tool_capabilities` and serve filter requests as specified in §3.
+  A consumer must not send `params.capabilities` unless `role.describe`
+  advertises the token. To request filtering from an advertising provider, a
+  consumer can intersect the index with the tags it wants using
+  `describe::select_tool_capabilities`, then build canonical `params` with
+  `catalog::params_for_capabilities`. Session-level capabilities travel in
+  the catalog answer.
 
 ### 2.1 Optional display views
 
@@ -408,12 +410,12 @@ responsibilities, not behaviors checked by this provider kit.
       change, and a runner fetches the item again at its next refresh.
       Under the runner contract a plan's tools are frozen per run, so a
       send that names a different model for one run keeps the plan's tools.
-    - There are two kinds of `tool.catalog` request, whether or not a provider
-      advertises `tool-catalog-capability-filter/v1`:
+    - Every provider serves ordinary requests. Providers that still advertise
+      `tool-catalog-capability-filter/v1` also serve filter requests:
       - A **filter request** carries `params.capabilities`. It accepts only
         `capabilities` in `params` (`catalog::check_capability_params`). Any
         other key, including `model`, is refused as `invalid_request` with
-        `detail.field: "params.<key>"`. Discovery sends filter requests.
+        `detail.field: "params.<key>"`.
       - An **ordinary plan-item request** has no `capabilities` member. The
         provider serves it under its own documented params and preset rules,
         exactly as for a provider that does not advertise the filter token.
@@ -540,10 +542,10 @@ responsibilities, not behaviors checked by this provider kit.
     A route opts into `reply_custody` at bind, in `consumer_capabilities`, the
     same way it opts into `late_results`. Per-call arguments do not opt in.
     Routes that do not opt in keep their existing behavior.
-  - `tool_capabilities` in `role.describe` is the sorted, unique union of the
-    per-tool capability tags in the full catalog. An advertising provider's
-    filtered answer still contains exactly the tools selected by any requested
-    tag.
+  - When published, `tool_capabilities` in `role.describe` is the sorted,
+    unique union of the per-tool capability tags in the full catalog. For a
+    provider that still advertises the catalog filter, a filtered answer
+    contains exactly the tools carrying any requested tag.
   - `system_text`, when requested, is `{text, item_digest, preflight_digest,
     composition_digest, tool_names, rich_ui?}` (`SystemTextAnswer`), from the
     same configuration resolution as the catalog in the same reply.
@@ -1845,12 +1847,12 @@ daemon stamps only known bind modes; unknown-mode refusal is checked in the
 helper's unit tests instead.
 
 The `catalog_capability_filter_matches_describe` case is gated by the live
-`role.describe` advertisement, never a subject flag. It requests all of the
-advertised `tool_capabilities` and checks that the returned catalog's tag union
-matches exactly. It also checks that an empty list selects no tools,
-filtering leaves `generation` unchanged, and a changed selection changes
-`catalog_digest`. A provider that does not advertise the capability skips this
-case by name.
+filter token in `role.describe`, not by the adapter's `ToolProviderSubject::capabilities()`
+or by the tag index alone. It requests all of the advertised `tool_capabilities`
+and checks that the returned catalog's tag union matches exactly. It also checks
+that an empty list selects no tools, filtering leaves `generation` unchanged,
+and a changed selection changes `catalog_digest`. A provider that does not
+advertise the capability skips this case by name.
 
 The `catalog_filter_preserves_plan_item` case sends the subject's ordinary
 `catalog_arguments()`, including its documented params and optional preset,
