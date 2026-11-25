@@ -396,9 +396,10 @@ impl RunnerEntry {
 pub struct ModelFallback {
     pub requested: String,
     pub answered: String,
-    /// The step's refusal-fallback reason, if recorded. All three members travel together.
+    /// Who performed the refusal fallback, if recorded. Travels with `cause`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
+    /// The provider's refusal category, if given. Never an empty string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -446,10 +447,10 @@ impl ModelFallback {
         Ok(fact)
     }
 
-    /// Copy the three reason members from the step that placed this reply.
+    /// Copy the refusal-fallback reason from the step that placed this reply.
     pub fn with_reason(mut self, fallback: &crate::step_events::Fallback) -> Self {
         self.by = Some(fallback.by.clone());
-        self.category = Some(fallback.category.clone());
+        self.category = (!fallback.category.is_empty()).then(|| fallback.category.clone());
         self.cause = Some(fallback.cause.clone());
         self
     }
@@ -471,18 +472,18 @@ impl ModelFallback {
             self.cause.as_deref(),
         ) {
             (None, None, None) => {}
-            (Some(by), Some(category), Some(cause)) => {
+            (Some(by), category, Some(cause)) => {
                 if !valid_by(by) {
                     return Err("model_fallback.by");
                 }
-                if !valid_category(category) {
+                if category.is_some_and(|value| !valid_category(value)) {
                     return Err("model_fallback.category");
                 }
                 if !valid_cause(cause) {
                     return Err("model_fallback.cause");
                 }
             }
-            _ => return Err("model_fallback requires by, category and cause together"),
+            _ => return Err("model_fallback requires by and cause for a refusal-fallback reason"),
         }
         Ok(())
     }

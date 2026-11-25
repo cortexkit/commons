@@ -32,7 +32,7 @@ fn model_fallback_reason_decodes_null_as_absent_and_omits_it_on_write() {
     assert!(serde_json::from_value::<ModelFallback>(wire)
         .unwrap_err()
         .to_string()
-        .contains("by, category and cause together"));
+        .contains("requires by and cause"));
 }
 
 #[test]
@@ -70,6 +70,33 @@ fn model_fallback_read_and_display_round_trip_the_step_reason() {
 }
 
 #[test]
+fn model_fallback_read_and_display_project_a_step_without_category() {
+    let step = Fallback::new("client", "requested", "", "refused_here");
+    let fact = ModelFallback::new("requested", "answered")
+        .unwrap()
+        .with_reason(&step);
+    assert_eq!(fact.category, None);
+    let read = ReadMessage::new(1, "reply", json!({"native":"opaque"}))
+        .with_role("assistant")
+        .with_model_fallback(fact.clone());
+    let row = DisplayRow::new("assistant", vec![]).with_model_fallback(fact);
+    assert_eq!(read.check_model_fallback("assistant"), Ok(()));
+    assert_eq!(row.check_model_fallback(), Ok(()));
+    let expected = json!({
+        "requested": "requested", "answered": "answered", "by": "client", "cause": "refused_here"
+    });
+    let raw_read = serde_json::to_value(&read).unwrap();
+    let raw_row = serde_json::to_value(&row).unwrap();
+    assert_eq!(raw_read["model_fallback"], expected);
+    assert_eq!(raw_row["model_fallback"], expected);
+    assert_eq!(
+        serde_json::from_value::<ReadMessage>(raw_read).unwrap(),
+        read
+    );
+    assert_eq!(serde_json::from_value::<DisplayRow>(raw_row).unwrap(), row);
+}
+
+#[test]
 fn model_fallback_read_and_display_refuse_partial_or_invalid_reasons() {
     let step = Fallback::new("client", "requested", "z".repeat(64), "refused_here");
     let valid = ModelFallback::new("requested", "answered")
@@ -98,7 +125,8 @@ fn model_fallback_read_and_display_refuse_partial_or_invalid_reasons() {
         assert!(read_error.to_string().contains(field), "{read_error}");
         assert!(row_error.to_string().contains(field), "{row_error}");
     };
-    for present in 1..7 {
+    // A reason without a category is valid; every other partial group still fails.
+    for present in [1, 2, 3, 4, 6] {
         let mut partial = valid.clone();
         for (index, field) in [&mut partial.by, &mut partial.category, &mut partial.cause]
             .into_iter()
@@ -108,9 +136,12 @@ fn model_fallback_read_and_display_refuse_partial_or_invalid_reasons() {
                 *field = None;
             }
         }
-        assert_refused(partial, "by, category and cause together");
+        assert_refused(partial, "requires by and cause");
     }
 
+    let mut empty = valid.clone();
+    empty.category = Some(String::new());
+    assert_refused(empty, "model_fallback.category");
     for (by, category, cause, field) in [
         ("host", "valid", "refused_here", "model_fallback.by"),
         (

@@ -8543,6 +8543,54 @@ async fn step_events_faithful_runner_passes_both_granularities_and_history_keys(
 }
 
 #[tokio::test]
+async fn step_events_accept_refusal_fallback_without_category() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_fallback: Some(
+                r#"{"by":"provider","requested_model":"requested","cause":"refused_here","refused_attempts":[{"model":"requested"}]}"#,
+            ),
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    for name in cases_of(&["step_events_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn step_events_reject_invalid_refusal_fallback_category_by_name() {
+    for fallback in [
+        r#"{"by":"provider","requested_model":"requested","cause":"round","category":""}"#,
+        r#"{"by":"provider","requested_model":"requested","cause":"round","category":"Uppercase"}"#,
+    ] {
+        let report = run(&step_event_subject(
+            Defects {
+                step_events_fallback: Some(fallback),
+                ..Defects::default()
+            },
+            "per_attempt",
+            "step_ref",
+        ))
+        .await;
+        let names = cases_of(&["step_events_"]);
+        for name in &names {
+            let reason = failed(&report, name);
+            assert!(reason.contains("fallback.category"), "{name}: {reason}");
+        }
+        assert_none_failed_but(&report, &names);
+    }
+}
+
+#[tokio::test]
 async fn step_events_duplicate_fails_only_count_case() {
     let report = run(&step_event_subject(
         Defects {
@@ -9865,6 +9913,50 @@ async fn model_fallback_facts_agree_without_a_shared_profile_or_host_parts() {
                 Some(&CaseOutcome::Passed),
                 "{}",
                 report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn model_fallback_reason_without_category_agrees_with_display_rows() {
+    let report = run(&displaying(Defects {
+        model_fallback: Some("reason_without_category"),
+        ..Defects::default()
+    }))
+    .await;
+    for name in [
+        "model_fallback_agrees_with_display_rows",
+        "display_row_is_the_profile_projection",
+        "read_display_facts_opt_in_envelope",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn model_fallback_invalid_category_fails_by_name() {
+    for mode in ["empty_category", "bad_category"] {
+        let report = run(&displaying(Defects {
+            model_fallback: Some(mode),
+            ..Defects::default()
+        }))
+        .await;
+        for name in [
+            "model_fallback_agrees_with_display_rows",
+            "display_row_is_the_profile_projection",
+            "read_display_facts_opt_in_envelope",
+        ] {
+            let reason = failed(&report, name);
+            assert!(
+                reason.contains("model_fallback.category"),
+                "{mode}: {name}: {reason}"
             );
         }
     }

@@ -95,6 +95,19 @@
         "parts": [{"type": "text", "part": "0", "text": "A replacement reply."}],
         "model_fallback": {"requested": "provider/requested", "answered": "provider/answered"}
       }
+    },
+    {
+      "name": "refusal fallback with no provider category",
+      "read": {
+        "ordinal": 7, "mid": "uncategorized-fallback", "role": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": "The fallback model replied."}]},
+        "model_fallback": {"requested": "model_a", "answered": "model_b", "by": "client", "cause": "refused_here"}
+      },
+      "row": {
+        "role": "assistant", "text": "The fallback model replied.",
+        "parts": [{"type": "text", "part": "0", "text": "The fallback model replied."}],
+        "model_fallback": {"requested": "model_a", "answered": "model_b", "by": "client", "cause": "refused_here"}
+      }
     }
   ],
   "invalid_parts": [

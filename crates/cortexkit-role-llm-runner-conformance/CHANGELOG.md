@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.92
+
+- Pin llm-runner `=0.9.9` and cover refusal fallback without a provider
+  category on step events and their read projections.
+
 ## 0.17.91
 
 - Pin llm-runner `=0.9.8`. `notice_yield_non_owner_steer` replaces the old

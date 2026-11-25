@@ -843,5 +843,22 @@ pub(super) fn fallback_fact(mode: &str) -> display_rows::ModelFallback {
     if mode == "equal" {
         fact.answered = fact.requested.clone();
     }
+    if matches!(
+        mode,
+        "reason_without_category" | "empty_category" | "bad_category"
+    ) {
+        let step = cortexkit_role_llm_runner::step_events::Fallback::new(
+            "client",
+            "test/requested",
+            "",
+            "refused_here",
+        );
+        fact = fact.with_reason(&step);
+        if mode == "empty_category" {
+            fact.category = Some(String::new());
+        } else if mode == "bad_category" {
+            fact.category = Some("not a category id".into());
+        }
+    }
     fact
 }

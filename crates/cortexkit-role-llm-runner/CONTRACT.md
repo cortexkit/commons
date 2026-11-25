@@ -791,9 +791,11 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   the step record's members of those names, §14.3) is an assistant-only reply fact, served only with
   `include_display_facts`, with the same value as the display row (§4.7).
   Both model ids are required, non-empty and different. Absent means no
-  claim, not that the requested model answered. The three later members are
-  optional, sent together or not at all, and a reader that doesn't know them
-  ignores them. The shared `display::ModelFallback`
+  claim, not that the requested model answered. `by` and `cause` are sent
+  together or not at all. `category` is optional with that pair and is
+  omitted when the provider gave no category. A producer never invents a
+  category or sends an empty string. A reader that doesn't know these
+  members ignores them. The shared `display::ModelFallback`
   type validates the values; `ReadMessage::check_model_fallback` validates
   them against the known role without parsing the opaque body.
 - [pinned] `runner_entry?: {code: string}` (added in 0.9.6) marks an entry
@@ -1794,11 +1796,12 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] **Fallback reply note (added in 0.8.46).** An assistant display row
   may carry `model_fallback?: {requested: string, answered: string, by?,
   category?, cause?}`, with the
-  same value as an opted-in read entry. `by`, `category` and `cause` (added
-  in 0.9.6) come only from the step's own refusal fallback record (§14.3),
-  are sent together or not at all, and let readers say why another model
-  answered. Only assistant entries may carry it;
-  validation refuses it on every other role. Both required, non-empty ids
+  same value as an opted-in read entry. `by` and `cause` come only from the
+  step's own refusal fallback record (§14.3) and are sent together, or not at
+  all. With that pair, optional `category` copies the step's provider category
+  (1–64 bytes of `[a-z0-9_-]`); absence means the provider gave none. A producer
+  never invents a category or sends an empty string. Only assistant entries
+  may carry the note; validation refuses it on every other role. Both required, non-empty ids
   use exactly the same form as the row's own `model` member and must differ.
   If that form is provider-qualified, the runner qualifies both bare ids
   with the reply's own provider. Absent means no claim, not "same model".
@@ -8707,8 +8710,8 @@ to the session's whole length.
 
 - [pinned] **Refusal fallback (`fallback`).** The step carries `fallback`
   (`step_events::Fallback`) when a refusal made a different model serve it:
-  either this step's first attempt was refused in a sensitive category and
-  another model answered inside the same reply, or the step ran on the
+  either this step's first attempt was refused and another model answered
+  inside the same reply, or the step ran on the
   fallback model inside a recovery round that an earlier refusal started. It
   is a closed object:
 
@@ -8716,7 +8719,7 @@ to the session's whole length.
   |---|---|
   | `by` | Required closed string: `client` when the host's sign-in plugin retried on its fallback model, `provider` when the provider's own server-side fallback did |
   | `requested_model` | Required non-empty model identifier the step was first sent to, in the same form as `model` and different from it |
-  | `category` | Required open string, the provider's refusal category id: 1–64 bytes of `[a-z0-9_-]` |
+  | `category?` | Optional open string, the provider's refusal category id: 1–64 bytes of `[a-z0-9_-]`. Absent when the provider gave no category. A producer never invents a category or sends an empty string |
   | `cause` | Required closed string: `refused_here` when this step's first attempt was refused, `round` when the step ran on the fallback model inside a recovery round that an earlier refusal started |
   | `credited?` | Optional boolean, only with `by: "client"`: whether the retry presented the provider's fallback credit token. The token itself is never sent |
   | `refused_attempts?` | Only with `cause: "refused_here"`, then required: 1–8 objects in attempt order, each `{model, input_tokens?, cached_input_tokens?, cache_write_tokens?, cache_write_5m_tokens?, cache_write_1h_tokens?, output_tokens?, reasoning_tokens?}` with a non-empty `model` and the same counter meanings as the step's own |
@@ -8733,9 +8736,10 @@ to the session's whole length.
   above, including the member combinations.
 - [pinned] On `session.read` with `include_display_facts: true`, an assistant
   entry placed by such a step carries `model_fallback` (§4.7) with
-  `requested` and `answered` as before, plus the step record's `by`,
-  `category` and `cause`. The token counters, `credited` and `round` stay on
-  the step only. Apps show that the fallback model answered and why.
+  `requested` and `answered` as before, plus the step record's `by` and
+  `cause`. It copies `category` only when present on the step. The token
+  counters, `credited` and `round` stay on the step only. Apps show that the
+  fallback model answered without inventing a category when none was given.
 - [pinned] **Readers first for 0.9.6:** every reader of `step.finished.v1`
   must run runner contract 0.9.6 or later before any runner emits
   `fallback`. Today's readers are the event durables and live-hint readers

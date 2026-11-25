@@ -503,7 +503,21 @@ pub fn decode_step_finished(
         }
         _ => return Err(StepEventDecodeError::InvalidSubject),
     };
-    let event: StepFinished = serde_json::from_slice(body).map_err(StepEventDecodeError::Body)?;
+    let event: StepFinished = serde_json::from_slice(body).map_err(|error| {
+        // A present category is checked during deserialization so it cannot
+        // be mistaken for the empty string that represents an omitted member.
+        // Preserve the field error exposed by the step decoder.
+        if error.is_data()
+            && error
+                .to_string()
+                .split_once(" at line ")
+                .is_some_and(|(message, _)| message == fallback::CATEGORY_FIELD)
+        {
+            StepEventDecodeError::InvalidField(fallback::CATEGORY_FIELD)
+        } else {
+            StepEventDecodeError::Body(error)
+        }
+    })?;
     event
         .check_shared()
         .map_err(StepEventDecodeError::InvalidField)?;
@@ -583,6 +597,20 @@ mod tests {
     }
 
     #[test]
+    fn refusal_fallback_step_round_trips_without_category() {
+        let wire = &vectors()["refusal_fallback_without_category"];
+        let step = decode_step_finished(SUBJECT, &serde_json::to_vec(wire).unwrap()).unwrap();
+        let fallback = Fallback::new("client", "model_a", "", "refused_here")
+            .with_credited(true)
+            .with_refused_attempts(vec![RefusedAttempt::new("model_a")])
+            .with_round(FallbackRound::new(3, 1));
+        assert_eq!(step.fallback.as_ref(), Some(&fallback));
+        let step = step.with_fallback(fallback);
+        assert_eq!(step.check(), Ok(()));
+        assert_eq!(serde_json::to_value(&step).unwrap(), *wire);
+    }
+
+    #[test]
     fn refusal_fallback_step_accepts_boundary_values_and_a_round_without_attempts() {
         let mut step: StepFinished = serde_json::from_value(vectors()["minimal"].clone()).unwrap();
         step.model = String::new();
@@ -653,11 +681,6 @@ mod tests {
             body["fallback"][key] = value;
             assert_refused(body, field);
         }
-        for category in ["", "Upper", "has space", "a.b", "é", &"a".repeat(65)] {
-            let mut body = valid.clone();
-            body["fallback"]["category"] = json!(category);
-            assert_refused(body, "fallback.category");
-        }
         let mut missing_attempts = valid;
         missing_attempts["fallback"]
             .as_object_mut()
@@ -667,13 +690,33 @@ mod tests {
     }
 
     #[test]
+    fn refusal_fallback_step_rejects_invalid_present_category() {
+        let valid = vectors()["refusal_fallback"].clone();
+        for category in ["", "Upper", "has space", "a.b", "é", &"a".repeat(65)] {
+            let mut body = valid.clone();
+            body["fallback"]["category"] = json!(category);
+            let error = serde_json::from_value::<StepFinished>(body.clone()).unwrap_err();
+            assert_eq!(error.to_string(), "fallback.category");
+            assert!(matches!(
+                decode_step_finished(SUBJECT, &serde_json::to_vec(&body).unwrap()),
+                Err(StepEventDecodeError::InvalidField("fallback.category"))
+            ));
+            if !category.is_empty() {
+                let mut step: StepFinished = serde_json::from_value(valid.clone()).unwrap();
+                step.fallback.as_mut().unwrap().category = category.into();
+                assert_eq!(step.check(), Err("fallback.category"));
+            }
+        }
+        let mut null = valid;
+        null["fallback"]["category"] = Value::Null;
+        assert!(serde_json::from_value::<StepFinished>(null).is_err());
+    }
+
+    #[test]
     fn refusal_fallback_step_objects_are_closed_and_require_their_fields() {
         let valid = vectors()["refusal_fallback"].clone();
         for (path, required) in [
-            (
-                "/fallback",
-                &["by", "requested_model", "category", "cause"][..],
-            ),
+            ("/fallback", &["by", "requested_model", "cause"][..]),
             ("/fallback/refused_attempts/0", &["model"][..]),
             ("/fallback/round", &["steps", "steps_left"][..]),
         ] {

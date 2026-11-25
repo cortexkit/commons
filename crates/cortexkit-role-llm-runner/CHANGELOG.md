@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.9
+
+- A refusal fallback may omit `category` on a step event (§14.3) and its read
+  projection (§4.7) when the provider gave no category. Do not invent a value
+  or send an empty string. The Rust step fallback field still uses `String`;
+  an empty value represents absence and is omitted on the wire.
+- Rollout: upgrade readers to 0.9.9 before producers omit `category`. Readers
+  on 0.9.8 and older refuse a step fallback record without it.
+
 ## 0.9.8
 
 - The plan's composer (the scope owner) can set `yields` on any sender

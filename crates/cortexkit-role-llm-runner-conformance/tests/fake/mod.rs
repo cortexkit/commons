@@ -311,6 +311,7 @@ pub struct Defects {
     pub step_events_no_evidence: bool,
     pub step_events_content_member: Option<&'static str>,
     pub step_events_malformed_rewrite_member: Option<(&'static str, &'static str)>,
+    pub step_events_fallback: Option<&'static str>,
     pub step_events_wrong_publisher: bool,
     pub system_text_default_invents_preset: bool,
     pub system_text_facts_rewrites: bool,

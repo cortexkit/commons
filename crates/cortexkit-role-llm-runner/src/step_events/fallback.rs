@@ -1,4 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+
+pub(super) const CATEGORY_FIELD: &str = "fallback.category";
 
 /// A different model served the step after a refusal. The enclosing step's
 /// counters include both refused attempts and the answer.
@@ -9,7 +11,13 @@ pub struct Fallback {
     /// `client` for a host retry, or `provider` for server-side fallback.
     pub by: String,
     pub requested_model: String,
-    /// The provider's category id, never refusal text.
+    /// The provider's category id, never refusal text. An empty string means
+    /// the provider gave no category and is omitted on the wire.
+    #[serde(
+        default,
+        skip_serializing_if = "String::is_empty",
+        deserialize_with = "deserialize_category"
+    )]
     pub category: String,
     /// `refused_here` for this step's refusal, or `round` for continued recovery.
     pub cause: String,
@@ -26,8 +34,9 @@ pub struct Fallback {
 }
 
 impl Fallback {
-    /// Set the required members. Set `refused_attempts` for `refused_here`, then
-    /// validate the containing step with [`super::StepFinished::check`].
+    /// Set the fallback fields, passing an empty string if the provider gave
+    /// no category. Set `refused_attempts` for `refused_here`, then validate
+    /// the containing step with [`super::StepFinished::check`].
     pub fn new(
         by: impl Into<String>,
         requested_model: impl Into<String>,
@@ -67,8 +76,8 @@ impl Fallback {
         if self.requested_model.is_empty() || self.requested_model == served_model {
             return Err("fallback.requested_model");
         }
-        if !valid_category(&self.category) {
-            return Err("fallback.category");
+        if !self.category.is_empty() && !valid_category(&self.category) {
+            return Err(CATEGORY_FIELD);
         }
         if !valid_cause(&self.cause) {
             return Err("fallback.cause");
@@ -105,6 +114,17 @@ pub(crate) fn valid_category(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
         })
+}
+
+fn deserialize_category<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if !valid_category(&value) {
+        return Err(de::Error::custom(CATEGORY_FIELD));
+    }
+    Ok(value)
 }
 
 pub(crate) fn valid_cause(value: &str) -> bool {

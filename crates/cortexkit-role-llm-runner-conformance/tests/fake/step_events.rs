@@ -126,6 +126,12 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
     if let Some((member, value)) = defects.step_events_malformed_rewrite_member {
         body[member] = serde_json::from_str(value).unwrap();
     }
+    if let Some(fallback) = defects
+        .step_events_fallback
+        .filter(|_| record["kind"] == "step")
+    {
+        body["fallback"] = serde_json::from_str(fallback).unwrap();
+    }
     let publisher = if defects.step_events_wrong_publisher {
         "runner-b"
     } else {

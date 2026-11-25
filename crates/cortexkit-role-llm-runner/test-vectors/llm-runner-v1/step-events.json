@@ -119,6 +119,31 @@
     "started_at_ms": 1790000002001,
     "finished_at_ms": 1790000003000
   },
+  "refusal_fallback_without_category": {
+    "runner": "runner_a",
+    "session_ref": "runner_session_a",
+    "log_incarnation": "log_a",
+    "seq": 45,
+    "run_id": "run_a",
+    "step_id": "step_d",
+    "attempt_id": "attempt_invented_d",
+    "attempt": 1,
+    "terminal_status": "completed",
+    "harness": "host_a",
+    "session": "session_a",
+    "provider": "provider_a",
+    "model": "model_b",
+    "fallback": {
+      "by": "client",
+      "requested_model": "model_a",
+      "cause": "refused_here",
+      "credited": true,
+      "refused_attempts": [{"model": "model_a"}],
+      "round": {"steps": 3, "steps_left": 1}
+    },
+    "started_at_ms": 1790000003001,
+    "finished_at_ms": 1790000004000
+  },
   "refused_members": [
     {
       "future_member": 1
