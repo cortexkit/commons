@@ -5430,55 +5430,76 @@ say who may send and which texts are system text.
   it show “via chat” rather than the trusted frame; they never cut raw text
   using an unverified byte count.
 
-#### 9.7.1.1 Host frames around a person's words (added in 0.9.6)
+#### 9.7.1.1 Host frames around a person's words (added in 0.9.6; lists in 0.9.7)
 
 Some hosts store a message the person sends during a running turn wrapped in
-fixed host text, before and after the person's words, inside a message whose
-native role is not `user`. Claude Code is the first. A host frame lets every
-reader show the person's words as the person's message and the fixed text as
-a host note.
+fixed host text, before and after the person's words. Claude Code is the
+first. Claude Code 2.1.331 puts the wrapped text in a message of its own whose
+native role is not `user`. 2.1.332 puts it in text parts of the `user` message
+that carries the turn's tool results, one part per message the person sent. A
+host frame lets every reader show the person's words as the person's message
+and the fixed text as a host note.
 
-- [pinned] The optional read fact is `host_frame: {part: u32, code: string,
-  head_bytes: u32, tail_bytes: u32}` (`attribution::HostFrame`). `part` is the
-  zero-based stored top-level content-part index, as for `attribution`; a
-  native message whose content is one string has that string as part 0.
-  `code` names the frame: an open vocabulary of 1–64 bytes of `[a-z0-9_]`.
-  On `session.read` it is served only with `include_display_facts: true` on
+- [pinned] The optional read fact is `host_frames: [{part: u32, code: string,
+  head_bytes: u32, tail_bytes: u32}]` (`attribution::HostFrame` items). Each
+  item names one stored text part. `part` is the zero-based stored top-level
+  content-part index, as for `attribution`; a native message whose content is
+  one string has that string as part 0. The list holds at least one item, in
+  strictly ascending `part` order, so no two items name the same part. `code`
+  names the frame: an open vocabulary of 1–64 bytes of `[a-z0-9_]`. On
+  `session.read` the list is served only with `include_display_facts: true` on
   a runner declaring `read_display_facts`, and absent otherwise, like
   `attribution`. An entry carries at most one of `attribution` and
-  `host_frame`.
-- [pinned] Each code pins its exact head and tail bytes in the crate
-  (`attribution::host_frames`). The first code is `claude_code_mid_turn`:
-  head `attribution::host_frames::CLAUDE_CODE_MID_TURN_HEAD`, the 52 bytes
-  `The user sent a new message while you were working:` followed by one
-  newline byte, and tail `CLAUDE_CODE_MID_TURN_TAIL`, the 232 bytes
-  beginning with two newline bytes, `This is how Claude Code surfaces
-  messages the user sends mid-turn`, through `as you continue this turn.`
-  with no trailing newline. The constants in the crate are the authority for
-  every byte; this text only names them.
-- [pinned] A runner sets the fact only from its own durable intake record
-  that this entry is a send it delivered into that host's wrapper, never by
-  matching text alone. Before serving it, check that the part's text starts
-  with exactly the code's head and ends with exactly its tail, that
-  `head_bytes` and `tail_bytes` equal those lengths, and that the two don't
-  overlap. The person's words are exactly the bytes between them, even when
-  the words themselves contain the head or tail text. On any mismatch,
-  including an unknown code on the runner's side, omit the fact and serve
-  the whole text. `attribution::verify_host_frame(fact, text)` checks all of
-  this.
-- [pinned] A display row applying the fact has role `user`, whatever the
-  native role. Its `text` is the person's words alone. The words keep the
-  stored part's key, and the head and tail become two separate host parts
-  (`host: true`, `host_code` equal to the frame's `code`) whose keys the
-  runner derives deterministically from the stored part's key, distinct from
-  every other key of the entry and the same on every read, and publishes
-  with the entry's other keys. `display::project_with_facts` applies this to
-  each pinned profile (`project_with_attribution` remains, for `attribution`
-  alone). A reader projecting raw entries applies the
-  verified fact the same way, and on mismatch shows the whole text with no
-  fact. The fact changes no stored bytes, identity, digests, tag numbering,
-  compaction or `client_message_id` matching. A reader that doesn't know the
-  fact still sees the entry's served `user` role; it shows the whole text.
+  `host_frames`.
+- [pinned] 0.9.6's single fact `host_frame` (the same item, not in a list)
+  stays valid until a later release removes it. A reader accepts either
+  member and reads `host_frame` as a one-item list. A runner sends at most one
+  of the two on an entry, and sends `host_frames` only once the readers it
+  serves accept it (see the changelog for 0.9.7's rollout).
+- [pinned] Each code pins its exact head and one or more exact tails in the
+  crate (`attribution::host_frames`). The first code is
+  `claude_code_mid_turn`: head
+  `attribution::host_frames::CLAUDE_CODE_MID_TURN_HEAD`, the 52 bytes `The
+  user sent a new message while you were working:` followed by one newline
+  byte. Its tails are `CLAUDE_CODE_MID_TURN_TAIL`, the 232 bytes beginning
+  with two newline bytes, `This is how Claude Code surfaces messages the user
+  sends mid-turn`, through `as you continue this turn.` with no trailing
+  newline, and `CLAUDE_CODE_MID_TURN_TAIL_FOLLOWED`, the same 232 bytes plus
+  one newline byte (233 bytes). Claude Code writes the 233-byte form on every
+  framed part except the last when one message holds several. An item's
+  `tail_bytes` says which tail its part ends with. The constants in the crate
+  are the authority for every byte; this text only names them.
+- [pinned] A runner sets an item only from its own durable intake record that
+  this part is a send it delivered into that host's wrapper, never by matching
+  text alone. Before serving an item, check that the part's text starts with
+  exactly the code's head and ends with exactly the code's tail of
+  `tail_bytes` length, that `head_bytes` equals the head's length, and that the
+  head and tail don't overlap. The person's words are exactly the bytes
+  between them, even when the words themselves contain the head or tail text.
+  On any mismatch, including an unknown code on the runner's side, omit that
+  item and serve that part's whole text; the other items stand. An empty list
+  is never served: omit the member. `attribution::verify_host_frame(item,
+  text)` checks one item.
+- [pinned] A display row applying the facts has role `user`, whatever the
+  native role. Each verified item's words keep that stored part's key, and its
+  head and tail become two separate host parts (`host: true`, `host_code`
+  equal to the item's `code`) whose keys the runner derives deterministically
+  from that part's key, distinct from every other key of the entry and the
+  same on every read, and publishes with the entry's other keys. The row
+  carries the verified items as `host_frames`. Its `text` joins every
+  verified item's words, in part order, as `run.result` joins text parts. A
+  part with no verified item, and every other part (for example a tool
+  result), is projected as it would be without the facts.
+- [pinned] Each verified item is a separate message from the person. A reader
+  that draws one message per row draws one per item instead, in part order,
+  each with that item's words; it finds them from the row's `host_frames`,
+  never by parsing keys or text. `display::project_with_facts` applies all of
+  this to each pinned profile (`project_with_attribution` remains, for
+  `attribution` alone). A reader projecting raw entries applies the verified
+  items the same way, and shows any part whose item doesn't verify as whole
+  text. The facts change no stored bytes, identity, digests, tag numbering,
+  compaction or `client_message_id` matching. A reader that doesn't know them
+  still sees the entry's served `user` role; it shows the whole text.
 
 ### 9.7.2 `notices`: reader facts for notices
 
@@ -5493,6 +5514,11 @@ labelled with its `speaks_for` agent when present. An unmarked module `sender`
 is an ordinary visible message labelled with that module, not a notice. The
 marks are positive: a sender forgetting a mark makes its message more visible,
 never less. This is the safe fallback because nothing gets hidden.
+
+A text part carrying a verified host frame item (§9.7.1.1) is the person's own
+message, even inside a `user` message that carries tool results. It is never a
+send riding a tool result, and never a notice. The message's other parts keep
+their own meaning.
 
 - [pinned] A runner declaring `notices` also declares
   `read_display_facts`, `history_display` and `live_events`. A declaration

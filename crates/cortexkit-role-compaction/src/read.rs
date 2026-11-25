@@ -79,6 +79,10 @@ pub struct Entry {
     /// and excluded from every checksum. Verify before use with [`HostFrame::words`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_frame: Option<HostFrame>,
+    /// The verified wrappers in stored text-part order. Sent only to providers
+    /// declaring `compaction-host-frame/v2`, and excluded from every checksum.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_frames: Option<Vec<HostFrame>>,
     /// Numbered-kind parts have no tag because their numbers cannot be
     /// established, not because they take none. Sent only to providers
     /// declaring `compaction-numbers-unknown/v1`, on every such entry in
@@ -138,6 +142,8 @@ struct EntryFields {
     host_parts: Vec<HostPart>,
     #[serde(default, deserialize_with = "present_host_frame")]
     host_frame: Option<HostFrame>,
+    #[serde(default, deserialize_with = "present_host_frames")]
+    host_frames: Option<Vec<HostFrame>>,
     #[serde(default)]
     numbers_unknown: bool,
     #[serde(deserialize_with = "crate::integer::required")]
@@ -158,7 +164,9 @@ impl<'de> Deserialize<'de> for Entry {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let entry = EntryFields::deserialize(deserializer)?;
         entry.check_host_parts().map_err(serde::de::Error::custom)?;
-        entry.check_host_frame().map_err(serde::de::Error::custom)?;
+        entry
+            .check_host_frames()
+            .map_err(serde::de::Error::custom)?;
         Ok(entry)
     }
 }
@@ -224,13 +232,12 @@ fn host_code<'de, D: serde::Deserializer<'de>>(
 
 /// A recorded host frame around a person's words in one stored text part.
 /// The runner takes the fact from its intake record, never from matching text.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct HostFrame {
     /// Stable id of the text part in the entry.
     pub part: String,
     /// Frame code from llm-runner's `attribution::host_frames`.
-    #[serde(deserialize_with = "host_frame_code")]
     pub code: String,
     pub head_bytes: u32,
     pub tail_bytes: u32,
@@ -265,18 +272,22 @@ impl HostFrame {
     }
 
     fn text<'a>(&self, entry: &'a Entry) -> Result<&'a str, &'static str> {
-        if !matches!(entry.role, Role::User | Role::System) {
-            return Err("host_frame is allowed only on a user or system entry");
-        }
-        let part = entry
-            .parts
-            .iter()
-            .find(|part| part.id == self.part)
-            .ok_or("host_frame names an id not in the entry")?;
-        match &part.body {
+        let index = self.part_index(entry)?;
+        match &entry.parts[index].body {
             PartBody::Text { text } => Ok(text.as_str()),
             _ => Err("host_frame must name a text part"),
         }
+    }
+
+    fn part_index(&self, entry: &Entry) -> Result<usize, &'static str> {
+        if !matches!(entry.role, Role::User | Role::System) {
+            return Err("host_frame is allowed only on a user or system entry");
+        }
+        entry
+            .parts
+            .iter()
+            .position(|part| part.id == self.part)
+            .ok_or("host_frame names an id not in the entry")
     }
 }
 
@@ -297,21 +308,46 @@ fn host_frame_code<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::
 fn present_host_frame<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<HostFrame>, D::Error> {
-    struct FrameObject;
+    HostFrame::deserialize(d).map(Some)
+}
 
-    impl<'de> serde::de::Visitor<'de> for FrameObject {
-        type Value = Option<HostFrame>;
+fn present_host_frames<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<HostFrame>>, D::Error> {
+    Vec::deserialize(d).map(Some)
+}
 
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a host_frame object")
+impl<'de> Deserialize<'de> for HostFrame {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(remote = "HostFrame")]
+        struct HostFrameFields {
+            part: String,
+            #[serde(deserialize_with = "host_frame_code")]
+            code: String,
+            head_bytes: u32,
+            tail_bytes: u32,
         }
 
-        fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
-            HostFrame::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Some)
+        struct FrameObject;
+
+        impl<'de> serde::de::Visitor<'de> for FrameObject {
+            type Value = HostFrame;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a host_frame object")
+            }
+
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                map: M,
+            ) -> Result<Self::Value, M::Error> {
+                HostFrameFields::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
         }
+
+        d.deserialize_map(FrameObject)
     }
-
-    d.deserialize_map(FrameObject)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -491,7 +527,7 @@ pub struct Head {
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
 /// `generated_under`, reasoning counts, part `tokens` and delivered-item
-/// `tokens` and entry `speaks_for`, `host_parts`, `host_frame` and
+/// `tokens` and entry `speaks_for`, `host_parts`, `host_frame`, `host_frames` and
 /// `numbers_unknown` are not hashed.
 /// Tags absent from the served parts never enter the checksum.
 /// Pass full parts: compact parts hash to a
@@ -539,6 +575,7 @@ impl Entry {
             speaks_for: None,
             host_parts: Vec::new(),
             host_frame: None,
+            host_frames: None,
             numbers_unknown: false,
             written_at,
             completed_at: None,
@@ -613,7 +650,7 @@ impl Entry {
         provider_declared: bool,
     ) -> Result<Self, &'static str> {
         self.host_frame = provider_declared.then_some(fact);
-        self.check_host_frame()?;
+        self.check_host_frames()?;
         Ok(self)
     }
 
@@ -623,6 +660,55 @@ impl Entry {
         if let Some(fact) = &self.host_frame {
             check_host_frame_code(&fact.code)?;
             fact.text(self)?;
+        }
+        Ok(())
+    }
+
+    /// Project verified intake facts for a provider declaring v2 at Setup.
+    /// A v2 declaration replaces the v1 member; without it, omit the list.
+    pub fn with_host_frames(
+        mut self,
+        facts: Vec<HostFrame>,
+        provider_declared: bool,
+    ) -> Result<Self, &'static str> {
+        if provider_declared {
+            self.host_frame = None;
+        }
+        self.host_frames = (provider_declared && !facts.is_empty()).then_some(facts);
+        self.check_host_frames()?;
+        Ok(self)
+    }
+
+    /// Read either wire form as one list, empty when neither was sent.
+    pub fn host_frames(&self) -> &[HostFrame] {
+        self.host_frames
+            .as_deref()
+            .unwrap_or(self.host_frame.as_slice())
+    }
+
+    /// Check the role, part membership, order and code shape as decoding does.
+    /// Use [`HostFrame::words`] to verify each fact against the stored text.
+    pub fn check_host_frames(&self) -> Result<(), &'static str> {
+        let Some(frames) = &self.host_frames else {
+            return self.check_host_frame();
+        };
+        if self.host_frame.is_some() {
+            return Err("host_frame and host_frames are mutually exclusive");
+        }
+        if frames.is_empty() {
+            return Err("host_frames must not be empty");
+        }
+        let mut previous = None;
+        for frame in frames {
+            check_host_frame_code(&frame.code)?;
+            let index = frame.part_index(self)?;
+            if !matches!(self.parts[index].body, PartBody::Text { .. }) {
+                return Err("host_frame must name a text part");
+            }
+            if previous.is_some_and(|previous| previous >= index) {
+                return Err("host_frames must be unique and in stored part order");
+            }
+            previous = Some(index);
         }
         Ok(())
     }

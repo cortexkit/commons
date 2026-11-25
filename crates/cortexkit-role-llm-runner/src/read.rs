@@ -599,6 +599,10 @@ pub struct ReadMessage {
     /// on a runner declaring `read_display_facts`. Mutually exclusive with attribution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_frame: Option<crate::attribution::HostFrame>,
+    /// Verified wrappers, one per stored text part in part order. Serve only
+    /// with `include_display_facts` on a runner declaring `read_display_facts`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_frames: Option<Vec<crate::attribution::HostFrame>>,
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
@@ -675,8 +679,16 @@ struct ReadMessageFields {
     notices: Vec<NoticeFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attribution: Option<crate::attribution::Attribution>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::attribution::deserialize_host_frame"
+    )]
     host_frame: Option<crate::attribution::HostFrame>,
+    #[serde(
+        default,
+        deserialize_with = "crate::attribution::deserialize_host_frames"
+    )]
+    host_frames: Option<Vec<crate::attribution::HostFrame>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tool_times: Vec<ToolTime>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1046,7 +1058,43 @@ impl ReadMessage {
     }
 
     pub(crate) fn check_frame_facts(&self) -> Result<(), &'static str> {
-        crate::attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+        crate::attribution::check_host_frames(
+            self.attribution.is_some(),
+            self.host_frame.as_ref(),
+            self.host_frames.as_deref(),
+        )
+    }
+
+    /// Read either wire form as one list, empty when neither was sent.
+    pub fn host_frames(&self) -> &[crate::attribution::HostFrame] {
+        self.host_frames
+            .as_deref()
+            .unwrap_or(self.host_frame.as_slice())
+    }
+
+    /// Attach the list form from durable intake facts, omitting any item that
+    /// does not verify against the stored message. Call only when display facts
+    /// were requested and the reader supports lists. An empty list clears the
+    /// fact. The runner serves the entry's `user` role even when the facts are
+    /// not requested.
+    pub fn with_host_frames(
+        mut self,
+        profile: &str,
+        facts: &[crate::attribution::HostFrame],
+    ) -> Result<Self, crate::display::ProjectionError> {
+        self.host_frame = None;
+        self.host_frames = if facts.is_empty() {
+            None
+        } else {
+            let mut projection = crate::display::ProjectionFacts::default().with_host_frames(facts);
+            projection.attribution = self.attribution.as_ref();
+            crate::display::project_with_facts(profile, &self.message, None, &projection)?
+                .host_frames
+        };
+        if self.host_frames.is_some() {
+            self.role = Some(role::USER.into());
+        }
+        Ok(self)
     }
 
     pub fn new(ordinal: u64, mid: impl Into<String>, message: Value) -> Self {
@@ -1076,6 +1124,7 @@ impl ReadMessage {
             notices: Vec::new(),
             attribution: None,
             host_frame: None,
+            host_frames: None,
             tool_times: Vec::new(),
             host_parts: Vec::new(),
             model_fallback: None,

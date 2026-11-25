@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.90
+
+- Require llm-runner `=0.9.7`, whose read decoder accepts lists of host frames.
+
 ## 0.17.89
 
 - Require llm-runner `=0.9.6`, whose step-event decoder accepts and validates

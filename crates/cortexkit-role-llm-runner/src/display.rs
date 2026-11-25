@@ -97,6 +97,9 @@ pub struct DisplayRow {
     /// Verified wrapper shown as separate host parts, never with attribution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_frame: Option<crate::attribution::HostFrame>,
+    /// Verified wrappers shown as separate host parts, in stored part order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_frames: Option<Vec<crate::attribution::HostFrame>>,
     /// Notices riding this row's tool results, in delivery order, outside checksums.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<crate::read::NoticeFact>,
@@ -167,8 +170,13 @@ pub struct DisplayRow {
 struct DisplayRowFields {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attribution: Option<crate::attribution::Attribution>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "attribution::deserialize_host_frame")]
     host_frame: Option<crate::attribution::HostFrame>,
+    #[serde(
+        default,
+        deserialize_with = "crate::attribution::deserialize_host_frames"
+    )]
+    host_frames: Option<Vec<crate::attribution::HostFrame>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     notices: Vec<crate::read::NoticeFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,7 +220,18 @@ impl TryFrom<DisplayRowWire> for DisplayRow {
 
 impl DisplayRow {
     fn check_frame_facts(&self) -> Result<(), &'static str> {
-        crate::attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+        attribution::check_host_frames(
+            self.attribution.is_some(),
+            self.host_frame.as_ref(),
+            self.host_frames.as_deref(),
+        )
+    }
+
+    /// Read either wire form as one list, empty when neither was sent.
+    pub fn host_frames(&self) -> &[HostFrame] {
+        self.host_frames
+            .as_deref()
+            .unwrap_or(self.host_frame.as_slice())
     }
 
     pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
@@ -238,6 +257,7 @@ impl DisplayRow {
         Self {
             attribution: None,
             host_frame: None,
+            host_frames: None,
             notices: Vec::new(),
             role: role.into(),
             output_refs: None,
@@ -1175,6 +1195,7 @@ pub fn project_with_attribution(
 pub struct ProjectionFacts<'a> {
     pub attribution: Option<&'a Attribution>,
     pub host_frame: Option<&'a HostFrame>,
+    pub host_frames: Option<&'a [HostFrame]>,
     /// The runner's stored-order keys for host-frame projection, when served.
     /// Prefer the keys from part digests to the envelope's `part_keys`.
     /// Without these, the projection uses the profile's default keys.
@@ -1192,13 +1213,22 @@ impl<'a> ProjectionFacts<'a> {
         self
     }
 
+    pub fn with_host_frames(mut self, facts: &'a [HostFrame]) -> Self {
+        self.host_frames = Some(facts);
+        self
+    }
+
     pub fn with_part_keys(mut self, keys: &'a [String]) -> Self {
         self.part_keys = Some(keys);
         self
     }
 
     pub fn check(&self) -> Result<(), &'static str> {
-        attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+        attribution::check_host_frames(
+            self.attribution.is_some(),
+            self.host_frame,
+            self.host_frames,
+        )
     }
 }
 
@@ -1212,8 +1242,14 @@ pub fn project_with_facts(
     facts: &ProjectionFacts<'_>,
 ) -> Result<DisplayRow, ProjectionError> {
     facts.check().map_err(ProjectionError::new)?;
-    if let Some(fact) = facts.host_frame {
-        if let Some(row) = project_host_frame(profile, body, limits, fact, facts.part_keys) {
+    let frames = facts
+        .host_frames
+        .or_else(|| facts.host_frame.map(std::slice::from_ref));
+    if let Some(frames) = frames {
+        if let Some(mut row) = project_host_frames(profile, body, limits, frames, facts.part_keys) {
+            if facts.host_frame.is_some() {
+                row.host_frame = row.host_frames.take().and_then(|mut frames| frames.pop());
+            }
             return Ok(row);
         }
     }
@@ -1278,26 +1314,40 @@ fn stored_content<'a>(profile: &str, body: &'a Value) -> Option<Cow<'a, Value>> 
     }
 }
 
-fn project_host_frame(
+fn project_host_frames(
     profile: &str,
     body: &Value,
     limits: Option<&Limits>,
-    fact: &HostFrame,
+    frames: &[HostFrame],
     part_keys: Option<&[String]>,
 ) -> Option<DisplayRow> {
     let content = stored_content(profile, body)?;
-    let index = fact.part as usize;
-    let (stored_text, part_count) = if let Some(text) = content.as_str().filter(|_| index == 0) {
-        (text, 1)
+    let part_count = if content.is_string() {
+        1
     } else {
-        let parts = content.as_array()?;
-        let part = parts.get(index)?;
-        if part["type"] != "text" {
-            return None;
-        }
-        (part["text"].as_str()?, parts.len())
+        content.as_array()?.len()
     };
-    let (head, words, tail) = attribution::split_host_frame(fact, stored_text)?;
+    let mut candidates = frames
+        .iter()
+        .filter_map(|fact| {
+            let index = fact.part as usize;
+            let stored_text = if let Some(text) = content.as_str().filter(|_| index == 0) {
+                text
+            } else {
+                let part = content.as_array()?.get(index)?;
+                if part["type"] != "text" {
+                    return None;
+                }
+                part["text"].as_str()?
+            };
+            Some((
+                index,
+                fact,
+                attribution::split_host_frame(fact, stored_text)?,
+            ))
+        })
+        .peekable();
+    candidates.peek()?;
     let keys = match part_keys {
         Some(keys) if keys.len() == part_count => Cow::Borrowed(keys),
         Some(_) => return None,
@@ -1313,43 +1363,57 @@ fn project_host_frame(
                 .collect(),
         ),
     };
-    let stored_key = keys.get(index)?;
-    let (head_key, tail_key) = host_frame_keys(stored_key, &keys);
-
     let mut row = if profile == OPENCODE_AISDK {
         opencode_aisdk_indexed(body, limits, true).ok()?
     } else {
         project(profile, body, limits).ok()?
     };
-    let slot = index.to_string();
-    let position = row
-        .parts
-        .iter()
-        .position(|part| matches!(part, DisplayPart::Text(text) if text.part == slot))?;
-    for part in &mut row.parts {
-        *part.part_mut() = keys.get(part.part().parse::<usize>().ok()?)?.clone();
+    let mut used: HashSet<_> = keys.iter().cloned().collect();
+    let mut parts = Vec::with_capacity(row.parts.len());
+    let mut verified = Vec::new();
+    let mut words_in_order = Vec::new();
+    for mut part in row.parts {
+        let index = part.part().parse::<usize>().ok()?;
+        let stored_key = keys.get(index)?;
+        *part.part_mut() = stored_key.clone();
+        // A profile can group stored text under a tool result instead of
+        // showing it as an independent text part. It must remain whole.
+        if matches!(part, DisplayPart::Text(_)) {
+            while candidates.peek().is_some_and(|(slot, ..)| *slot < index) {
+                candidates.next();
+            }
+            if let Some((_, fact, (head, words, tail))) =
+                candidates.next_if(|(slot, ..)| *slot == index)
+            {
+                let (head_key, tail_key) = host_frame_keys(stored_key, &mut used);
+                parts.extend([
+                    DisplayPart::Text(TextPart::new(head_key, head)).with_host_code(&fact.code),
+                    DisplayPart::Text(TextPart::new(stored_key, words)),
+                    DisplayPart::Text(TextPart::new(tail_key, tail)).with_host_code(&fact.code),
+                ]);
+                words_in_order.push(words);
+                verified.push(fact.clone());
+                continue;
+            }
+        }
+        parts.push(part);
     }
-    row.parts.splice(
-        position..=position,
-        [
-            DisplayPart::Text(TextPart::new(head_key, head)).with_host_code(&fact.code),
-            DisplayPart::Text(TextPart::new(stored_key, words)),
-            DisplayPart::Text(TextPart::new(tail_key, tail)).with_host_code(&fact.code),
-        ],
-    );
+    if verified.is_empty() {
+        return None;
+    }
+    row.parts = parts;
     row.role = crate::read::role::USER.into();
-    row.text = words.into();
-    row.host_frame = Some(fact.clone());
+    row.text = crate::run::join_text_parts(words_in_order);
+    row.host_frames = Some(verified);
     Some(row)
 }
 
-fn host_frame_keys(part: &str, stored_keys: &[String]) -> (String, String) {
-    let used: HashSet<_> = stored_keys.iter().map(String::as_str).collect();
-    let key = |edge| {
+fn host_frame_keys(part: &str, used: &mut HashSet<String>) -> (String, String) {
+    let mut key = |edge| {
         // The stored key and edge keep the two identities stable across reads;
         // extend the suffix if an opaque stored key already uses that spelling.
         let mut key = format!("{part}#host_frame:{edge}");
-        while used.contains(key.as_str()) {
+        while !used.insert(key.clone()) {
             key.push('#');
         }
         key
@@ -2297,10 +2361,14 @@ impl DisplayEntry {
             .as_ref()
             .map(|rows| rows.iter().map(|row| row.part.clone()).collect::<Vec<_>>())
             .or_else(|| entry.part_keys.clone());
-        if let Some(fact) = &row.host_frame {
+        if !row.host_frames().is_empty() {
             if let Some(keys) = &mut part_keys {
-                let index = fact.part as usize;
-                if let Some(part) = keys.get(index) {
+                // Later insertions must not shift the earlier stored indices.
+                for fact in row.host_frames().iter().rev() {
+                    let index = fact.part as usize;
+                    let Some(part) = keys.get(index) else {
+                        continue;
+                    };
                     let is_new_host_key = |part: &DisplayPart| {
                         part.host_code() == Some(fact.code.as_str())
                             && !keys.iter().any(|key| key == part.part())

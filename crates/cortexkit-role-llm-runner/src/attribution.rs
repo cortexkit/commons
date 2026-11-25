@@ -27,14 +27,28 @@ pub mod host_frames {
     pub const CLAUDE_CODE_MID_TURN: &str = "claude_code_mid_turn";
     pub const CLAUDE_CODE_MID_TURN_HEAD: &str =
         "The user sent a new message while you were working:\n";
-    pub const CLAUDE_CODE_MID_TURN_TAIL: &str = "\n\nThis is how Claude Code surfaces \
-        messages the user sends mid-turn — within the running turn, often alongside the next tool \
-        result, rather than as a separate conversation turn. Address the message above as you \
-        continue this turn.";
+    macro_rules! claude_code_mid_turn_tail {
+        () => {
+            "\n\nThis is how Claude Code surfaces \
+            messages the user sends mid-turn — within the running turn, often alongside the next tool \
+            result, rather than as a separate conversation turn. Address the message above as you \
+            continue this turn."
+        };
+    }
+    pub const CLAUDE_CODE_MID_TURN_TAIL: &str = claude_code_mid_turn_tail!();
+    /// Tail on a framed part followed by another framed part in the same message.
+    pub const CLAUDE_CODE_MID_TURN_TAIL_FOLLOWED: &str =
+        concat!(claude_code_mid_turn_tail!(), "\n");
 
-    pub(crate) fn get(code: &str) -> Option<(&'static str, &'static str)> {
+    pub(crate) fn get(code: &str) -> Option<(&'static str, &'static [&'static str])> {
         match code {
-            CLAUDE_CODE_MID_TURN => Some((CLAUDE_CODE_MID_TURN_HEAD, CLAUDE_CODE_MID_TURN_TAIL)),
+            CLAUDE_CODE_MID_TURN => Some((
+                CLAUDE_CODE_MID_TURN_HEAD,
+                &[
+                    CLAUDE_CODE_MID_TURN_TAIL,
+                    CLAUDE_CODE_MID_TURN_TAIL_FOLLOWED,
+                ],
+            )),
             _ => None,
         }
     }
@@ -81,9 +95,11 @@ impl HostFrame {
     /// Build a fact only when the runner recorded during intake that it sent
     /// the message into this wrapper. Never detect a frame from text alone.
     pub fn verified(part: u32, code: &str, text: &str) -> Option<Self> {
-        let (head, tail) = host_frames::get(code)?;
-        let fact = Self::new(part, code, head.len() as u32, tail.len() as u32);
-        verify_host_frame(&fact, text).then_some(fact)
+        let (head, tails) = host_frames::get(code)?;
+        tails.iter().find_map(|tail| {
+            let fact = Self::new(part, code, head.len() as u32, tail.len() as u32);
+            verify_host_frame(&fact, text).then_some(fact)
+        })
     }
 }
 
@@ -109,19 +125,55 @@ pub(crate) fn split_host_frame<'a>(
     fact: &HostFrame,
     text: &'a str,
 ) -> Option<(&'a str, &'a str, &'a str)> {
-    let (head, tail) = host_frames::get(&fact.code)?;
-    if fact.head_bytes as usize != head.len() || fact.tail_bytes as usize != tail.len() {
+    let (head, tails) = host_frames::get(&fact.code)?;
+    if fact.head_bytes as usize != head.len() {
         return None;
     }
+    let tail = tails
+        .iter()
+        .copied()
+        .find(|tail| tail.len() == fact.tail_bytes as usize)?;
     let words = text.strip_prefix(head)?.strip_suffix(tail)?;
     Some((head, words, tail))
 }
 
-pub(crate) fn check_facts(attribution: bool, host_frame: bool) -> Result<(), &'static str> {
-    if attribution && host_frame {
-        return Err("attribution and host_frame are mutually exclusive");
+/// Check the wire shape of host-frame facts without inspecting the stored text.
+pub fn check_host_frames(
+    attribution: bool,
+    host_frame: Option<&HostFrame>,
+    host_frames: Option<&[HostFrame]>,
+) -> Result<(), &'static str> {
+    if host_frame.is_some() && host_frames.is_some() {
+        return Err("host_frame and host_frames are mutually exclusive");
+    }
+    if attribution && (host_frame.is_some() || host_frames.is_some()) {
+        return Err(if host_frame.is_some() {
+            "attribution and host_frame are mutually exclusive"
+        } else {
+            "attribution and host_frames are mutually exclusive"
+        });
+    }
+    if let Some(frames) = host_frames {
+        if frames.is_empty() {
+            return Err("host_frames must not be empty");
+        }
+        if frames.windows(2).any(|pair| pair[0].part >= pair[1].part) {
+            return Err("host_frames must be in strictly ascending part order");
+        }
     }
     Ok(())
+}
+
+pub(crate) fn deserialize_host_frames<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<HostFrame>>, D::Error> {
+    Vec::deserialize(d).map(Some)
+}
+
+pub(crate) fn deserialize_host_frame<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<HostFrame>, D::Error> {
+    HostFrame::deserialize(d).map(Some)
 }
 
 /// The contract's exact bytes, including both trailing newline bytes.

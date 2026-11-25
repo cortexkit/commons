@@ -265,3 +265,146 @@ fn host_frame_leaves_all_w7_checksums_and_stored_content_unchanged() {
     }
     assert_eq!(seal_view(&marked).checksum, seal_view(&plain).checksum);
 }
+
+fn list_vector(name: &str) -> Value {
+    let name = format!("steer-frame-claude-code-v2/{name}");
+    serde_json::from_str(vectors::file(&name).unwrap()).unwrap()
+}
+
+#[test]
+fn host_frames_compaction_entry_and_provider_gate_match_the_samples() {
+    use cortexkit_role_compaction::{provides_host_frames, COMPACTION_HOST_FRAMES_PROVIDES};
+    assert_eq!(COMPACTION_HOST_FRAMES_PROVIDES, "compaction-host-frame/v2");
+    let wire = list_vector("compaction-entry.json");
+    let marked: Entry = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(json!(marked), wire);
+    let frames = marked.host_frames().to_vec();
+    assert_eq!(
+        frames
+            .iter()
+            .map(|frame| frame.words(&marked).unwrap())
+            .collect::<Vec<_>>(),
+        ["Try the blue dial. ", "Leave the brass latch open.",]
+    );
+    assert_eq!(
+        entry_digest(marked.role.clone(), None, &marked.parts),
+        marked.digest
+    );
+    assert!(marked
+        .parts
+        .iter()
+        .all(|part| body_digest(part.seal.clone(), &part.body) == part.digest));
+    for capabilities in list_vector("compaction-gates.json").as_array().unwrap() {
+        let provides: Vec<String> =
+            serde_json::from_value(capabilities["provides"].clone()).unwrap();
+        let declared = provides_host_frames(&provides);
+        assert_eq!(json!(declared), capabilities["host_frames"]);
+        for detail in [marked.clone(), {
+            let mut compact = marked.clone();
+            compact.parts = compact.parts.iter().map(Part::compact).collect();
+            compact
+        }] {
+            let projected = detail.with_host_frames(frames.clone(), declared).unwrap();
+            let projected_wire = json!(projected);
+            assert_eq!(projected_wire.get("host_frames").is_some(), declared);
+            assert!(projected_wire.get("host_frame").is_none());
+            assert_eq!(projected.digest, marked.digest);
+            assert_eq!(
+                serde_json::from_value::<Entry>(projected_wire).unwrap(),
+                projected
+            );
+        }
+    }
+    assert!(!provides_host_frames(&[
+        "compaction-host-frame/v2-extra".into()
+    ]));
+    let old = marked
+        .clone()
+        .with_host_frames(vec![], true)
+        .unwrap()
+        .with_host_frame(frames[1].clone(), true)
+        .unwrap();
+    assert_eq!(old.host_frames(), &frames[1..]);
+    let read_legacy: Entry = serde_json::from_value(json!(old)).unwrap();
+    assert_eq!(read_legacy.host_frames(), &frames[1..]);
+    assert_eq!(old.with_host_frames(frames, true).unwrap(), marked);
+}
+
+#[test]
+fn host_frames_compaction_refuses_invalid_wire_and_in_memory_lists() {
+    fn assert_refused(entry: Entry, reason: &str) {
+        assert_eq!(entry.check_host_frames(), Err(reason));
+        let error = serde_json::from_value::<Entry>(json!(entry)).unwrap_err();
+        assert!(error.to_string().contains(reason), "{error}");
+    }
+    let wire = list_vector("compaction-entry.json");
+    let entry: Entry = serde_json::from_value(wire.clone()).unwrap();
+    let mut invalid = entry.clone();
+    invalid.role = Role::Assistant;
+    assert_refused(
+        invalid,
+        "host_frame is allowed only on a user or system entry",
+    );
+    let mut invalid = entry.clone();
+    invalid.host_frames = Some(vec![]);
+    assert_refused(invalid, "host_frames must not be empty");
+    let mut invalid = entry.clone();
+    invalid.parts[0].body = PartBody::Reasoning {
+        text: None,
+        text_bytes: None,
+    };
+    assert_refused(invalid, "host_frame must name a text part");
+    let mut invalid = entry.clone();
+    invalid.host_frames.as_mut().unwrap()[0].part = "not-a-part".into();
+    assert_refused(invalid, "host_frame names an id not in the entry");
+    let mut invalid = entry.clone();
+    invalid.host_frames.as_mut().unwrap()[0].code = "Bad_Code".into();
+    assert_refused(
+        invalid,
+        "host_frame code must be 1-64 bytes of lowercase ASCII letters, digits or _",
+    );
+    let mut invalid = entry.clone();
+    invalid.host_frames.as_mut().unwrap().reverse();
+    assert_refused(
+        invalid,
+        "host_frames must be unique and in stored part order",
+    );
+    let mut invalid = entry.clone();
+    invalid.host_frames = Some(vec![entry.host_frames()[0].clone(); 2]);
+    assert_refused(
+        invalid,
+        "host_frames must be unique and in stored part order",
+    );
+    let mut invalid = entry.clone();
+    invalid.host_frame = Some(entry.host_frames()[0].clone());
+    assert_refused(invalid, "host_frame and host_frames are mutually exclusive");
+    for value in [
+        Value::Null,
+        wire["host_frames"][0].clone(),
+        json!([["z-first", "claude_code_mid_turn", 52, 233]]),
+    ] {
+        let mut invalid = wire.clone();
+        invalid["host_frames"] = value;
+        assert!(serde_json::from_value::<Entry>(invalid).is_err());
+    }
+}
+
+#[test]
+fn host_frames_compaction_verifies_items_independently() {
+    let mut wire = list_vector("compaction-entry.json");
+    wire["host_frames"][0]["code"] = json!("future_code");
+    let entry: Entry = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(entry.host_frames()[0].words(&entry), None);
+    assert_eq!(
+        entry.host_frames()[1].words(&entry),
+        Some("Leave the brass latch open.")
+    );
+    wire["host_frames"][0]["code"] = json!(CLAUDE_CODE_MID_TURN);
+    wire["host_frames"][1]["tail_bytes"] = json!(233);
+    let entry: Entry = serde_json::from_value(wire).unwrap();
+    assert_eq!(
+        entry.host_frames()[0].words(&entry),
+        Some("Try the blue dial. ")
+    );
+    assert_eq!(entry.host_frames()[1].words(&entry), None);
+}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.13
+
+- `Entry.host_frames` lists every verified host frame of an entry, one item per
+  text part, mirroring llm-runner 0.9.7 ([CONTRACT.md](CONTRACT.md), W4.1).
+  Runners serve it only to providers declaring `compaction-host-frame/v2`. A
+  v2 provider also reads 0.4.12's single `host_frame` as a one-item list. A
+  runner sends at most one of the two, and a later release removes
+  `host_frame` with v1.
+
 ## 0.4.12
 
 - Add `Entry.host_frame` for a person's mid-turn words stored inside host text

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.7
+
+- Host frames become a list (§9.7.1.1): `host_frames` holds one item per framed
+  text part, so one message can carry several messages the person sent. Claude
+  Code 2.1.332 does this when the person sends twice during one tool call, in
+  the `user` message that carries the tool results. `claude_code_mid_turn` now
+  pins a second tail, the same 232 bytes plus one newline, for every framed
+  part but the last. Each item is verified on its own. Display rows carry the
+  list, and a reader draws one message per item.
+- Rollout: readers accept both `host_frame` and `host_frames` first. Runners
+  send `host_frames` only after that, and a later release removes the single
+  `host_frame`.
+- A text part with a verified host frame is the person's own message even in a
+  tool-result message (§9.7.2), never a send riding a tool result or a notice.
+
 ## 0.9.6
 
 - `step.finished.v1` can carry a content-free refusal fallback record (§14.3),

@@ -453,3 +453,264 @@ fn host_frame_display_row_wire_round_trips_all_fields() {
     });
     verify_both_frame_wire_forms::<DisplayRow>(wire);
 }
+
+const LIST_VECTORS: &str = "test-vectors/llm-runner-v1/steer-frame-claude-code-v2/";
+
+fn list_vector(name: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(LIST_VECTORS)
+        .join(name);
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+#[test]
+fn host_frame_followed_tail_requires_its_exact_byte_count_and_newline() {
+    use attribution::host_frames::CLAUDE_CODE_MID_TURN_TAIL_FOLLOWED as FOLLOWED;
+
+    let words = "Checking both locks 🗝";
+    let last = wrapped(words);
+    let followed = format!("{last}\n");
+    assert_eq!(FOLLOWED.len(), 233);
+    assert_eq!(FOLLOWED, format!("{CAPTURE_TAIL}\n"));
+    let frame = HostFrame::verified(1, CODE, &followed).expect("recognizes the 233-byte tail");
+    assert_eq!(frame.tail_bytes, 233);
+    assert!(attribution::verify_host_frame(&frame, &followed));
+    assert!(!attribution::verify_host_frame(&frame, &last));
+    assert!(!attribution::verify_host_frame(
+        &frame,
+        &format!("{followed}\n")
+    ));
+    let last_frame = HostFrame::new(1, CODE, 52, 232);
+    assert!(attribution::verify_host_frame(&last_frame, &last));
+    assert!(!attribution::verify_host_frame(&last_frame, &followed));
+}
+
+#[test]
+fn host_frames_read_decoder_accepts_two_frames() {
+    let wire = list_vector("two-frames-read.json");
+    let read: ReadMessage = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        read.host_frames()
+            .iter()
+            .map(|frame| frame.part)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert_eq!(json!(read), wire);
+    let history = HistoryEntry::from_read(read).unwrap();
+    assert_eq!(json!(history), wire);
+    let decoded: HistoryEntry = serde_json::from_value(wire).unwrap();
+    assert_eq!(decoded.host_frames(), history.host_frames());
+}
+
+#[test]
+fn host_frames_samples_project_the_exact_rows_and_serve_only_verified_items() {
+    for (name, input) in [
+        ("two-frames", "two-frames-read.json"),
+        ("one-frame", "one-frame-read.json"),
+        ("bad-tail", "bad-tail-candidates.json"),
+    ] {
+        let read: ReadMessage = serde_json::from_value(list_vector(input)).unwrap();
+        let row = display::project_with_facts(
+            ANTHROPIC,
+            &read.message,
+            None,
+            &ProjectionFacts::default().with_host_frames(read.host_frames()),
+        )
+        .unwrap();
+        let projected = list_vector(&format!("{name}-display.json"));
+        assert_eq!(json!(row), projected, "{name}");
+        let decoded: DisplayRow = serde_json::from_value(projected).unwrap();
+        assert_eq!(decoded, row);
+        let plain = display::project(ANTHROPIC, &read.message, None).unwrap();
+        assert_eq!(row.parts[0], plain.parts[0], "the tool result is unchanged");
+        assert!(!row.notice);
+        assert!(row.notices.is_empty());
+        if name == "bad-tail" {
+            assert_eq!(row.parts.last(), plain.parts.last());
+        }
+
+        let served = read
+            .clone()
+            .with_host_frames(ANTHROPIC, read.host_frames())
+            .unwrap();
+        assert_eq!(json!(served), list_vector(&format!("{name}-read.json")));
+        assert_eq!(row.host_frames(), served.host_frames());
+    }
+}
+
+#[test]
+fn host_frames_wire_and_projection_refuse_bad_list_shapes() {
+    let wire = list_vector("two-frames-read.json");
+    let row = list_vector("two-frames-display.json");
+    let first = wire["host_frames"][0].clone();
+    let second = wire["host_frames"][1].clone();
+    let duplicate = list_vector("refused-read.json");
+    assert!(serde_json::from_value::<ReadMessage>(duplicate.clone()).is_err());
+    let relay = json!({"part":0,"module":"chat","header_bytes":10});
+    let mut bad_code = first.clone();
+    bad_code["code"] = json!("a-invalid");
+    for (frames, other) in [
+        (json!([]), None),
+        (Value::Null, None),
+        (duplicate["host_frames"].clone(), None),
+        (json!([second, first]), None),
+        (json!([bad_code]), None),
+        (wire["host_frames"].clone(), Some(("host_frame", first))),
+        (
+            wire["host_frames"].clone(),
+            Some(("host_frame", Value::Null)),
+        ),
+        (wire["host_frames"].clone(), Some(("attribution", relay))),
+    ] {
+        let invalid = |mut base: Value| {
+            base["host_frames"] = frames.clone();
+            if let Some((key, value)) = &other {
+                base[*key] = value.clone();
+            }
+            base
+        };
+        assert!(serde_json::from_value::<ReadMessage>(invalid(wire.clone())).is_err());
+        assert!(serde_json::from_value::<HistoryEntry>(invalid(wire.clone())).is_err());
+        assert!(serde_json::from_value::<DisplayRow>(invalid(row.clone())).is_err());
+    }
+    let read: ReadMessage = serde_json::from_value(wire).unwrap();
+    let [first, second] = read.host_frames() else {
+        panic!("two frame facts")
+    };
+    for frames in [
+        vec![],
+        vec![first.clone(), first.clone()],
+        vec![second.clone(), first.clone()],
+    ] {
+        let facts = ProjectionFacts::default().with_host_frames(&frames);
+        assert!(facts.check().is_err());
+        assert!(display::project_with_facts(ANTHROPIC, &read.message, None, &facts).is_err());
+    }
+    let facts = ProjectionFacts::default()
+        .with_host_frame(first)
+        .with_host_frames(read.host_frames());
+    assert!(facts.check().is_err());
+}
+
+#[test]
+fn host_frames_skip_all_unverified_parts_without_serving_an_empty_list() {
+    let read: ReadMessage = serde_json::from_value(list_vector("two-frames-read.json")).unwrap();
+    let mut unknown = read.host_frames()[0].clone();
+    unknown.code = "unrecognized_code".into();
+    let non_text = HostFrame::new(0, CODE, 52, 232);
+    let non_existent = HostFrame::new(30, CODE, 52, 232);
+    let invalid = [non_text.clone(), unknown.clone(), non_existent.clone()];
+    let served = read.clone().with_host_frames(ANTHROPIC, &invalid).unwrap();
+    assert!(served.host_frames().is_empty());
+    assert!(json!(served).get("host_frames").is_none());
+    let facts = ProjectionFacts::default().with_host_frames(&invalid);
+    let plain = display::project(ANTHROPIC, &read.message, None).unwrap();
+    assert_eq!(
+        display::project_with_facts(ANTHROPIC, &read.message, None, &facts).unwrap(),
+        plain
+    );
+    let valid = read.host_frames()[1].clone();
+    let mixed = [non_text, unknown, valid.clone(), non_existent];
+    let row = display::project_with_facts(
+        ANTHROPIC,
+        &read.message,
+        None,
+        &ProjectionFacts::default().with_host_frames(&mixed),
+    )
+    .unwrap();
+    assert_eq!(row.host_frames(), &[valid]);
+    assert_eq!(row.parts[..2], plain.parts[..2]);
+}
+
+#[test]
+fn host_frames_single_list_preserves_legacy_projection_and_normalizes_legacy_wire() {
+    let read: ReadMessage = serde_json::from_value(list_vector("one-frame-read.json")).unwrap();
+    let frame = read.host_frames()[0].clone();
+    let mut legacy_wire = json!(read);
+    legacy_wire.as_object_mut().unwrap().remove("host_frames");
+    legacy_wire["host_frame"] = json!(frame);
+    let legacy_read: ReadMessage = serde_json::from_value(legacy_wire).unwrap();
+    assert_eq!(legacy_read.host_frames(), read.host_frames());
+    assert_eq!(
+        HistoryEntry::from_read(legacy_read).unwrap().host_frames(),
+        read.host_frames()
+    );
+
+    let stored = read.message["content"][1]["text"].clone();
+    let part_zero = [HostFrame::new(0, CODE, 52, 232)];
+    for (profile, body, frames) in [
+        (ANTHROPIC, read.message.clone(), read.host_frames()),
+        (
+            "opencode-aisdk",
+            json!({"info":{"role":"system"},"parts":[{"id":"opaque","type":"text","text":stored}]}),
+            part_zero.as_slice(),
+        ),
+        (
+            "opencode-v2",
+            json!({"type":"system","text":stored}),
+            part_zero.as_slice(),
+        ),
+        (
+            "pi",
+            json!({"type":"message","message":{"role":"system","content":stored}}),
+            part_zero.as_slice(),
+        ),
+    ] {
+        let project = |facts| display::project_with_facts(profile, &body, None, &facts).unwrap();
+        let legacy = project(ProjectionFacts::default().with_host_frame(&frames[0]));
+        let row = project(ProjectionFacts::default().with_host_frames(frames));
+        assert_eq!(legacy.host_frames(), frames);
+        assert_eq!(row.host_frames(), frames);
+        let mut legacy_json = json!(legacy);
+        legacy_json.as_object_mut().unwrap().remove("host_frame");
+        let mut row_json = json!(row);
+        row_json.as_object_mut().unwrap().remove("host_frames");
+        assert_eq!(
+            serde_json::to_vec(&legacy_json).unwrap(),
+            serde_json::to_vec(&row_json).unwrap(),
+            "{profile}"
+        );
+    }
+}
+
+#[test]
+fn host_frames_publish_all_host_keys_in_stored_order() {
+    let read: ReadMessage = serde_json::from_value(list_vector("two-frames-read.json")).unwrap();
+    let content = &read.message["content"];
+    let body = json!({"info":{"role":"system"},"parts":[
+        {"type":"step-start"}, content[1], content[2], {"type":"step-finish"},
+    ]});
+    let keys = [
+        "first#host_frame:head",
+        "first",
+        "second",
+        "second#host_frame:tail",
+    ]
+    .map(str::to_owned);
+    let facts = ProjectionFacts::default()
+        .with_part_keys(&keys)
+        .with_host_frames(read.host_frames());
+    let row = display::project_with_facts("opencode-aisdk", &body, None, &facts).unwrap();
+    assert_eq!(row.role, "user");
+    assert_eq!(
+        row,
+        display::project_with_facts("opencode-aisdk", &body, None, &facts).unwrap()
+    );
+    let history = HistoryEntry::new(1, "m1", 5, body).with_part_keys(keys.to_vec());
+    let display = DisplayEntry::from_history(&history, row);
+    assert_eq!(
+        display.part_keys.unwrap(),
+        [
+            "first#host_frame:head",
+            "first#host_frame:head#",
+            "first",
+            "first#host_frame:tail",
+            "second#host_frame:head",
+            "second",
+            "second#host_frame:tail#",
+            "second#host_frame:tail",
+        ]
+    );
+    assert_eq!(history.part_keys.unwrap(), keys);
+}

@@ -473,6 +473,9 @@ pub struct HistoryEntry {
     /// Verified wrapper around a person's words; message bytes stay whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_frame: Option<crate::attribution::HostFrame>,
+    /// Verified wrappers in stored part order; message bytes stay whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_frames: Option<Vec<crate::attribution::HostFrame>>,
 }
 
 // Match HistoryEntry's wire fields while ignoring unknown members. The
@@ -517,8 +520,16 @@ struct HistoryEntryFields {
     keep: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attribution: Option<crate::attribution::Attribution>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::attribution::deserialize_host_frame"
+    )]
     host_frame: Option<crate::attribution::HostFrame>,
+    #[serde(
+        default,
+        deserialize_with = "crate::attribution::deserialize_host_frames"
+    )]
+    host_frames: Option<Vec<crate::attribution::HostFrame>>,
 }
 
 #[derive(Deserialize)]
@@ -536,7 +547,18 @@ impl TryFrom<HistoryEntryWire> for HistoryEntry {
 
 impl HistoryEntry {
     fn check_frame_facts(&self) -> Result<(), &'static str> {
-        crate::attribution::check_facts(self.attribution.is_some(), self.host_frame.is_some())
+        crate::attribution::check_host_frames(
+            self.attribution.is_some(),
+            self.host_frame.as_ref(),
+            self.host_frames.as_deref(),
+        )
+    }
+
+    /// Read either wire form as one list, empty when neither was sent.
+    pub fn host_frames(&self) -> &[crate::attribution::HostFrame] {
+        self.host_frames
+            .as_deref()
+            .unwrap_or(self.host_frame.as_slice())
     }
 
     pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
@@ -586,12 +608,13 @@ impl HistoryEntry {
             keep: false,
             attribution: None,
             host_frame: None,
+            host_frames: None,
         }
     }
 
     /// The history entry for a message `session.read` serves as `read`:
     /// the same bytes, ordinal, part-digest rows and served part keys. `None` when `read` has
-    /// no `written_at`, which every history entry carries, or conflicting frame facts.
+    /// no `written_at`, which every history entry carries, or invalid frame facts.
     pub fn from_read(read: ReadMessage) -> Option<Self> {
         read.check_frame_facts().ok()?;
         Some(Self {
@@ -614,6 +637,7 @@ impl HistoryEntry {
             keep: read.keep,
             attribution: read.attribution,
             host_frame: read.host_frame,
+            host_frames: read.host_frames,
         })
     }
 

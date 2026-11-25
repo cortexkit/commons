@@ -737,6 +737,66 @@ pub const FILES: &[(&str, &str)] = &[
         "steer-frame-claude-code-v1/tail.txt",
         include_str!("../test-vectors/llm-runner-v1/steer-frame-claude-code-v1/tail.txt"),
     ),
+    (
+        "steer-frame-claude-code-v2/README.md",
+        include_str!("../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/README.md"),
+    ),
+    (
+        "steer-frame-claude-code-v2/two-frames-read.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/two-frames-read.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/two-frames-display.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/two-frames-display.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/one-frame-read.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/one-frame-read.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/one-frame-display.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/one-frame-display.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/bad-tail-candidates.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/bad-tail-candidates.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/bad-tail-read.json",
+        include_str!("../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/bad-tail-read.json"),
+    ),
+    (
+        "steer-frame-claude-code-v2/bad-tail-display.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/bad-tail-display.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/refused-read.json",
+        include_str!("../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/refused-read.json"),
+    ),
+    (
+        "steer-frame-claude-code-v2/compaction-entry.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/compaction-entry.json"
+        ),
+    ),
+    (
+        "steer-frame-claude-code-v2/compaction-gates.json",
+        include_str!(
+            "../test-vectors/llm-runner-v1/steer-frame-claude-code-v2/compaction-gates.json"
+        ),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.
