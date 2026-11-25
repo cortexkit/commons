@@ -114,6 +114,36 @@ pub struct RateWindow {
     /// providers state no split, so absence is the common case.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub breakdown: Option<UsageBreakdown>,
+    /// Which of the account's models draw on this window, as far as the
+    /// upstream says: one of the values in [`model_scope`], or a value a
+    /// consumer has not seen yet.
+    ///
+    /// [`ALL`](model_scope::ALL) means the upstream applies the window to the
+    /// account's usage as a whole: every model counts against it.
+    /// [`SUBSET`](model_scope::SUBSET) means the upstream limits it to some of
+    /// the account's models without listing them in the reading; the window's
+    /// own identifier and title are the only names it gives that group, so a
+    /// consumer that needs the models keeps its own mapping from those.
+    ///
+    /// **Absence means the producer did not say, never "all".** A producer sets
+    /// it only where the upstream's reply shows the window's scope. A consumer
+    /// that needs a decision for an unmarked window must treat it as unknown.
+    ///
+    /// An open string, not an enum: an unknown value must reach the consumer
+    /// intact, not fail the decode of the whole response.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_scope: Option<String>,
+}
+
+/// The values [`RateWindow::model_scope`] carries today.
+///
+/// The list is open. A consumer must handle a value it does not know.
+pub mod model_scope {
+    /// Every model the account uses draws on the window.
+    pub const ALL: &str = "all";
+    /// Only some of the account's models draw on the window, and the reading
+    /// does not list which.
+    pub const SUBSET: &str = "subset";
 }
 
 /// The values [`RateWindow::window_kind`] carries today.
@@ -1145,6 +1175,7 @@ mod tests {
             regeneration: None,
             window_kind: None,
             breakdown: None,
+            model_scope: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
         assert_eq!(
@@ -1186,6 +1217,7 @@ mod tests {
             }),
             window_kind: None,
             breakdown: None,
+            model_scope: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
         let back: RateWindow = serde_json::from_str(&json).expect("round-trips");
@@ -1359,6 +1391,7 @@ mod tests {
                     regeneration: None,
                     window_kind: None,
                     breakdown: None,
+                    model_scope: None,
                 }),
                 ..Default::default()
             },
@@ -1453,6 +1486,7 @@ mod tests {
             regeneration: None,
             window_kind: None,
             breakdown: None,
+            model_scope: None,
         };
         let json = serde_json::to_string(&unrelaxed).unwrap();
         assert!(
@@ -1470,6 +1504,7 @@ mod tests {
             regeneration: None,
             window_kind: None,
             breakdown: None,
+            model_scope: None,
         };
         let json = serde_json::to_string(&relaxed).unwrap();
         assert!(json.contains("\"rawUsedPercent\":70.0"));
@@ -1537,6 +1572,7 @@ mod tests {
             regeneration: None,
             window_kind: None,
             breakdown: None,
+            model_scope: None,
         };
         let json = serde_json::to_string(&window).unwrap();
         assert!(
@@ -1881,6 +1917,7 @@ mod tests {
             regeneration: None,
             window_kind: None,
             breakdown,
+            model_scope: None,
         }
     }
 
@@ -1941,6 +1978,35 @@ mod tests {
             ],
             ["hourly", "five_hour", "daily", "weekly", "monthly"]
         );
+    }
+
+    /// The vocabulary is pinned, so renaming a value (which every consumer
+    /// matches as a string) fails here instead of silently on the wire.
+    #[test]
+    fn the_model_scope_vocabulary_is_pinned() {
+        assert_eq!([model_scope::ALL, model_scope::SUBSET], ["all", "subset"]);
+    }
+
+    /// `model_scope` serializes as `modelScope`, is omitted when unset (so a
+    /// window from a producer that doesn't mark scope is byte-identical to
+    /// before), and an unknown value decodes intact.
+    #[test]
+    fn model_scope_round_trips_is_omitted_when_unset_and_keeps_unknown_values() {
+        let unset = serde_json::to_string(&weekly(None)).unwrap();
+        assert!(!unset.contains("modelScope"), "{unset}");
+        let old: RateWindow = serde_json::from_str(r#"{"usedPercent":5.0}"#).unwrap();
+        assert_eq!(old.model_scope, None);
+
+        let mut window = weekly(None);
+        window.model_scope = Some(model_scope::SUBSET.to_string());
+        let json = serde_json::to_value(&window).unwrap();
+        assert_eq!(json["modelScope"], "subset");
+        let back: RateWindow = serde_json::from_value(json).unwrap();
+        assert_eq!(back, window);
+
+        let future: RateWindow =
+            serde_json::from_str(r#"{"usedPercent":5.0,"modelScope":"per_region"}"#).unwrap();
+        assert_eq!(future.model_scope.as_deref(), Some("per_region"));
     }
 
     /// The field is additive: a window without a split serializes exactly as

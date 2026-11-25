@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-provider-usage"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "serde",
  "serde_json",
