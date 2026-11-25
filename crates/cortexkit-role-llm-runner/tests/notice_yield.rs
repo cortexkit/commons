@@ -25,7 +25,11 @@ fn notice_yield_plan_request_vectors_and_refresh_helpers() {
         let groups: Vec<String> = serde_json::from_value(case["groups"].clone()).unwrap();
         let plan = case["plan"].as_object().unwrap();
         let owner = case["owner"].as_str();
-        let expected = case["field"].as_str().map_or(Ok(()), |s| Err(s.into()));
+        let expected = match (case["accepted"].as_bool(), case["field"].as_str()) {
+            (Some(true), None) => Ok(()),
+            (None, Some(field)) => Err(field.into()),
+            _ => panic!("missing or conflicting plan expectation: {case}"),
+        };
         assert_eq!(
             call_yield::check_plan_for_owner(plan, &groups, owner),
             expected,

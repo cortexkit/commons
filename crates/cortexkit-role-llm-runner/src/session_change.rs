@@ -96,7 +96,7 @@ impl RelaunchRefreshRequest {
     pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::call_yield::check_plan(&self.plan, declared)
     }
-    /// Validate sender marks and the scope-owner-only `yields` grant before
+    /// Validate sender marks, including that `yields` requires a scope owner, before
     /// fetching or storing the refresh plan.
     pub fn check_notice_yield<S: AsRef<str>>(
         &self,
@@ -180,7 +180,7 @@ impl RefreshRequest {
     pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::call_yield::check_plan(&self.plan, declared)
     }
-    /// Validate sender marks and the scope-owner-only `yields` grant before
+    /// Validate sender marks, including that `yields` requires a scope owner, before
     /// fetching or storing the refresh plan.
     pub fn check_notice_yield<S: AsRef<str>>(
         &self,

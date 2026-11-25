@@ -1,4 +1,5 @@
-//! Owner-requested hand-back reuses the person-steer provider and observations.
+//! Check urgent hand-back using the same scripted tool provider and durable
+//! storage observations as the person-steer cases.
 
 use crate::{
     call_yield::{check_stored_before_answer, check_yield, CallYieldObservation},
@@ -13,6 +14,8 @@ use crate::{
 use cortexkit_role_llm_runner::{capabilities, errors, ops, run::RunStatus, send::SendReply};
 use serde_json::{json, Map, Value};
 
+pub(crate) const NON_OWNER_STEER: &str = "notice_yield_non_owner_steer";
+
 #[derive(Default)]
 struct Evidence {
     calls: Vec<CallYieldObservation>,
@@ -24,14 +27,15 @@ struct Evidence {
 fn refusal_fields(name: &str) -> &'static [&'static str] {
     match name {
         "notice_yield_sender_and_delivery_refused" => &["yield", "yield"],
-        "notice_yield_non_owner_plan_refused" => {
-            &["plan.senders[0].yields", "plan.senders[0].yields"]
-        }
         "notice_yield_undeclared_members_refused" => {
             &["plan.senders[0].yields", "plan.senders[0].yields", "yield"]
         }
         _ => &[],
     }
+}
+
+fn expect_start(name: &str, reply: Reply) -> Result<Value, String> {
+    expect_ok(&format!("{name}: start waiting work"), reply)
 }
 
 fn check(name: &str, evidence: &Evidence) -> Result<(), String> {
@@ -128,19 +132,10 @@ where
         let owner_stamp = case.subject.owner_stamp();
         let owner = crate::send_helpers::stamp_module(name, &owner_stamp)?;
         let sender_case = name == "notice_yield_sender_and_delivery_refused";
-        let plan_case = name == "notice_yield_non_owner_plan_refused"
-            || (name == "notice_yield_undeclared_members_refused" && index < 2);
+        let plan_case = name == "notice_yield_undeclared_members_refused" && index < 2;
         let mut members = Map::new();
         let mut entry = json!({"module": owner});
         if plan_case {
-            if name == "notice_yield_non_owner_plan_refused" {
-                let Some(sender) = case.subject.plan_sender() else {
-                    return Ok(Ending::Inapplicable(
-                        "adapter supplies no non-owner sender fixture".into(),
-                    ));
-                };
-                entry["module"] = json!(sender.module);
-            }
             entry["yields"] = json!(index == 0);
         } else if sender_case && index == 1 {
             entry["yields"] = json!(true);
@@ -178,6 +173,25 @@ async fn effect<S: LlmRunnerSubject>(case: &Case<'_, S>, name: &str) -> Result<E
 where
     S::Route: RunnerRoute,
 {
+    let owner_stamp = case.subject.owner_stamp();
+    let owner = crate::send_helpers::stamp_module(name, &owner_stamp)?;
+    let sender = if name == NON_OWNER_STEER {
+        let Some(sender) = case.subject.plan_sender() else {
+            return Ok(Ending::Inapplicable(
+                "adapter supplies no non-owner sender fixture".into(),
+            ));
+        };
+        if sender.module == owner
+            || crate::send_helpers::stamp_module(name, &sender.stamp)? != sender.module
+        {
+            return Err(format!(
+                "{name}: fixture must attest the non-owner plan sender"
+            ));
+        }
+        Some(sender)
+    } else {
+        None
+    };
     let count = if name == "notice_yield_running_calls_and_steer" {
         2
     } else {
@@ -213,9 +227,10 @@ where
             ));
         }
     }
-    let owner_stamp = case.subject.owner_stamp();
-    let owner = crate::send_helpers::stamp_module(name, &owner_stamp)?;
-    let members = json!({"senders":[{"module":owner,"yields":true}]})
+    let marked_module = sender
+        .as_ref()
+        .map_or(owner, |sender| sender.module.as_str());
+    let members = json!({"senders":[{"module":marked_module,"yields":true}]})
         .as_object()
         .unwrap()
         .clone();
@@ -236,8 +251,8 @@ where
     );
     let start: SendReply = decode(
         "start waiting work",
-        expect_ok(
-            "start waiting work",
+        expect_start(
+            name,
             call(&session.route, ops::SESSION_SEND, Value::Object(fields)).await?,
         )?,
     )?;
@@ -260,11 +275,29 @@ where
         .as_object()
         .unwrap()
         .clone();
+    if name == NON_OWNER_STEER {
+        // The legacy string includes idle_start, a separate grant the sender
+        // does not need to steer an already running turn.
+        marked.insert("delivery".into(), json!(["steer"]));
+    }
     if name == "notice_yield_notice_mark_admitted" {
         marked.insert("notice".into(), json!(true));
     }
     let params = crate::send_helpers::params(case, &session, None, &text, &send_id, &marked);
-    let send = call(&session.route, ops::SESSION_SEND, params);
+    let sender_route = match sender {
+        Some(sender) => Some(
+            case.subject
+                .session_route(case.handle.inner(), &session.name, &sender.stamp)
+                .await
+                .map_err(|e| format!("{name}: opening the non-owner sender route: {e}"))?,
+        ),
+        None => None,
+    };
+    let send = call(
+        sender_route.as_ref().unwrap_or(&session.route),
+        ops::SESSION_SEND,
+        params,
+    );
     let inspect = async {
         let result = async {
             tokio::time::timeout(
@@ -388,7 +421,7 @@ mod tests {
         PersonReason,
         UnmarkedSender,
         QueueFirst,
-        NonOwnerPlan,
+        RefuseNonOwnerPlan,
         Undeclared,
         IgnoreNotice,
         Reyield,
@@ -410,7 +443,7 @@ mod tests {
         ) -> Reply {
             let field = if (plan.is_some() && !group && self.fault != Fault::Undeclared)
                 || (plan.is_some_and(|(module, _)| module != "owner")
-                    && self.fault != Fault::NonOwnerPlan)
+                    && self.fault == Fault::RefuseNonOwnerPlan)
             {
                 Some("plan.senders[0].yields")
             } else if plan.is_none()
@@ -446,16 +479,12 @@ mod tests {
             evidence.refusals.push((reply, before, vec![self.writes]));
         }
 
-        fn execute(&mut self, name: &str) -> Evidence {
+        fn execute(&mut self, name: &str) -> Result<Evidence, String> {
             let mut evidence = Evidence::default();
             match name {
                 "notice_yield_sender_and_delivery_refused" => {
                     self.refuse(&mut evidence, true, None, false, true);
                     self.refuse(&mut evidence, true, None, true, false);
-                }
-                "notice_yield_non_owner_plan_refused" => {
-                    self.refuse(&mut evidence, true, Some(("peer", true)), false, true);
-                    self.refuse(&mut evidence, true, Some(("peer", false)), false, true);
                 }
                 "notice_yield_undeclared_members_refused" => {
                     self.refuse(&mut evidence, false, Some(("owner", true)), false, true);
@@ -463,6 +492,10 @@ mod tests {
                     self.refuse(&mut evidence, false, None, true, true);
                 }
                 _ => {
+                    if name == NON_OWNER_STEER {
+                        expect_start(name, self.send(true, Some(("peer", true)), false, true))?;
+                        expect_ok(name, self.send(true, None, true, true))?;
+                    }
                     let notice = name == "notice_yield_notice_mark_admitted";
                     let repeat = name == "notice_yield_second_send_never_reyields";
                     let count = if name == "notice_yield_running_calls_and_steer" {
@@ -494,21 +527,25 @@ mod tests {
                     }
                 }
             }
-            evidence
+            Ok(evidence)
         }
     }
 
-    fn rejects_fault(name: &str, fault: Fault) {
+    fn rejects_fault(name: &str, fault: Fault) -> String {
         let faithful = FakeRunner {
             fault: Fault::None,
             writes: 0,
         }
-        .execute(name);
+        .execute(name)
+        .unwrap();
         check(name, &faithful).unwrap();
-        let faulty = FakeRunner { fault, writes: 0 }.execute(name);
-        let failure = check(name, &faulty).unwrap_err();
+        let failure = FakeRunner { fault, writes: 0 }
+            .execute(name)
+            .and_then(|evidence| check(name, &evidence))
+            .unwrap_err();
         assert!(failure.starts_with(name), "{failure}");
         println!("faulty runner rejected: {failure}");
+        failure
     }
 
     #[test]
@@ -531,8 +568,9 @@ mod tests {
         );
     }
     #[test]
-    fn notice_yield_non_owner_plan_refused_rejects_faulty_runner() {
-        rejects_fault("notice_yield_non_owner_plan_refused", Fault::NonOwnerPlan);
+    fn notice_yield_non_owner_steer_rejects_faulty_runner() {
+        let failure = rejects_fault(NON_OWNER_STEER, Fault::RefuseNonOwnerPlan);
+        assert!(failure.contains("plan.senders[0].yields"), "{failure}");
     }
     #[test]
     fn notice_yield_undeclared_members_refused_rejects_faulty_runner() {

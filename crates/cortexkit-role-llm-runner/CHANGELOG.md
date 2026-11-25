@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.8
+
+- The plan's composer (the scope owner) can set `yields` on any sender
+  (`CONTRACT.md`, §9.23). An attested sender marked `yields: true` can request
+  urgent hand-back with a steer-first `yield: true` send. Unscoped sessions and
+  runners without `notice_yield` still refuse any `yields` plan member,
+  including false.
+- Rollout: upgrade runners before a composer sets `yields` on another module's
+  entry. Older runners refuse the whole plan.
+
 ## 0.9.7
 
 - Host frames become a list (§9.7.1.1): `host_frames` holds one item per framed

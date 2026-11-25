@@ -61,10 +61,11 @@ these cases.
 and keep refusal fields, identical marks, and false/absent retry equivalence.
 The mark retry-identity unit test consumes these cases without hashing marks.
 
-`notice-yield.json` pins accepted and refused owner-only `yields` plan entries
-and urgent `yield` sends, including group gating, steer-first delivery, notice
-and speaker marks, malformed values and false-as-absent sends. The
-`notice_yield` integration tests exercise send and both refresh helpers.
+`notice-yield.json` pins `yields` plan entries and urgent `yield` sends. It
+covers marks on owner and non-owner senders, unscoped plans, group gating,
+steer-first delivery, notice and speaker marks, malformed values and
+false-as-absent sends. The `notice_yield` integration tests exercise send and
+both refresh helpers.
 
 `cache-policy.json` covers accepted cache requests, shape-refusal fields,
 an unknown-zone runner refusal, and actual explicit/implicit step cache reports

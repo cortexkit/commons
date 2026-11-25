@@ -212,7 +212,7 @@ pub mod capabilities {
     pub const RESTART_SURVIVAL: &str = "restart_survival";
     /// Person-steer hand-back of waiting tools, with durable late-result notices.
     pub const CALL_YIELD: &str = "call_yield";
-    /// Scope-owner-requested hand-back of waiting tools for urgent messages.
+    /// Hand-back of waiting tools for urgent messages from plan-marked senders.
     pub const NOTICE_YIELD: &str = "notice_yield";
     /// Session-wide work stop, admitted like interrupt-granted cancellation.
     pub const STOP_ALL: &str = "stop_all";

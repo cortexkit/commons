@@ -1,4 +1,4 @@
-//! Shared person-steer and urgent-owner admission for handed-back calls.
+//! Shared person-steer and urgent-notice admission for handed-back calls.
 
 use crate::{capabilities, delivery_order::PlanSender};
 use serde::{Deserialize, Serialize};
@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 /// Refuse group-only sender marks before decoding, fetching or storing a plan.
 /// Even false requires the mark's group. Also call [`check_plan_for_owner`]
-/// with the session's scope owner to validate who may supply `yields`.
+/// with the session's scope owner to reject `yields` on unscoped sessions.
 pub fn check_plan<S: AsRef<str>>(plan: &Map<String, Value>, groups: &[S]) -> Result<(), String> {
     let declared = groups
         .iter()
@@ -31,21 +31,21 @@ pub fn check_plan<S: AsRef<str>>(plan: &Map<String, Value>, groups: &[S]) -> Res
     Ok(())
 }
 
-/// Only the session's scope owner (the plan composer) may supply `yields`.
-/// An unscoped session has no such sender. Identity comes from route admission,
-/// not a field supplied by the caller in the plan.
+/// The session's scope owner (the plan composer) may set `yields` on any sender.
+/// An unscoped session has no composer and cannot use the mark. Use the scope
+/// owner from route admission, not a field supplied by the caller in the plan.
 pub fn check_plan_for_owner<S: AsRef<str>>(
     plan: &Map<String, Value>,
     groups: &[S],
     scope_owner: Option<&str>,
 ) -> Result<(), String> {
     check_plan(plan, groups)?;
+    if scope_owner.is_some() {
+        return Ok(());
+    }
     if let Some(senders) = plan.get("senders").and_then(Value::as_array) {
         for (index, sender) in senders.iter().enumerate() {
-            if sender.get("yields").is_some()
-                && (scope_owner.is_none()
-                    || sender.get("module").and_then(Value::as_str) != scope_owner)
-            {
+            if sender.get("yields").is_some() {
                 return Err(format!("plan.senders[{index}].yields"));
             }
         }

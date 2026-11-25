@@ -478,7 +478,8 @@ pub struct PlanSender {
     /// This module carries the person's own messages. Requires `call_yield`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub person: bool,
-    /// The scope owner may request urgent hand-back. Requires `notice_yield`.
+    /// The scope owner grants this sender permission to request urgent hand-back.
+    /// Requires `notice_yield`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub yields: bool,
     /// Opt-in trusted relay frame, fixed at intake. Requires `sender_attribution`.
@@ -521,7 +522,7 @@ impl PlanSender {
         self.person = true;
         self
     }
-    /// Mark the scope owner's sender entry for urgent hand-back requests.
+    /// Mark this sender as allowed to request urgent hand-back.
     pub fn with_yields(mut self) -> Self {
         self.yields = true;
         self

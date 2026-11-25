@@ -360,7 +360,7 @@ alias until the next breaking release.
 | `run_awaits` | `run.status`, `session.head`, `session.subscribe` and `run.result` with `awaits` | §6.1.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
 | `call_yield` | Person-steer hand-back of waiting calls and late-result notices; requires `plans`, `delivery_order`, `notices`, `message_marks` | §9.21 |
-| `notice_yield` | Owner-requested hand-back of waiting calls for an urgent message; requires `call_yield` | §9.23 |
+| `notice_yield` | Hand-back of waiting calls for an urgent message from a sender the plan's composer marks; requires `call_yield` | §9.23 |
 | `stop_all` | `session.stop_all`; requires `run_cancel_by_interrupt` | §9.22 |
 | `run_cancel` | `run.cancel` | §6.2 |
 | `run_cancel_by_interrupt` | no additional op; requires `run_cancel` and `delivery_order` | §6.2 |
@@ -7161,18 +7161,22 @@ provider's breakpoint limit (four on Anthropic).
   Stop's treatment of yielded calls and late notices (§9.21) is unchanged;
   only `session.stop_all` asks providers to stop their work.
 
-### 9.23 `notice_yield`: hand back a waiting tool for the owner's urgent message
+### 9.23 `notice_yield`: hand back a waiting tool for an urgent message
 
 - [pinned] A runner declares `notice_yield` only with `call_yield` (§9.21).
   A missing prerequisite is refused as `notice_yield_without_call_yield`.
   Since `call_yield` requires `plans`, `delivery_order`, `notices` and
   `message_marks`, every runner declaring `notice_yield` has `delivery_order`.
-  The session's scope owner decides which of its messages need urgent
-  hand-back; the runner implements the mechanism, not an urgency policy.
+  The session's scope owner, which composes the plan, decides which senders
+  may ask for urgent hand-back, and each such sender decides which of its
+  messages need it. The runner implements the mechanism, not an urgency
+  policy.
 - [pinned] `PlanSender` adds optional `yields: true`. Absence means false and
   is omitted when serialized; sender decoding stays `deny_unknown_fields`.
-  Only the sender entry whose module is the session's scope owner, the plan's
-  composer, may supply this member. On any other entry, refuse
+  The plan's composer, the session's scope owner, may set it on any sender
+  entry of the plan, its own or another module's: for example the sender of
+  a live voice call, which it adds only while the call lasts. A session without a scope
+  owner has no composer, so any `yields` there is refused
   `invalid_params {field: "plan.senders[i].yields"}`. A runner without
   `notice_yield` refuses any supplied `yields`, even false, by the same field,
   before storing or fetching the plan. `call_yield::check_plan` checks the

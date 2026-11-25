@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.91
+
+- Pin llm-runner `=0.9.8`. `notice_yield_non_owner_steer` replaces the old
+  non-owner plan refusal case: the owner marks another sender with `yields`,
+  and a send from that sender must hand a waiting call back with `tool.yield`
+  reason `urgent_notice`. Adapters use the existing `plan_sender()` fixture
+  and must support opening a route to the session that attests that sender's
+  identity rather than the owner's.
+- Rollout: upgrade runners before a composer sets `yields` on another module's
+  entry. Older runners refuse the whole plan.
+
 ## 0.17.90
 
 - Require llm-runner `=0.9.7`, whose read decoder accepts lists of host frames.

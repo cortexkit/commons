@@ -1971,9 +1971,10 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
-    /// A module other than the owner and the stranger, which the
-    /// delivery-order cases name in a plan's `senders`. Required with
-    /// [`Capability::DeliveryOrder`].
+    /// A module other than the owner and the stranger, which cases name in
+    /// a plan's `senders` and use to open an admitted non-owner route.
+    /// Required with [`Capability::DeliveryOrder`], including for
+    /// `notice_yield`, which sends an urgent steer over that route.
     fn plan_sender(&self) -> Option<PlanSenderIdentity> {
         None
     }
