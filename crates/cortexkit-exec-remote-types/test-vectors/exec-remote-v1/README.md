@@ -82,6 +82,8 @@ resulting corpus contains 54 outcome cases and 17 reply cases:
 - `outcomes/crate-local-return-result-files`: two requested cwd-relative files
   with standard padded base64 data and their SHA-256 digests, returned directly
   before the terminal record.
+- `outcomes/crate-local-return-result-executable`: a plain returned file with
+  `executable: true`.
 - `outcomes/crate-local-return-result-over-cap`, `-missing`, `-escape`,
   `-not-regular`, and `-frame-limit`: each known collection failure cause. The
   terminal exit remains successful because file collection does not change the
@@ -204,7 +206,7 @@ wire shapes.
 
 ## Chunked returned files
 
-`return-chunked/` holds 25 crate-local cases for `RunRequest.return_chunked`,
+`return-chunked/` holds 26 crate-local cases for `RunRequest.return_chunked`,
 in the same `.jcs`/`.sha256` format. Each case is an object with:
 
 - `return_paths` and `cap_bytes`: the requested paths and the effective cap,
@@ -228,6 +230,8 @@ paths relative to that directory; tests check its exact inventory and hashes.
 Accepted streams:
 
 - `two-files-one-empty`: two returned files; the zero-byte one has no chunks.
+- `two-files-executable-and-non-executable`: two returned files whose manifest
+  entries report `executable: true` and `executable: false`, respectively.
 - `three-chunks-short-last`: one file in chunks of 4, 4 and 2 bytes.
 - `failed-missing`, `failed-not-regular`, `failed-escape`, `failed-over-cap`:
   one returned file and one failed path per cause. The over-cap entry carries

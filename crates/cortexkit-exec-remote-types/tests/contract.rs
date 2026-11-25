@@ -2,7 +2,11 @@ use cortexkit_exec_remote_types::*;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 const COPIED_OUTCOMES: &[&str] = &[
     "exit",
@@ -55,6 +59,7 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-request-rejected",
     "crate-local-runner-authentication-failed",
     "crate-local-return-result-files",
+    "crate-local-return-result-executable",
     "crate-local-return-result-over-cap",
     "crate-local-return-result-missing",
     "crate-local-return-result-escape",
@@ -265,9 +270,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 38);
+    assert_eq!(LOCAL_OUTCOMES.len(), 39);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 75);
+    assert_eq!(cases().len(), 76);
 }
 
 #[test]
@@ -869,6 +874,7 @@ fn return_result_with_two_files_matches_vector_and_precedes_terminal() {
         "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
     );
     assert_eq!(files[0].data(), b"hello");
+    assert_eq!(files[0].executable(), None);
     assert_eq!(files[1].path(), "dist/world.txt");
     assert_eq!(
         files[1].sha256(),
@@ -880,6 +886,44 @@ fn return_result_with_two_files_matches_vector_and_precedes_terminal() {
         serde_json::to_value(StreamRecord::ReturnResult((*result).clone())).unwrap(),
         raw
     );
+}
+
+#[test]
+fn return_result_with_executable_round_trips() {
+    let raw = value("outcomes", "crate-local-return-result-executable")["stream"][1].clone();
+    let StreamRecord::ReturnResult(result) = serde_json::from_value(raw.clone()).unwrap() else {
+        panic!("expected a return_result record")
+    };
+    let [file] = result.returned_files().unwrap() else {
+        panic!("expected one executable file")
+    };
+    assert_eq!(file.executable(), Some(true));
+    let constructed = ReturnedFile::new(file.path(), file.sha256(), BytePayload(b"hello".to_vec()))
+        .with_executable(true);
+    assert_eq!(constructed, *file);
+    assert_eq!(
+        serde_json::to_value(StreamRecord::ReturnResult(result)).unwrap(),
+        raw
+    );
+}
+
+#[test]
+fn returned_file_mode_never_makes_git_paths_executable() {
+    let tool = Path::new("dist/tool");
+    assert_eq!(returned_file_mode(None, tool), None);
+    assert_eq!(returned_file_mode(Some(false), tool), Some(0o666));
+    assert_eq!(returned_file_mode(Some(true), tool), Some(0o777));
+    assert_eq!(
+        returned_file_mode(Some(true), Path::new("a/not.git/x")),
+        Some(0o777)
+    );
+    for path in [".git/hooks/pre-commit", ".GIT/hooks/pre-commit", "a/.Git/x"] {
+        assert_eq!(
+            returned_file_mode(Some(true), Path::new(path)),
+            Some(0o666),
+            "{path}"
+        );
+    }
 }
 
 #[test]

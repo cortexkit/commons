@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.23
+
+- Add optional `executable` to plain returned files and successful chunked
+  manifest entries. Constructors are unchanged. Absent flags preserve existing
+  wire bytes and write behavior, and older readers ignore the new member.
+- Add `returned_file_mode` to choose the Unix creation mode before the umask.
+  It keeps `.git` paths (including ASCII case variants) non-executable. Windows
+  producers omit the flag, and failed manifest entries must not carry it.
+- Rollout: upgrade every client that writes returned files to 0.2.23 before
+  the runner starts sending the flag, so those clients restore the mode.
+
 ## 0.2.22
 
 - Add the display-only `queue_wait` progress phase after acceptance, with optional

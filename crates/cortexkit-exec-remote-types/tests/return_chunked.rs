@@ -11,6 +11,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 
 const VECTORS: &[&str] = &[
     "two-files-one-empty",
+    "two-files-executable-and-non-executable",
     "three-chunks-short-last",
     "failed-missing",
     "failed-not-regular",
@@ -229,6 +230,7 @@ macro_rules! vector_tests {
 
 vector_tests! {
     vector_two_files_one_empty => "two-files-one-empty",
+    vector_two_files_executable_and_non_executable => "two-files-executable-and-non-executable",
     vector_three_chunks_short_last => "three-chunks-short-last",
     vector_failed_missing => "failed-missing",
     vector_failed_not_regular => "failed-not-regular",
@@ -474,6 +476,61 @@ fn manifest_chunks_are_omitted_when_absent() {
             "path": "a", "cause": "missing", "chunks": count
         }))
         .is_err());
+    }
+}
+
+#[test]
+fn manifest_returned_entries_round_trip_executable_flags() {
+    let records = records("two-files-executable-and-non-executable");
+    let [.., StreamRecord::ReturnManifest(manifest), StreamRecord::Terminal(_)] =
+        records.as_slice()
+    else {
+        panic!("expected a manifest before the terminal record")
+    };
+    let [executable, non_executable] = manifest.files.as_slice() else {
+        panic!("expected two manifest entries")
+    };
+    for (entry, flag) in [(executable, true), (non_executable, false)] {
+        let constructed = ReturnManifestEntry::returned(
+            entry.path(),
+            entry.size().unwrap(),
+            entry.sha256().unwrap(),
+        );
+        assert_eq!(constructed.executable(), None);
+        let legacy = serde_json::to_value(&constructed).unwrap();
+        assert!(legacy.get("executable").is_none());
+        assert_eq!(
+            serde_json::from_value::<ReturnManifestEntry>(legacy).unwrap(),
+            constructed
+        );
+        assert_eq!(entry.executable(), Some(flag));
+        assert_eq!(constructed.with_executable(flag), *entry);
+    }
+}
+
+#[test]
+fn manifest_failed_entries_cannot_carry_an_executable_flag() {
+    let failed = ReturnManifestEntry::failed("a", ReturnPathsFailureCause::Missing);
+    let raw = json!({"path": "a", "cause": "missing"});
+    assert_eq!(
+        serde_json::from_value::<ReturnManifestEntry>(raw.clone()).unwrap(),
+        failed
+    );
+    for flag in [true, false] {
+        assert_eq!(failed.clone().with_executable(flag).executable, None);
+        let mut entry = failed.clone();
+        entry.executable = Some(flag);
+        assert_eq!(entry.executable(), None);
+        assert_eq!(serde_json::to_value(entry).unwrap(), raw);
+        let malformed = json!({"path": "a", "cause": "missing", "executable": flag});
+        let error = serde_json::from_value::<ReturnManifestEntry>(malformed.clone()).unwrap_err();
+        assert!(error.to_string().contains("must not contain executable"));
+        let record = json!({
+            "type": "return_manifest", "job_id": job_id(), "seq": 2,
+            "files": [malformed],
+            "total_bytes": 0, "cap_bytes": 10
+        });
+        assert!(serde_json::from_value::<StreamRecord>(record).is_err());
     }
 }
 

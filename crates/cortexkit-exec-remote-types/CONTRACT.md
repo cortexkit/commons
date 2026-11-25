@@ -328,6 +328,19 @@ reject a record with both or neither. Known causes are `over_cap`, `missing`,
 `escape`, `not_regular`, and `frame_limit`. The cause is open-ended: callers
 preserve unrecognized strings rather than failing to decode the record.
 
+The optional `executable` flag applies to both plain returned files and returned
+entries in a chunked manifest. A supporting producer sets it on every returned
+file: `true` if any execute bit was set on the runner and `false` otherwise. It
+never sets the flag on a failed entry. Windows producers omit it. An absent
+flag means unknown and leaves the receiver's existing write behavior unchanged.
+
+When the flag is present, a Unix receiver creates the file with mode `0777` for
+`true` or `0666` for `false`, both masked by the umask. If any component of the
+relative path is `.git` or an ASCII case variant, the receiver uses `0666`
+regardless of the flag so a job cannot plant an executable Git hook. The
+`returned_file_mode` helper chooses the mode before applying the umask. It does
+not validate where the path resolves.
+
 A collection failure never changes the job's exit outcome. The runner must still
 send the terminal record describing the command's actual outcome; callers must
 not interpret a `return_paths_failed` cause as a process failure.
@@ -420,14 +433,16 @@ the file's position in `return_paths`, from 0. `offset` is the position of
 `files` has one entry per requested path, in request order. Each entry echoes
 its requested path exactly as the caller sent it. An entry is either:
 
-- returned: `{path, size, sha256, chunks?}`, where `sha256` is the lowercase
-  hexadecimal SHA-256 of the file's bytes; or
+- returned: `{path, size, sha256, chunks?, executable?}`, where `sha256` is the
+  lowercase hexadecimal SHA-256 of the file's bytes and `executable` follows the
+  rule above; or
 - failed: `{path, cause, size?, chunks?}`, where `size` is the file's size when the
   runner knew it, for example for an over-cap or expired file.
 
 Exactly one of `sha256` and `cause` is present. Decoding refuses an entry with
-both or neither, and a `sha256` without `size`. `total_bytes` is the sum of the
-returned entries' sizes. `cap_bytes` is the effective cap.
+both or neither, a `sha256` without `size`, or a `cause` with an `executable`
+flag. `total_bytes` is the sum of the returned entries' sizes. `cap_bytes` is
+the effective cap.
 
 `chunks`, when present, is a `u32` count of the `return_chunk` records originally
 sent for that path, regardless of their sizes. A producer that sets it sets it

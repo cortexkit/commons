@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
+use std::path::{Component, Path};
 pub use uuid::Uuid;
 
 /// Raw bytes, not text: an output chunk can split a UTF-8 character.
@@ -1479,6 +1480,9 @@ pub struct ReturnedFile {
     pub sha256: String,
     /// File bytes, encoded as standard padded base64 on the wire.
     pub data: BytePayload,
+    /// Whether any execute bit was set on the runner; `None` means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable: Option<bool>,
 }
 
 impl ReturnedFile {
@@ -1488,7 +1492,14 @@ impl ReturnedFile {
             path: path.into(),
             sha256: sha256.into(),
             data,
+            executable: None,
         }
+    }
+
+    /// Record whether any execute bit was set on the runner.
+    pub fn with_executable(mut self, executable: bool) -> Self {
+        self.executable = Some(executable);
+        self
     }
 
     /// Read the cwd-relative path.
@@ -1505,6 +1516,25 @@ impl ReturnedFile {
     pub fn data(&self) -> &[u8] {
         &self.data.0
     }
+
+    /// Read the reported executable bit, or `None` if unknown.
+    pub fn executable(&self) -> Option<bool> {
+        self.executable
+    }
+}
+
+/// Choose the Unix creation mode for a returned file, before applying the umask.
+///
+/// `None` leaves the caller's existing behavior unchanged. Even with a true
+/// flag, keep files under `.git` (including ASCII case variants) non-executable
+/// so a returned file cannot become an executable Git hook by setting the flag.
+/// This only checks the supplied path components; callers still check confinement.
+pub fn returned_file_mode(executable: Option<bool>, relative_path: &Path) -> Option<u32> {
+    let executable = executable?;
+    let in_git = relative_path.components().any(|component| {
+        matches!(component, Component::Normal(name) if name.as_encoded_bytes().eq_ignore_ascii_case(b".git"))
+    });
+    Some(if executable && !in_git { 0o777 } else { 0o666 })
 }
 
 /// Why requested files could not be returned. Unknown strings remain readable.
@@ -1774,9 +1804,10 @@ pub enum ReturnManifestOutcome {
 
 /// One requested path's entry in a [`ReturnManifest`].
 ///
-/// On the wire a returned entry is `{path, size, sha256, chunks?}` and a failed
-/// entry is `{path, cause, size?, chunks?}`. Decoding refuses an entry with both
-/// `sha256` and `cause`, with neither, or with `sha256` but no `size`.
+/// On the wire a returned entry is `{path, size, sha256, chunks?, executable?}`
+/// and a failed entry is `{path, cause, size?, chunks?}`. Decoding refuses an
+/// entry with both `sha256` and `cause`, with neither, with `sha256` but no
+/// `size`, or with `cause` and an executable flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ReturnManifestEntry {
@@ -1787,6 +1818,8 @@ pub struct ReturnManifestEntry {
     /// a read failure. Preserved on expired replay; omitted by older producers.
     /// A producer that supplies a count must supply it on every manifest entry.
     pub chunks: Option<u32>,
+    /// Whether any execute bit was set on the runner. Absent if unknown or failed.
+    pub executable: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1800,6 +1833,8 @@ struct ReturnManifestEntryWire {
     cause: Option<ReturnPathsFailureCause>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     chunks: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executable: Option<bool>,
 }
 
 impl Serialize for ReturnManifestEntry {
@@ -1811,6 +1846,7 @@ impl Serialize for ReturnManifestEntry {
                 sha256: Some(sha256.clone()),
                 cause: None,
                 chunks: self.chunks,
+                executable: self.executable,
             },
             ReturnManifestOutcome::Failed { cause, size } => ReturnManifestEntryWire {
                 path: self.path.clone(),
@@ -1818,6 +1854,7 @@ impl Serialize for ReturnManifestEntry {
                 sha256: None,
                 cause: Some(cause.clone()),
                 chunks: self.chunks,
+                executable: None,
             },
         };
         wire.serialize(serializer)
@@ -1836,10 +1873,17 @@ impl<'de> Deserialize<'de> for ReturnManifestEntry {
                 };
                 ReturnManifestOutcome::Returned { size, sha256 }
             }
-            (None, Some(cause)) => ReturnManifestOutcome::Failed {
-                cause,
-                size: wire.size,
-            },
+            (None, Some(cause)) => {
+                if wire.executable.is_some() {
+                    return Err(serde::de::Error::custom(
+                        "a failed return_manifest entry must not contain executable",
+                    ));
+                }
+                ReturnManifestOutcome::Failed {
+                    cause,
+                    size: wire.size,
+                }
+            }
             _ => {
                 return Err(serde::de::Error::custom(
                     "a return_manifest entry must contain exactly one of sha256 or cause",
@@ -1850,6 +1894,7 @@ impl<'de> Deserialize<'de> for ReturnManifestEntry {
             path: wire.path,
             outcome,
             chunks: wire.chunks,
+            executable: wire.executable,
         })
     }
 }
@@ -1864,6 +1909,7 @@ impl ReturnManifestEntry {
                 sha256: sha256.into(),
             },
             chunks: None,
+            executable: None,
         }
     }
 
@@ -1873,6 +1919,7 @@ impl ReturnManifestEntry {
             path: path.into(),
             outcome: ReturnManifestOutcome::Failed { cause, size: None },
             chunks: None,
+            executable: None,
         }
     }
 
@@ -1896,6 +1943,22 @@ impl ReturnManifestEntry {
     /// Read the original chunk count, or `None` for an older producer.
     pub fn chunks(&self) -> Option<u32> {
         self.chunks
+    }
+
+    /// Record whether any execute bit was set on the runner, for a returned file only.
+    pub fn with_executable(mut self, executable: bool) -> Self {
+        if matches!(self.outcome, ReturnManifestOutcome::Returned { .. }) {
+            self.executable = Some(executable);
+        }
+        self
+    }
+
+    /// Read the reported executable bit, or `None` if unknown or failed.
+    pub fn executable(&self) -> Option<bool> {
+        match self.outcome {
+            ReturnManifestOutcome::Returned { .. } => self.executable,
+            ReturnManifestOutcome::Failed { .. } => None,
+        }
     }
 
     /// Read the requested path as echoed by the runner.
