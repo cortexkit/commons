@@ -28,6 +28,7 @@
 //! the shared lease root is shared across all modules.
 
 use std::{
+    ffi::OsStr,
     fs::{File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -611,12 +612,62 @@ impl FileLeaseStore {
         }
     }
 
+    /// Remove an existing lease file by name without waiting for the lock.
+    ///
+    /// Pass only the file name (16 lowercase hexadecimal digits followed by
+    /// `.lease`), not a path. An invalid name returns
+    /// [`io::ErrorKind::InvalidInput`]. Returns `true` if the file was removed.
+    /// Returns `false` if the file does not exist, a shared or exclusive holder
+    /// has it locked, or the path no longer points to the opened file once the
+    /// lock is taken.
+    ///
+    /// Only call this after deleting the guarded resource and its stored data.
+    /// Removing the file resets the persisted fence epoch, even if nobody is
+    /// holding the lease. As with [`LeaseHandle::remove`], all acquirers must
+    /// use 0.1.8 or newer: older versions can lock a file they opened before it
+    /// was removed and mistake it for the current lease. On Windows, removal
+    /// requires POSIX delete support from the filesystem.
+    pub fn remove_if_free(&self, file_name: &OsStr) -> io::Result<bool> {
+        self.remove_if_free_with(file_name, |path| open_lease_file(path, false))
+    }
+
+    fn remove_if_free_with(
+        &self,
+        file_name: &OsStr,
+        open: impl FnOnce(&Path) -> io::Result<File>,
+    ) -> io::Result<bool> {
+        let valid_name = file_name
+            .to_str()
+            .and_then(|name| name.strip_suffix(LEASE_FILE_SUFFIX))
+            .is_some_and(|hash| {
+                hash.len() == LEASE_HASH_HEX_LEN
+                    && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            });
+        if !valid_name {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a lease file name (16 lowercase hex digits followed by .lease)",
+            ));
+        }
+
+        let path = std::path::absolute(self.base_dir.join(file_name))?;
+        let file = match open(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        if !try_lock_lease_file(&file, true)? {
+            return Ok(false);
+        }
+        unlink_locked_lease_file(&file, &path)
+    }
+
     /// Stable per-key lock-file path: a deterministic hash of the namespaced
     /// identity, so the same key always maps to the same lock file across
     /// processes and restarts, and distinct modules never collide.
     fn lease_path(&self, key: &LeaseKey) -> PathBuf {
         self.base_dir
-            .join(format!("{}.lease", fnv1a_hex(&key.identity())))
+            .join(format!("{}{LEASE_FILE_SUFFIX}", fnv1a_hex(&key.identity())))
     }
 
     fn acquire_with(
@@ -633,18 +684,8 @@ impl FileLeaseStore {
         }
         for _ in 0..LEASE_OPEN_ATTEMPTS {
             let mut file = open(&path).map_err(LeaseError::Io)?;
-            let lock = if exclusive {
-                file.try_lock_exclusive()
-            } else {
-                // Use fs2, not std's inherent method, for its contention error.
-                FileExt::try_lock_shared(&file)
-            };
-            match lock {
-                Ok(()) => {}
-                Err(e) if is_lock_contended(&e) => {
-                    return Err(LeaseError::Held { key: key.clone() });
-                }
-                Err(e) => return Err(LeaseError::Io(e)),
+            if !try_lock_lease_file(&file, exclusive).map_err(LeaseError::Io)? {
+                return Err(LeaseError::Held { key: key.clone() });
             }
 
             // An exclusive holder could have removed the file after we opened
@@ -678,17 +719,37 @@ impl FileLeaseStore {
     }
 }
 
+const LEASE_FILE_SUFFIX: &str = ".lease";
+const LEASE_HASH_HEX_LEN: usize = 16;
 const LEASE_OPEN_ATTEMPTS: usize = 8;
 
-fn open_lease_file(path: &Path) -> io::Result<File> {
+fn open_lease_file(path: &Path, create: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
+    options
+        .read(true)
+        .write(true)
+        .create(create)
+        .truncate(false);
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
         options.share_mode(windows::LEASE_FILE_SHARE);
     }
     options.open(path)
+}
+
+fn try_lock_lease_file(file: &File, exclusive: bool) -> io::Result<bool> {
+    // Use fs2 for both modes so contention has the same OS error mapping.
+    let lock = if exclusive {
+        FileExt::try_lock_exclusive(file)
+    } else {
+        FileExt::try_lock_shared(file)
+    };
+    match lock {
+        Ok(()) => Ok(true),
+        Err(e) if is_lock_contended(&e) => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 fn lease_path_matches(file: &File, path: &Path) -> io::Result<bool> {
@@ -714,6 +775,17 @@ fn lease_path_matches(file: &File, path: &Path) -> io::Result<bool> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
         result => result,
     }
+}
+
+fn unlink_locked_lease_file(file: &File, path: &Path) -> io::Result<bool> {
+    if !lease_path_matches(file, path)? {
+        return Ok(false);
+    }
+    #[cfg(windows)]
+    windows::remove_locked_lease(file)?;
+    #[cfg(not(windows))]
+    std::fs::remove_file(path)?;
+    Ok(true)
 }
 
 /// A file-backed held lease: holds the OS advisory lock (exclusive or shared)
@@ -765,17 +837,13 @@ impl LeaseHandle for FileLeaseHandle {
                 "a shared lease cannot remove the lease file",
             )));
         }
-        if !lease_path_matches(&self.file, &self.path).map_err(LeaseError::Io)? {
+        if !unlink_locked_lease_file(&self.file, &self.path).map_err(LeaseError::Io)? {
             return Err(LeaseError::Io(io::Error::new(
                 io::ErrorKind::NotFound,
                 "the lease path no longer names the locked file",
             )));
         }
-        #[cfg(windows)]
-        let removed = windows::remove_locked_lease(&self.file);
-        #[cfg(not(windows))]
-        let removed = std::fs::remove_file(&self.path);
-        removed.map_err(LeaseError::Io)
+        Ok(())
     }
 }
 
@@ -787,11 +855,11 @@ impl Drop for FileLeaseHandle {
 
 impl LeaseStore for FileLeaseStore {
     fn acquire(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError> {
-        self.acquire_with(key, true, open_lease_file)
+        self.acquire_with(key, true, |path| open_lease_file(path, true))
     }
 
     fn acquire_shared(&self, key: &LeaseKey) -> Result<Box<dyn LeaseHandle>, LeaseError> {
-        self.acquire_with(key, false, open_lease_file)
+        self.acquire_with(key, false, |path| open_lease_file(path, true))
     }
 }
 
@@ -854,7 +922,7 @@ fn fnv1a_hex(s: &str) -> String {
         h ^= *b as u64;
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("{h:016x}")
+    format!("{h:0LEASE_HASH_HEX_LEN$x}")
 }
 
 #[cfg(test)]
@@ -1112,7 +1180,7 @@ mod tests {
         let path = store.lease_path(&k);
         for exclusive in [true, false] {
             let original = store.acquire(&k).expect("lock original file");
-            let mut stale = Some(open_lease_file(&path).expect("open before removal"));
+            let mut stale = Some(open_lease_file(&path, true).expect("open before removal"));
             original.remove().expect("unlink while the waiter is open");
             let replacement = store.acquire(&k).expect("lock replacement file");
 
@@ -1121,7 +1189,7 @@ mod tests {
                 opens += 1;
                 match stale.take() {
                     Some(file) => Ok(file),
-                    None => open_lease_file(path),
+                    None => open_lease_file(path, true),
                 }
             });
             assert!(
@@ -1162,7 +1230,7 @@ mod tests {
             opens += 1;
             assert!(opens <= LEASE_OPEN_ATTEMPTS, "too many open attempts");
             let writer = store.acquire(&k).expect("lock file before opening");
-            let stale = open_lease_file(path)?;
+            let stale = open_lease_file(path, true)?;
             writer.remove().expect("unlink before the waiter can lock");
             Ok(stale)
         });
@@ -1171,6 +1239,110 @@ mod tests {
             "expected retry exhaustion, got {result:?}"
         );
         assert_eq!(opens, LEASE_OPEN_ATTEMPTS);
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_by_name_unlinks_a_free_file() {
+        let (store, dir) = tmp_store();
+        let k = key("free-by-name");
+        let path = store.lease_path(&k);
+        let writer = store.acquire(&k).expect("seed the epoch");
+        writer.raise_epoch(9).expect("raise the persisted epoch");
+        drop(writer);
+
+        assert!(store.remove_if_free(path.file_name().unwrap()).unwrap());
+        assert_eq!(
+            path.symlink_metadata().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        let next = store.acquire(&k).expect("acquire after removal");
+        assert_eq!(next.epoch(), 1, "removal resets the fence epoch");
+        drop(next);
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_by_name_preserves_exclusive_and_shared_holders() {
+        let (store, dir) = tmp_store();
+        let k = key("held-by-name");
+        let path = store.lease_path(&k);
+        let name = path.file_name().unwrap();
+
+        let writer = store.acquire(&k).expect("exclusive lease");
+        assert!(!store.remove_if_free(name).unwrap());
+        assert!(path.is_file());
+        assert_eq!(writer.raise_epoch(9).expect("writer still works"), 9);
+        drop(writer);
+
+        let reader = store.acquire_shared(&k).expect("shared lease");
+        assert!(!store.remove_if_free(name).unwrap());
+        assert!(path.is_file());
+        assert!(matches!(store.acquire(&k), Err(LeaseError::Held { .. })));
+        assert_eq!(reader.epoch(), 9);
+        let peer = store.acquire_shared(&k).expect("another reader can join");
+        assert_eq!(peer.epoch(), 9, "the persisted epoch was not reset");
+        drop((reader, peer));
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_by_name_does_not_create_a_missing_file() {
+        let (store, dir) = tmp_store();
+        std::fs::create_dir(&dir).expect("create an empty lease directory");
+        let path = store.lease_path(&key("missing-by-name"));
+
+        assert!(!store.remove_if_free(path.file_name().unwrap()).unwrap());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).expect("clean up leases");
+    }
+
+    #[test]
+    fn lease_removal_by_name_rejects_invalid_names_before_opening() {
+        let (store, _) = tmp_store();
+        let absolute = std::path::absolute(store.lease_path(&key("absolute"))).unwrap();
+        for name in [
+            absolute.as_os_str(),
+            OsStr::new("0000000000000000.lease/"),
+            OsStr::new(r"subdir\0000000000000000.lease"),
+            OsStr::new("."),
+            OsStr::new(".."),
+            OsStr::new("0000000000000000"),
+            OsStr::new("000000000000000.lease"),
+            OsStr::new("00000000000000000.lease"),
+            OsStr::new("000000000000000A.lease"),
+            OsStr::new("000000000000000g.lease"),
+        ] {
+            let error = store
+                .remove_if_free_with(name, |_| panic!("must not open an invalid name: {name:?}"))
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn lease_removal_by_name_leaves_a_replacement_in_place() {
+        let (store, dir) = tmp_store();
+        let k = key("replaced-by-name");
+        let path = store.lease_path(&k);
+        let original = store.acquire(&k).expect("lock original file");
+
+        let removed = store
+            .remove_if_free_with(path.file_name().unwrap(), |path| {
+                let stale = open_lease_file(path, false)?;
+                original.remove().expect("unlink while the file is open");
+                let replacement = store.acquire(&k).expect("create a replacement file");
+                replacement.raise_epoch(9).expect("mark the replacement");
+                // Leave the replacement free so retrying would wrongly remove it.
+                drop(replacement);
+                Ok(stale)
+            })
+            .unwrap();
+
+        assert!(!removed, "the opened file no longer has this name");
+        let replacement = store.acquire_shared(&k).expect("read the replacement");
+        assert_eq!(replacement.epoch(), 9, "the replacement was not removed");
+        drop(replacement);
         std::fs::remove_dir_all(dir).expect("clean up leases");
     }
 

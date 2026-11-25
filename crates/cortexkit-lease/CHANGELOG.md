@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9
+
+- `FileLeaseStore::remove_if_free` removes a lease file by name without a key or
+  a blocking lock. Use it only after deleting the guarded resource and its data:
+  removing the lease file resets the fence epoch.
+
 ## 0.1.8
 
 - Exclusive file lease holders can remove the lease file once its guarded
