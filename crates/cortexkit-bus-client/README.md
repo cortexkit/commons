@@ -39,6 +39,19 @@ for directive in ASYNC_NATS_LOG_DIRECTIVE.split(',') {
 }
 ```
 
+With `cortexkit-log` 0.3.7 or later, pass a `Crates` policy to
+`cortexkit_log::init_with_crates` instead. List your module's own crates so they
+keep their existing logger names:
+
+```rust
+use cortexkit_log::{Crates, LevelFilter};
+
+let crates = Crates::new()
+    .own(["my_module_core"])
+    .ceiling("async_nats", LevelFilter::WARN)
+    .ceiling("async_nats::connector", LevelFilter::OFF);
+```
+
 ## Credential lifecycle
 
 The client calls `ckbus.credential` over a subc route whose caller identity the

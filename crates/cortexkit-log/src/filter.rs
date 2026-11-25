@@ -105,35 +105,20 @@ impl LevelFilter {
         module_id: &str,
         path: LoggerPath<'_>,
         level: &Level,
-    ) -> bool {
-        Self::allows(self.threshold_for_path(module_id, path), level)
-    }
-
-    /// Applies the dependency WARN default unless CK_LOG names this dependency.
-    pub(crate) fn dependency_enabled_path(
-        &self,
-        module_id: &str,
-        path: LoggerPath<'_>,
-        level: &Level,
         ceiling: Option<Option<Level>>,
     ) -> bool {
-        let has_dependency_directive = self.directives.iter().any(|(prefix, _)| {
-            is_dependency_directive(prefix, module_id) && path.matches_prefix(module_id, prefix)
-        });
-        let mut threshold = if has_dependency_directive {
-            self.threshold_for_path(module_id, path)
-        } else {
+        let uses_dependency_default = path.dependency_name().is_some()
+            && !self.directives.iter().any(|(prefix, _)| {
+                is_dependency_directive(prefix, module_id) && path.matches_prefix(module_id, prefix)
+            });
+        let threshold = if uses_dependency_default {
             self.threshold(module_id)
                 .map(|own_level| own_level.min(Level::WARN))
+        } else {
+            self.threshold_for_path(module_id, path)
         };
 
-        // A configured ceiling is applied after the CK_LOG directives. `None`
-        // inside the outer option is an explicit OFF ceiling.
-        if let Some(ceiling) = ceiling {
-            threshold = threshold.zip(ceiling).map(|(level, cap)| level.min(cap));
-        }
-
-        Self::allows(threshold, level)
+        Self::allows(apply_ceiling(threshold, ceiling), level)
     }
 
     pub(crate) fn max_level_hint(
@@ -143,8 +128,9 @@ impl LevelFilter {
         ceilings: Option<&HashMap<String, Option<Level>>>,
     ) -> Option<Level> {
         if own_crates_possible {
-            // A dependency-looking prefix can also be an own-crate component
-            // target, where dependency ceilings do not apply.
+            // A directive that names a dependency can also match an event from
+            // one of the module's own crates, and bare crate ceilings never cap
+            // those, so the hint can't lower the level below the directives.
             let mut maximum = self.root;
             for (index, (prefix, level)) in self.directives.iter().enumerate() {
                 if is_last_directive(&self.directives, index, prefix) {
@@ -177,15 +163,17 @@ impl LevelFilter {
                 continue;
             }
             let crate_name = crate_segment.replace('-', "_");
-            let ceiling = ceilings
-                .and_then(|ceilings| ceilings.get(&crate_name))
-                .copied();
-            let effective = match ceiling {
-                Some(None) => None,
-                Some(Some(ceiling)) => level.map(|level| level.min(ceiling)),
-                None => *level,
-            };
-            maximum = max_level(maximum, effective);
+            let ceiling = ceilings.and_then(|ceilings| {
+                let crate_ceiling = *ceilings.get(&crate_name)?;
+                // A more specific path can permit levels above the crate
+                // ceiling, so the hint must account for the least restrictive cap.
+                let path_levels = ceilings.iter().filter_map(|(path, level)| {
+                    let (root, _) = path.split_once("::")?;
+                    (root == crate_name).then_some(*level)
+                });
+                Some(path_levels.fold(crate_ceiling, max_level))
+            });
+            maximum = max_level(maximum, apply_ceiling(*level, ceiling));
         }
         maximum
     }
@@ -257,6 +245,14 @@ fn max_level(current: Option<Level>, candidate: Option<Level>) -> Option<Level> 
         (Some(current), Some(candidate)) => Some(current.max(candidate)),
         (Some(level), None) | (None, Some(level)) => Some(level),
         (None, None) => None,
+    }
+}
+
+// Apply the ceiling after resolving CK_LOG. The inner `None` is an explicit OFF.
+fn apply_ceiling(threshold: Option<Level>, ceiling: Option<Option<Level>>) -> Option<Level> {
+    match ceiling {
+        Some(cap) => threshold.zip(cap).map(|(level, cap)| level.min(cap)),
+        None => threshold,
     }
 }
 

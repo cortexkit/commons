@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Document how to keep bus outage logs and suppress async-nats reconnect logs
+  with `cortexkit-log` 0.3.7 or later.
+
 ## 0.1.17
 
 - Report bus outages once when they start and once when they end, with periodic

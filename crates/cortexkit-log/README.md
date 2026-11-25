@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-log = "0.3.6"
+cortexkit-log = "0.3.7"
 ```
 
 With a [`Crates`](src/lib.rs) policy, own crates retain their existing logger
@@ -16,16 +16,23 @@ underscores become hyphens, so `hyper_util` is logged as
 resolved level, whichever is lower. A `CK_LOG` directive such as
 `<module_id>.dep.hyper-util=debug` can raise one dependency's level.
 
-Use `Crates::ceiling` to set a maximum for a dependency after `CK_LOG`; an OFF
-ceiling drops that crate entirely. Ceilings are useful for transports whose
-verbose logs may contain credentials or connection secrets.
+Use `Crates::ceiling` to set a maximum for a crate or module path after
+`CK_LOG`; an OFF ceiling drops matching events. Paths match the event's Rust
+module path (or its target if none is recorded) on `::` boundaries. The most
+specific ceiling wins, and a module-path ceiling can also cap a path in an
+`own` crate without changing its logger name.
+
+Pair this policy with `cortexkit-bus-client` 0.1.17's outage logs to suppress
+async-nats reconnect and handshake logs while keeping its other warnings and
+errors:
 
 ```rust
 use cortexkit_log::{init_with_crates, Config, Crates, LevelFilter};
 
 let crates = Crates::new()
     .own(["my_module_core"])
-    .ceiling("sensitive_transport", LevelFilter::INFO);
+    .ceiling("async_nats", LevelFilter::WARN)
+    .ceiling("async_nats::connector", LevelFilter::OFF);
 let config = Config::in_dir("my-module", "run/logs");
 let _ = init_with_crates(config, crates);
 ```

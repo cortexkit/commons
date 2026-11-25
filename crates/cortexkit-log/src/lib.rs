@@ -98,19 +98,28 @@ impl Retention {
 /// A complete-line redactor composed after the fleet credential redactor.
 pub type Redactor = dyn for<'line> Fn(&'line str) -> Cow<'line, str> + Send + Sync;
 
-/// Dependency crates whose log names and maximum levels are controlled by this
-/// logger.
+/// Logger names for dependency crates and maximum levels for crates and modules.
 ///
 /// `Crates::own` takes crate names in Rust spelling, for example
 /// `my_module_core`; events from those crates retain the logger-name behavior used
 /// without a crate policy. Other crates are labelled `<module_id>.dep.<crate>`, with
 /// underscores changed to hyphens. Unless a `CK_LOG` directive names a
 /// dependency, its level is capped at WARN or the module's own resolved level,
-/// whichever is lower. A ceiling is enforced after all `CK_LOG` directives;
-/// use it for transports whose debug output may contain credentials or
-/// connection secrets. The cap and ceilings are also checked while writing,
-/// so an outer `filter_fn` cannot bypass them, although its own predicate can
-/// still suppress events.
+/// whichever is lower. Ceilings are enforced after all `CK_LOG` directives and
+/// rechecked while writing, so an outer `filter_fn` cannot bypass them, although
+/// its own predicate can still suppress events.
+///
+/// Pair this with `cortexkit-bus-client` 0.1.17's outage logs to drop redundant
+/// reconnect and handshake logs while keeping async-nats's other warnings and
+/// errors:
+///
+/// ```
+/// use cortexkit_log::{Crates, LevelFilter};
+///
+/// let crates = Crates::new()
+///     .ceiling("async_nats", LevelFilter::WARN)
+///     .ceiling("async_nats::connector", LevelFilter::OFF);
+/// ```
 #[non_exhaustive]
 #[derive(Clone, Debug, Default)]
 pub struct Crates {
@@ -137,14 +146,18 @@ impl Crates {
         self
     }
 
-    /// Sets the maximum level for one dependency crate.
+    /// Sets the maximum level for a dependency crate or a Rust module path.
     ///
-    /// This limit is applied after `CK_LOG`, so no directive can raise the
-    /// dependency above it. `crate_name` uses Rust crate-identifier spelling,
-    /// such as `transport_layer`; underscores become hyphens in the logger
-    /// label. An OFF ceiling drops the dependency's events. This is useful when
-    /// verbose transport logs can contain credentials or connection secrets.
-    pub fn ceiling(mut self, crate_name: impl Into<String>, level: LevelFilter) -> Self {
+    /// Use Rust spelling, such as `transport_layer` or `transport_layer::retry`.
+    /// The event's module path (or target if absent) matches on `::` boundaries.
+    /// The most specific ceiling wins, regardless of insertion order. Module
+    /// path ceilings also apply to [`Self::own`] crates, which ignore bare crate
+    /// ceilings. Neither type of ceiling changes the logger name.
+    ///
+    /// The ceiling applies after `CK_LOG`; no directive can raise the event's
+    /// level above it. An OFF ceiling drops matching events. Ceilings can keep
+    /// verbose transport output containing credentials out of the logs.
+    pub fn ceiling(mut self, crate_or_module: impl Into<String>, level: LevelFilter) -> Self {
         let level = match level.to_string().to_ascii_lowercase().as_str() {
             "off" => None,
             "error" => Some(tracing::Level::ERROR),
@@ -154,8 +167,29 @@ impl Crates {
             "trace" => Some(tracing::Level::TRACE),
             _ => unreachable!("tracing level filters have a fixed set of levels"),
         };
-        self.ceilings.insert(crate_name.into(), level);
+        self.ceilings.insert(crate_or_module.into(), level);
         self
+    }
+
+    fn ceiling_for(
+        &self,
+        mut module_path: &str,
+        dependency: bool,
+    ) -> Option<Option<tracing::Level>> {
+        if self.ceilings.is_empty() {
+            return None;
+        }
+        while let Some((parent, _)) = module_path.rsplit_once("::") {
+            if let Some(level) = self.ceilings.get(module_path) {
+                return Some(*level);
+            }
+            module_path = parent;
+        }
+        if dependency {
+            self.ceilings.get(module_path).copied()
+        } else {
+            None
+        }
     }
 }
 
@@ -628,19 +662,14 @@ impl LogLayer {
     }
 
     fn event_enabled(&self, metadata: &Metadata<'_>, path: format::LoggerPath<'_>) -> bool {
-        match path.dependency_name() {
-            Some(crate_name) => self.filter.dependency_enabled_path(
-                &self.inner.module_id,
-                path,
-                metadata.level(),
-                self.crates
-                    .as_ref()
-                    .and_then(|crates| crates.ceilings.get(crate_name).copied()),
-            ),
-            None => self
-                .filter
-                .enabled_path(&self.inner.module_id, path, metadata.level()),
-        }
+        let ceiling = self.crates.as_ref().and_then(|crates| {
+            crates.ceiling_for(
+                metadata.module_path().unwrap_or(metadata.target()),
+                path.dependency_name().is_some(),
+            )
+        });
+        self.filter
+            .enabled_path(&self.inner.module_id, path, metadata.level(), ceiling)
     }
 }
 

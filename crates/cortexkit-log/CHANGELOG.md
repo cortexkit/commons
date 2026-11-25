@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.7
+
+- Support module-path level ceilings, with the most specific ceiling applied
+  after `CK_LOG` without changing logger names. Use this to suppress async-nats
+  reconnect logs without dropping its other warnings and errors.
+
 ## 0.3.6
 
 - Label dependency events as `<module_id>.dep.<crate>` and add dependency
