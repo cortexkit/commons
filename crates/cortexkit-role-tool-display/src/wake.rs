@@ -242,6 +242,33 @@ fn check_ask_form(value: &Value) -> Result<(), InvalidParams> {
     Ok(())
 }
 
+/// Display-only pointer to a notice record under `(session, writer, id)`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct NoticeRecordRef {
+    pub writer: String,
+    pub id: String,
+}
+
+impl NoticeRecordRef {
+    pub fn new(writer: impl Into<String>, id: impl Into<String>) -> Self {
+        Self {
+            writer: writer.into(),
+            id: id.into(),
+        }
+    }
+
+    pub fn check(&self) -> Result<(), InvalidParams> {
+        for (field, value) in [("writer", &self.writer), ("id", &self.id)] {
+            if !validate_id(value) {
+                return Err(InvalidParams::new(format!("notice_record.{field}")));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -253,6 +280,8 @@ pub struct WakeRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub omitted_items: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice_record: Option<NoticeRecordRef>,
 }
 
 impl WakeRecord {
@@ -260,12 +289,16 @@ impl WakeRecord {
         Self {
             items,
             omitted_items: None,
+            notice_record: None,
         }
     }
 
     /// Reader validation preserves unknown kinds but never accepts invalid known refs.
     pub fn check(&self) -> Result<(), ErrorBody> {
         self.bytes()?;
+        if let Some(notice_record) = &self.notice_record {
+            notice_record.check().map_err(|error| error.refusal())?;
+        }
         for item in &self.items {
             item.check().map_err(|error| error.refusal())?;
         }

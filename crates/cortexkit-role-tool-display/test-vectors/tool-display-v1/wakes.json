@@ -773,6 +773,39 @@
       "notice": {
         "send_id": "send-riding"
       }
+    },
+    {
+      "tag": "awaited_work_notice_record",
+      "write": {
+        "kind": "wake",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "runner"
+        },
+        "session": "session-example",
+        "send_id": "send-awaited-work",
+        "body": {
+          "items": [
+            {
+              "kind": "notice",
+              "refs": {
+                "family": "worker_notice",
+                "title": "Background command finished"
+              },
+              "at": 1700000000000,
+              "excerpt": "The background command finished successfully."
+            }
+          ],
+          "notice_record": {
+            "writer": "example-writer",
+            "id": "record-background-01"
+          }
+        }
+      },
+      "notice": {
+        "send_id": "record-background-01",
+        "record_key_only": true
+      }
     }
   ],
   "refusals": [

@@ -41,6 +41,7 @@ fn wake_constructors_and_registry_agents_validate() {
         "send-constructor",
         WakeRecord::new(vec![item]),
     );
+    assert!(write.body.notice_record.is_none());
     write.check(&writer()).unwrap();
 }
 
@@ -82,11 +83,66 @@ fn wake_vectors_cover_every_kind_caps_and_keyed_riding_notice() {
             );
         }
         if case["tag"] == "keyed_riding_notice" {
+            assert!(write.body.notice_record.is_none());
             assert_eq!(write.send_id, case["notice"]["send_id"]);
             assert_eq!(case["send"]["send_id"], case["notice"]["send_id"]);
             assert_eq!(case["send"]["delivery"], json!(["tool_result"]));
         }
+        if case["tag"] == "awaited_work_notice_record" {
+            let pointer = write.body.notice_record.as_ref().unwrap();
+            assert_eq!(pointer.writer, "example-writer");
+            assert_eq!(pointer.id, case["notice"]["send_id"]);
+            assert_eq!(case["notice"]["record_key_only"], json!(true));
+        }
     }
+}
+
+#[test]
+fn wake_notice_record_pointer_validates_without_changing_legacy_bytes() {
+    let fixture = fixture();
+    let legacy: WakeWrite = serde_json::from_value(
+        fixture["writes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["tag"] == "keyed_riding_notice")
+            .unwrap()["write"]
+            .clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        legacy.check(&writer()).unwrap(),
+        br#"{"items":[{"at":1700000000000,"excerpt":"The indexed files are ready.","kind":"notice","refs":{"family":"worker_notice","title":"Work update"}}]}"#
+    );
+
+    let mut record = legacy.body;
+    for (writer, id, field) in [
+        (
+            String::new(),
+            "record-example".into(),
+            "notice_record.writer",
+        ),
+        (
+            "bad writer".into(),
+            "record-example".into(),
+            "notice_record.writer",
+        ),
+        ("example-writer".into(), String::new(), "notice_record.id"),
+        (
+            "example-writer".into(),
+            "bad record".into(),
+            "notice_record.id",
+        ),
+        ("example-writer".into(), "x".repeat(257), "notice_record.id"),
+    ] {
+        record.notice_record = Some(NoticeRecordRef::new(writer, id));
+        assert_eq!(
+            record.check().unwrap_err().detail.unwrap()["field"],
+            json!(field)
+        );
+    }
+    record.notice_record = Some(NoticeRecordRef::new("example-writer", "x".repeat(256)));
+    record.check().unwrap();
 }
 
 #[test]

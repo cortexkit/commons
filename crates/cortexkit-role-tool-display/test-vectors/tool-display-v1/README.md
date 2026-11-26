@@ -1,8 +1,11 @@
 # tool-display/v1 vectors
 
 `wakes.json` contains tagged wake writes covering every kind, an exact 16 KiB /
-64-item record with `omittedItems`, a keyed riding notice, refusal cases, and
-same-session, moved-row and ambiguous lookups. All agents and names are invented.
+64-item record with `omittedItems`, a notice delivered with a tool result under
+the same key, an awaited-work wake with a display-only `notice_record` pointer,
+legacy wakes without that pointer whose canonical bytes are unchanged, refusal
+cases, and same-session, moved-row and ambiguous lookups. All agents and names
+are invented.
 Wake refs and identities use snake_case; `omittedItems` keeps the display marker's
 existing spelling. Lookup examples describe server behavior, not an app read op.
 
@@ -34,10 +37,11 @@ existing spelling. Lookup examples describe server behavior, not an app read op.
   directory. Pins matching and mismatching tool definitions, and a legacy view
   whose missing `tool` keeps its serialized bytes and requires a catalog check.
 - `notices.json`: notice writes and their served shapes, including finished,
-  failed, still-running and watch notices and a folded pair. A capped write
-  reaches the name, version, key, send id and body limits. Refusals modify the
-  first write unless they name the capped write; an `append` adds bytes to the
-  string at the given JSON pointer. `malformed` cases fail structural decoding.
+  failed, still-running and watch notices, a folded pair, and a record-key-only
+  notice whose `send_id` is never sent to the agent. A capped write reaches the
+  name, version, key, send id and body limits. Refusals modify the first write
+  unless they name the capped write; an `append` adds bytes to the string at the
+  given JSON pointer. `malformed` cases fail structural decoding.
 
 `SHA256SUMS` covers every JSON file and this README. Tests read every JSON file;
 `scripts/gate.sh fast` at the repository root verifies every checksum.

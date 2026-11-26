@@ -64,6 +64,13 @@ fn notice_records_round_trip_writes_served_shapes_and_fold_pair() {
     );
     assert_eq!(find("visible")["tag"], "fold_later");
 
+    let record_key_only = cases
+        .iter()
+        .find(|case| case["tag"] == "record_key_without_send")
+        .unwrap();
+    assert_eq!(record_key_only["record_key_only"], json!(true));
+    assert_eq!(record_key_only["write"]["send_id"], "record-background-01");
+
     let cap: NoticeWrite = serde_json::from_value(fixture["cap_write"].clone()).unwrap();
     assert_eq!(cap.check(&writer).unwrap().len(), 16_384);
     let record = NoticeRecord::from_body(&writer, cap.body).unwrap();

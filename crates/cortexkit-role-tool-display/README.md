@@ -34,9 +34,12 @@ the reply reuses the params for that write kind. `DisplayRecordReady` is the
 strict, identifier-only bus event body published after a record commits. Both
 validate opaque record ids.
 
-Modules can also write immutable notice records for their own sends. The
-display server joins them by attested sender and send id and serves `NoticeRecord`
-only on opt-in reads. A notice without an accepted view keeps the existing
+Modules can also write immutable notice records for their own sends or under a
+record key used only by a wake's display-only `notice_record` pointer. The
+display server joins sends by attested sender and send id and serves
+`NoticeRecord` only on opt-in reads. A wake reader uses its pointed record only
+when the attested writer, session and served view all match; otherwise it uses
+the wake's own items. A notice without an accepted view keeps the existing
 folded card. See [notice records](CONTRACT.md#10-notice-records) for capability
 negotiation, writes, and joins.
 

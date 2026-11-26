@@ -287,6 +287,169 @@
     "invalid_field": "more"
   },
   {
+    "name": "notice_record writer and id minimum",
+    "request": {
+      "method": "awaited_work.finish",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "outcome": "done",
+        "summary": "",
+        "notice_record": {
+          "writer": "a",
+          "id": "!"
+        }
+      }
+    }
+  },
+  {
+    "name": "notice_record writer and id maximum",
+    "request": {
+      "method": "awaited_work.progress",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "text": "Match found",
+        "notice_record": {
+          "writer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "id": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        }
+      }
+    }
+  },
+  {
+    "name": "notice_record writer empty",
+    "request": {
+      "method": "awaited_work.progress",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "text": "Match found",
+        "notice_record": {
+          "writer": "",
+          "id": "watch!42~"
+        }
+      }
+    },
+    "invalid_field": "notice_record.writer"
+  },
+  {
+    "name": "notice_record writer over maximum",
+    "request": {
+      "method": "awaited_work.finish",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "outcome": "done",
+        "summary": "",
+        "notice_record": {
+          "writer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "id": "command!42~"
+        }
+      }
+    },
+    "invalid_field": "notice_record.writer"
+  },
+  {
+    "name": "notice_record writer module syntax",
+    "request": {
+      "method": "awaited_work.progress",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "text": "Match found",
+        "notice_record": {
+          "writer": "Demo_Writer",
+          "id": "watch!42~"
+        }
+      }
+    },
+    "invalid_field": "notice_record.writer"
+  },
+  {
+    "name": "notice_record writer leading hyphen",
+    "request": {
+      "method": "awaited_work.finish",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "outcome": "done",
+        "summary": "",
+        "notice_record": {
+          "writer": "-demo-writer",
+          "id": "command!42~"
+        }
+      }
+    },
+    "invalid_field": "notice_record.writer"
+  },
+  {
+    "name": "notice_record id empty",
+    "request": {
+      "method": "awaited_work.finish",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "outcome": "done",
+        "summary": "",
+        "notice_record": {
+          "writer": "demo-writer",
+          "id": ""
+        }
+      }
+    },
+    "invalid_field": "notice_record.id"
+  },
+  {
+    "name": "notice_record id over maximum",
+    "request": {
+      "method": "awaited_work.progress",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "text": "Match found",
+        "notice_record": {
+          "writer": "demo-writer",
+          "id": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        }
+      }
+    },
+    "invalid_field": "notice_record.id"
+  },
+  {
+    "name": "notice_record id space",
+    "request": {
+      "method": "awaited_work.finish",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "outcome": "done",
+        "summary": "",
+        "notice_record": {
+          "writer": "demo-writer",
+          "id": "command 42"
+        }
+      }
+    },
+    "invalid_field": "notice_record.id"
+  },
+  {
+    "name": "notice_record id non-ASCII",
+    "request": {
+      "method": "awaited_work.progress",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "text": "Match found",
+        "notice_record": {
+          "writer": "demo-writer",
+          "id": "watché"
+        }
+      }
+    },
+    "invalid_field": "notice_record.id"
+  },
+  {
     "name": "text minimum",
     "request": {
       "method": "awaited_work.progress",

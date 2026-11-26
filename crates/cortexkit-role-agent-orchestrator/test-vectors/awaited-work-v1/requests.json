@@ -58,6 +58,32 @@
       "more": null
     }
   },
+  "finish_notice_record": {
+    "method": "awaited_work.finish",
+    "params": {
+      "instance": "demo_1-A",
+      "key": "work!42~",
+      "outcome": "done",
+      "summary": "Complete.\nTwo files checked.",
+      "more": "See the saved report",
+      "notice_record": {
+        "writer": "demo-writer",
+        "id": "command!42~"
+      }
+    }
+  },
+  "progress_notice_record": {
+    "method": "awaited_work.progress",
+    "params": {
+      "instance": "demo_1-A",
+      "key": "work!42~",
+      "text": "First file checked.\nOne remaining.",
+      "notice_record": {
+        "writer": "demo-writer",
+        "id": "watch!42~"
+      }
+    }
+  },
   "malformed": [
     {
       "name": "awaited_work.open extra param",
@@ -94,6 +120,37 @@
           "key": "work!42~",
           "text": "First file checked.\nOne remaining.",
           "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "awaited_work.finish notice_record extra member",
+      "request": {
+        "method": "awaited_work.finish",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "outcome": "done",
+          "summary": "Complete.",
+          "notice_record": {
+            "writer": "demo-writer",
+            "id": "command!42~",
+            "caller": "demo-writer"
+          }
+        }
+      }
+    },
+    {
+      "name": "awaited_work.progress notice_record missing id",
+      "request": {
+        "method": "awaited_work.progress",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "text": "Match found",
+          "notice_record": {
+            "writer": "demo-writer"
+          }
         }
       }
     },

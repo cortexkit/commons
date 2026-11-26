@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.15
+
+- Add optional, display-only `notice_record` pointers to wake bodies and permit
+  notice records keyed without a send. Existing wake bodies keep their canonical
+  bytes. Readers use the pointed record only after attested-writer, session and
+  view checks; otherwise they draw the wake's own items.
+
 ## 0.1.14
 
 - Drop undeclared extensions when joining records and completions, and allow a kept tool view’s record schema to grow within a pin. Apps still treat pins as opaque.

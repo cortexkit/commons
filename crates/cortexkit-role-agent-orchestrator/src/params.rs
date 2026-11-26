@@ -50,12 +50,31 @@ fn validate_instance(instance: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
+fn validate_opaque_id(field: &str, value: &str, maximum: usize) -> Result<(), Refusal> {
+    if !(1..=maximum).contains(&value.len()) || !value.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err(invalid(
+            field,
+            &format!("must be 1 to {maximum} printable ASCII characters without spaces"),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_key(field: &str, key: &str) -> Result<(), Refusal> {
-    if !(1..=128).contains(&key.chars().count()) || !key.bytes().all(|byte| byte.is_ascii_graphic())
+    validate_opaque_id(field, key, 128)
+}
+
+fn validate_module_id(field: &str, module_id: &str) -> Result<(), Refusal> {
+    if !(1..=64).contains(&module_id.len())
+        || !module_id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        || module_id.starts_with('-')
+        || module_id.ends_with('-')
     {
         return Err(invalid(
             field,
-            "must be 1 to 128 printable ASCII characters without spaces",
+            "must be 1 to 64 lowercase ASCII letters, digits or '-', starting and ending with a letter or digit",
         ));
     }
     Ok(())
@@ -103,6 +122,21 @@ pub enum Outcome {
 }
 
 closed_params! {
+    /// A display-only reference to a record stored by the calling module.
+    NoticeRecord {
+        writer: String,
+        id: String,
+    }
+}
+
+impl NoticeRecord {
+    pub fn validate(&self) -> Result<(), Refusal> {
+        validate_module_id("notice_record.writer", &self.writer)?;
+        validate_opaque_id("notice_record.id", &self.id, 256)
+    }
+}
+
+closed_params! {
     FinishParams {
         instance: String,
         key: String,
@@ -110,6 +144,8 @@ closed_params! {
         summary: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         more: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notice_record: Option<NoticeRecord>,
     }
 }
 
@@ -125,6 +161,9 @@ impl FinishParams {
         }) {
             return Err(invalid("more", "must be 1 to 200 characters on one line"));
         }
+        if let Some(notice_record) = &self.notice_record {
+            notice_record.validate()?;
+        }
         Ok(())
     }
 }
@@ -134,6 +173,8 @@ closed_params! {
         instance: String,
         key: String,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notice_record: Option<NoticeRecord>,
     }
 }
 
@@ -143,6 +184,9 @@ impl ProgressParams {
         validate_key("key", &self.key)?;
         if !(1..=2000).contains(&self.text.chars().count()) {
             return Err(invalid("text", "must be 1 to 2000 characters"));
+        }
+        if let Some(notice_record) = &self.notice_record {
+            notice_record.validate()?;
         }
         Ok(())
     }

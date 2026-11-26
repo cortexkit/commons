@@ -35,6 +35,13 @@
     }
   },
   {
+    "code": "invalid_params",
+    "message": "notice_record.writer: must be the route's caller module",
+    "detail": {
+      "field": "notice_record.writer"
+    }
+  },
+  {
     "code": "future_refusal",
     "message": "A future refusal code.",
     "future_member": true

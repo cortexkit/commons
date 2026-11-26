@@ -437,7 +437,14 @@ plain card. Retries retain the first canonical bytes, never refreshed facts.
 
 ### 8.2 Record and item shapes
 
-`WakeRecord` is `{items: [WakeItem, ...], omittedItems?: n}`. An item is
+`WakeRecord` is `{items: [WakeItem, ...], omittedItems?: n,
+notice_record?: NoticeRecordRef}`. `notice_record` is `{writer, id}`. `writer` is
+the bare module id of the notice record's writer, and `id` is that writer's
+record id. Both obey the opaque-field rule in §2; in particular, `id` is 1–256
+printable non-space ASCII bytes. For an awaited-work notice, the wake writer
+copies `notice_record` unchanged from the `awaited_work.finish` or
+`awaited_work.progress` that produced the notice. The pointer does not change
+`items`: those items remain the wake's own card and its fallback. An item is
 `{kind, refs, from?, to?, at, excerpt}`. Field spelling is snake_case for refs
 and envelope fields; `omittedItems` deliberately reuses the existing display
 cut marker. `at` is an i64 JSON integer in milliseconds since Unix epoch.
@@ -506,6 +513,21 @@ and never cuts it itself. Malformed known kinds, missing peer agents and
 overlong excerpts are `invalid_params` naming the field. `WakeWrite::check`
 checks the envelope, verified writer, record and closed writer vocabulary;
 structural decode failures must also be mapped to `invalid_params`.
+
+### 8.4 Display-only notice-record join
+
+A reader that understands `notice_record` looks up the notice record under
+`(session, writer, id)`, where `id` is the notice write's `send_id`. It shows
+that writer's notice record in place of the wake's own card only when the record
+exists and is readable, its attested writer is the module named by `writer`, its
+session is the wake's session, its body and served view pass schema validation,
+and that writer serves its view. The reader shows exactly one card, never both.
+
+With no pointer, or when the record is missing or unreadable, fails schema
+validation, has a different attested writer or session, or its writer does not
+serve its view, the reader shows the wake's own `items` card. The pointer is
+display-only: it changes no send, notice delivery, wake delivery, retry or
+storage requirement.
 
 ## 9. Message records
 
@@ -586,8 +608,13 @@ side writes or serves notice records until the other has declared its token.
 ### 10.1 Writes
 
 The request is `{name: "display.write", arguments: {kind: "notice", runner,
-session, send_id, body}}` (`NoticeWrite`). `runner`, `session` and `send_id` have
-the same meaning and rules as in §8.1. The sender is exclusively the
+session, send_id, body}}` (`NoticeWrite`). `runner` and `session` have the same
+meaning and rules as in §8.1. `send_id` obeys the same opaque-field rule. It is
+normally the writer's own send id as in §8.1. It may instead be a record key
+that the writer never sends to the agent: the id the writer puts in a wake's
+`notice_record.id` (§8.2). Such a record key is unique within that writer's own
+namespace. The immutable storage key and lookup use it exactly like a send id,
+but no runner send or delivery carries it. The sender is exclusively the
 daemon-verified module on the write route. For pull through
 `display_record_ready.v1` and `display.read`, it is the verified module the
 display server called. A claimed
@@ -611,8 +638,11 @@ The immutable key is `(session, attested sender, send_id)`. The display server
 stores the canonical JCS body bytes atomically and keeps them for 180 days.
 A first write answers `stored`, an identical retry `already_stored`, and a retry
 with different bytes `display_write_conflict`. The runner is provenance, not a
-key component. Writers write before sending with their own short deadline. A
-missed write never holds back or fails the send; the app draws the folded notice.
+key component. For a notice that has a send, writers write before sending with
+their own short deadline. A missed write never holds back or fails that send;
+the app draws the folded notice. A record-key-only notice has no send and is
+written for the wake-pointer join in §8.4; its absence likewise leaves the
+wake's own card in place.
 
 `NoticeWrite::check` validates attestation, the envelope and the body and
 returns the canonical bytes. The serving implementation maps structural decode
@@ -627,7 +657,8 @@ For a notice delivered with a tool result rather than as its own message, it
 uses the sender and send id on that `session.notices` entry. A record with the
 pair in the same session joins. For a row moved from another session, a unique
 record for the pair across sessions joins; two or more are ambiguous and none
-joins.
+joins. A record-key-only notice does not join a runner row through `send_ids` or
+`session.notices`; it is fetched for the wake-pointer join in §8.4.
 
 The record joins only if its own writer serves its view. The display server
 constructs `nv1:<sender>:<name>:<version>` with the attested sender, never a

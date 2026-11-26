@@ -1,6 +1,6 @@
 # `agent-orchestrator` role: `awaited-work/v1`
 
-Normative wire contract, crate version **0.1.0**. **Pinned** means a v1
+Normative wire contract, crate version **0.2.0**. **Pinned** means a v1
 implementation must obey the rule. **Open** means the implementer chooses and
 documents it. This crate supplies serde types, bounds checks and packaged
 vectors. There is no transport, store or runtime in it.
@@ -106,8 +106,8 @@ Reply: `{item}` (section 5).
 
 ### 4.2 `awaited_work.finish` (pinned)
 
-Params: `{instance, key, outcome, summary, more?}`, on any route of the
-caller module.
+Params: `{instance, key, outcome, summary, more?, notice_record?}`, on any route
+of the caller module.
 
 - `outcome`: `done` or `failed`.
 - `summary`: what the agent needs to act on, 0 to 2,000 characters. Line
@@ -115,6 +115,20 @@ caller module.
 - `more`: an optional hint of 1 to 200 characters, one line, on where the full
   result is, for example `full output: bash_status({ taskId: "bash-…" })`.
   Long output never travels through the inbox.
+- `notice_record`: an optional `{writer, id}` reference to a display record
+  stored by the caller. `writer` is the caller's bare module id: 1 to 64
+  lowercase ASCII letters, digits or `-`, starting and ending with a letter or
+  digit. `id` is the record's writer-assigned opaque id: 1 to 256 printable
+  non-space ASCII bytes.
+- `notice_record` is display-only. The implementer may store it on its result
+  notice so the apps show the writer's card, and falls back to its own generic
+  card when the reference is absent or the record cannot be found. Nothing
+  about admission, delivery or settlement depends on it.
+- `writer` must be the module that calls `finish` (the route's caller). The
+  implementer refuses a mismatch with `invalid_params`, naming
+  `notice_record.writer`. A module cannot point at another module's records.
+- `notice_record` is part of the request for any idempotency or replay compare
+  of `finish`: a retry sends the same value.
 
 The item ends with state `done` or `failed`, and the implementer delivers the
 result (section 6). `finish` on an item that has already ended changes nothing
@@ -125,7 +139,23 @@ Reply: `{item}`.
 
 ### 4.3 `awaited_work.progress` (pinned)
 
-Params: `{instance, key, text}`, `text` 1 to 2,000 characters.
+Params: `{instance, key, text, notice_record?}`.
+
+- `text`: 1 to 2,000 characters.
+- `notice_record`: an optional `{writer, id}` reference to a display record
+  stored by the caller. `writer` is the caller's bare module id: 1 to 64
+  lowercase ASCII letters, digits or `-`, starting and ending with a letter or
+  digit. `id` is the record's writer-assigned opaque id: 1 to 256 printable
+  non-space ASCII bytes.
+- `notice_record` is display-only. The implementer may store it on its progress
+  notice so the apps show the writer's card, and falls back to its own generic
+  card when the reference is absent or the record cannot be found. Nothing
+  about admission, delivery or settlement depends on it.
+- `writer` must be the module that calls `progress` (the route's caller). The
+  implementer refuses a mismatch with `invalid_params`, naming
+  `notice_record.writer`. A module cannot point at another module's records.
+- `notice_record` is part of the request for any idempotency or replay compare
+  of `progress`: a retry sends the same value.
 
 Something the agent asked to hear about while the work runs, such as a pattern
 it is watching for appearing in a command's output. The item stays open. At

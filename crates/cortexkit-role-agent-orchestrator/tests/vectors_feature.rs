@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use cortexkit_role_agent_orchestrator::{
@@ -103,6 +103,29 @@ fn finish_null_more_decodes_as_absent() {
     assert_eq!(serde_json::to_value(request).unwrap(), value);
 }
 
+#[test]
+fn notice_record_vectors_round_trip() {
+    let requests = fixture("requests.json");
+    for name in ["finish_notice_record", "progress_notice_record"] {
+        let value = &requests[name];
+        let request: Request = serde_json::from_value(value.clone()).unwrap();
+        request.validate().unwrap();
+        assert_eq!(&serde_json::to_value(&request).unwrap(), value);
+    }
+
+    for method in [ops::AWAITED_WORK_FINISH, ops::AWAITED_WORK_PROGRESS] {
+        let value = requests["valid"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["method"] == method)
+            .unwrap();
+        assert!(value["params"].get("notice_record").is_none());
+        let request: Request = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(&serde_json::to_value(&request).unwrap(), value);
+    }
+}
+
 fn assert_invalid(result: Result<(), Refusal>, field: &str, case: &str) {
     let refusal = result.expect_err(case);
     assert_eq!(refusal.code, Code::InvalidParams, "{case}");
@@ -157,6 +180,7 @@ fn shared_fields_are_validated_in_every_operation_that_carries_them() {
 #[test]
 fn refusal_codes_are_complete_and_terminal() {
     let mut known = BTreeSet::new();
+    let mut known_counts = BTreeMap::new();
     let mut future = 0;
     for value in fixture("refusals.json").as_array().unwrap() {
         let refusal: Refusal = serde_json::from_value(value.clone()).unwrap();
@@ -168,7 +192,8 @@ fn refusal_codes_are_complete_and_terminal() {
             assert_eq!(actual, "future_refusal");
             future += 1;
         } else {
-            assert!(known.insert(code.to_string()), "duplicate {code}");
+            known.insert(code.to_string());
+            *known_counts.entry(code.to_string()).or_insert(0usize) += 1;
         }
         let mut expected = value.clone();
         expected.as_object_mut().unwrap().remove("future_member");
@@ -178,6 +203,10 @@ fn refusal_codes_are_complete_and_terminal() {
         known,
         errors::CODES.iter().map(|code| code.to_string()).collect()
     );
+    for code in errors::CODES {
+        let expected = if *code == "invalid_params" { 2 } else { 1 };
+        assert_eq!(known_counts.get(*code), Some(&expected), "{code}");
+    }
     assert_eq!(future, 1);
 }
 

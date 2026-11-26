@@ -185,6 +185,36 @@
           "title": "Watch example output"
         }
       }
+    },
+    {
+      "tag": "record_key_without_send",
+      "record_key_only": true,
+      "write": {
+        "kind": "notice",
+        "runner": {
+          "kind": "reserved",
+          "module_id": "example-runner"
+        },
+        "session": "session-example",
+        "send_id": "record-background-01",
+        "body": {
+          "view": "finished:1",
+          "data": {
+            "status": "finished",
+            "exit_code": 0,
+            "title": "Background example"
+          }
+        }
+      },
+      "served": {
+        "sender": "example-writer",
+        "view": "nv1:example-writer:finished:1",
+        "data": {
+          "status": "finished",
+          "exit_code": 0,
+          "title": "Background example"
+        }
+      }
     }
   ],
   "fold": {
