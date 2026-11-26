@@ -61,9 +61,10 @@ pub const VERSION: &str = "v1";
 /// The string a provider lists in its manifest's `capabilities.provides`.
 pub const PROVIDES: &str = "tool-provider/v1";
 
-/// The optional `role.describe` capability for selecting catalog tools by
-/// their capability tags. The filter is deprecated and will be removed in a
-/// later release; providers may still publish `tool_capabilities` for discovery.
+/// The removed catalog capability-filter token.
+#[deprecated(
+    note = "the catalog capability filter was removed from the contract; this item goes at the next minor release"
+)]
 pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
 
 /// The optional `role.describe` capability for accepting `params.model` on

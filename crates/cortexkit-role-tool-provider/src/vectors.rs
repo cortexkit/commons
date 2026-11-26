@@ -79,7 +79,10 @@ pub const CALL_MODES_JSON: &str = include_str!("../test-vectors/tool-provider-v1
 /// The `catalog-answers.json` vector cases.
 pub const CATALOG_ANSWERS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/catalog-answers.json");
-/// The `catalog-capabilities.json` vector cases.
+/// The removed filter's `catalog-capabilities.json` vector cases.
+#[deprecated(
+    note = "the catalog capability filter was removed from the contract; this item goes at the next minor release"
+)]
 pub const CATALOG_CAPABILITIES_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/catalog-capabilities.json");
 /// The optional model selector's valid and malformed shapes.
@@ -183,7 +186,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("call-keepalive.json", CALL_KEEPALIVE_JSON),
     ("call-modes.json", CALL_MODES_JSON),
     ("catalog-answers.json", CATALOG_ANSWERS_JSON),
-    ("catalog-capabilities.json", CATALOG_CAPABILITIES_JSON),
+    (
+        "catalog-capabilities.json",
+        include_str!("../test-vectors/tool-provider-v1/catalog-capabilities.json"),
+    ),
     ("catalog-model.json", CATALOG_MODEL_JSON),
     (
         "catalog-notice-templates.json",

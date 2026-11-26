@@ -14,9 +14,9 @@ pub struct CaseSpec {
 }
 
 use Capability::{
-    ApprovalExecution, CallKey, CallModes, Cancellation, CatalogCapabilityFilter, CatalogModel,
-    DisableTool, HeldCalls, HeldReplyV1, LateResults, LegacyReply, SchemaPin, ScopeStamp,
-    SystemText, SystemTextOptionalPreset, ToolResultV1, ToolVersions,
+    ApprovalExecution, CallKey, CallModes, Cancellation, CatalogModel, DisableTool, HeldCalls,
+    HeldReplyV1, LateResults, LegacyReply, SchemaPin, ScopeStamp, SystemText,
+    SystemTextOptionalPreset, ToolResultV1, ToolVersions,
 };
 
 const WITHDRAW: &[Capability] = &[HeldCalls, ScopeStamp, CallKey];
@@ -147,24 +147,9 @@ pub const CASES: &[CaseSpec] = &[
         checks: "when the preset-less catalog answer lists presets, the list passes check_presets and tool.catalog answers each listed preset, without a presets list of its own, rather than refusing it",
     },
     CaseSpec {
-        name: "catalog_capability_filter_matches_describe",
-        requires: &[CatalogCapabilityFilter],
-        checks: "when role.describe advertises tool-catalog-capability-filter/v1, selecting all its tool_capabilities returns a catalog whose capability-tag union matches that list; filtering leaves generation unchanged, changes the catalog digest, and an empty list selects no tools",
-    },
-    CaseSpec {
-        name: "catalog_filter_preserves_plan_item",
-        requires: &[CatalogCapabilityFilter],
-        checks: "a provider advertising the filter serves the subject's ordinary plan-item params and preset with a non-empty catalog, rather than applying filter-only parameter rules",
-    },
-    CaseSpec {
         name: "catalog_model_malformed_refused",
         requires: &[CatalogModel],
         checks: "a provider advertising tool-catalog-model/v1 refuses each malformed model selector as invalid_request naming params.model",
-    },
-    CaseSpec {
-        name: "catalog_filter_model_refused",
-        requires: &[CatalogCapabilityFilter],
-        checks: "a filter request carrying model is refused as invalid_request naming params.model, even when its model selector has a valid shape",
     },
     CaseSpec {
         name: "system_text_digests_match_text",

@@ -297,25 +297,6 @@
           "field": "notice_templates"
         }
       }
-    },
-    {
-      "name": "filter request",
-      "provides": [
-        "session-notices/v1"
-      ],
-      "request": {
-        "params": {
-          "capabilities": []
-        },
-        "notice_templates": true
-      },
-      "error": {
-        "code": "invalid_request",
-        "message": "m",
-        "detail": {
-          "field": "notice_templates"
-        }
-      }
     }
   ]
 }

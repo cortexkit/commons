@@ -10,10 +10,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{
-    check_capability_tag, ops, CapabilityTagProblem, CATALOG_CAPABILITY_FILTER, PROVIDES,
-    REQUIRED_OPS,
-};
+use crate::{check_capability_tag, ops, CapabilityTagProblem, PROVIDES, REQUIRED_OPS};
 
 /// The `role.describe` answer: every major of the role the module serves,
 /// each with its own ops and stability. The caller picks the highest major it
@@ -29,13 +26,12 @@ pub struct RoleDescribe {
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
     /// Optional module-level capabilities. `tool-provider/v1` defines
-    /// [`CATALOG_CAPABILITY_FILTER`] and [`crate::TOOL_VIEWS_CAPABILITY`]; session capabilities travel in the
+    /// [`crate::TOOL_VIEWS_CAPABILITY`]; session capabilities travel in the
     /// catalog answer instead.
     #[serde(default)]
     pub capabilities: Vec<String>,
     /// The provider's sorted, unique index of catalog tool capability tags for
-    /// discovery. Any provider may publish it; providers advertising
-    /// [`CATALOG_CAPABILITY_FILTER`] must publish it.
+    /// discovery. Any provider may publish it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_capabilities: Vec<String>,
 }
@@ -101,15 +97,15 @@ impl RoleDescribe {
 
 /// Intersect a consumer's wanted tool tags with the provider's advertised
 /// tags. The result is sorted and deduplicated for `params.capabilities`; a
-/// provider that does not advertise [`CATALOG_CAPABILITY_FILTER`] returns
+/// provider that does not advertise `tool-catalog-capability-filter/v1` returns
 /// `None`, even if it publishes its tag index. A consumer must not send
 /// `params.capabilities` to that provider.
 ///
-/// Run [`check_describe`] first. A provider that advertises the filter but
-/// lists no `tool_capabilities` (one built before this field existed) fails it
-/// with [`DescribeProblem::MissingToolCapabilities`]; skip that provider's
-/// tools rather than calling this, because an empty result here would mean "no
-/// tag in common" and send a request that selects nothing.
+/// This preserves the advertised-token intersection for existing callers, but
+/// the catalog capability filter is no longer part of the contract.
+#[deprecated(
+    note = "the catalog capability filter was removed from the contract; this item goes at the next minor release"
+)]
 pub fn select_tool_capabilities<I, S>(describe: &RoleDescribe, wanted: I) -> Option<Vec<String>>
 where
     I: IntoIterator<Item = S>,
@@ -118,7 +114,7 @@ where
     if !describe
         .capabilities
         .iter()
-        .any(|capability| capability == CATALOG_CAPABILITY_FILTER)
+        .any(|capability| capability == "tool-catalog-capability-filter/v1")
     {
         return None;
     }
@@ -173,8 +169,7 @@ pub enum DescribeProblem {
     /// The answer carries a `tools` list. The catalog comes only from
     /// `tool.catalog`, so a describe answer stays cacheable.
     CarriesToolList,
-    /// The provider lists no tags in its index or advertises capability
-    /// filtering without an index.
+    /// The answer carries an empty `tool_capabilities` index.
     MissingToolCapabilities,
     /// Tool capability tags are not in bytewise sorted order.
     UnsortedToolCapabilities,
@@ -185,11 +180,10 @@ pub enum DescribeProblem {
         tag: String,
         problem: CapabilityTagProblem,
     },
-    /// Not produced since 0.15.19: providers may publish tags for discovery
-    /// without supporting catalog filtering.
+    /// Not produced: tool capability indexes do not require a filter.
     #[deprecated(
         since = "0.15.19",
-        note = "tool capability indexes do not require a filter"
+        note = "the catalog capability filter was removed from the contract; this item goes at the next minor release"
     )]
     ToolCapabilitiesWithoutFilter,
 }
@@ -226,11 +220,7 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     if problems.is_empty() {
-        let advertises_filter = describe
-            .capabilities
-            .iter()
-            .any(|capability| capability == CATALOG_CAPABILITY_FILTER);
-        if advertises_filter || object.contains_key("tool_capabilities") {
+        if object.contains_key("tool_capabilities") {
             if describe.tool_capabilities.is_empty() {
                 problems.push(DescribeProblem::MissingToolCapabilities);
             } else {
@@ -329,37 +319,10 @@ mod tests {
 
     #[test]
     fn role_describe_omits_empty_tool_capabilities_on_the_wire() {
-        let describe = RoleDescribe::new(Vec::new(), "test")
-            .with_capabilities(vec![CATALOG_CAPABILITY_FILTER.into()]);
+        let describe = RoleDescribe::new(Vec::new(), "test");
         let value = serde_json::to_value(&describe).unwrap();
         assert!(!value.as_object().unwrap().contains_key("tool_capabilities"));
         let decoded: RoleDescribe = serde_json::from_value(value).unwrap();
         assert!(decoded.tool_capabilities.is_empty());
-    }
-
-    #[test]
-    fn consumer_selects_the_sorted_intersection_only_for_advertising_providers() {
-        let describe = RoleDescribe::new(
-            vec![Major {
-                version: PROVIDES.into(),
-                ops: REQUIRED_OPS.iter().map(|op| (*op).to_owned()).collect(),
-                stability: "alpha".into(),
-            }],
-            "test",
-        )
-        .with_capabilities(vec![CATALOG_CAPABILITY_FILTER.into()])
-        .with_tool_capabilities(["zeta:tool/v1", "code.read/v1", "code.read/v1"]);
-        assert_eq!(
-            select_tool_capabilities(
-                &describe,
-                ["zeta:tool/v1", "code.read/v1", "missing:tool/v1"]
-            ),
-            Some(vec!["code.read/v1".into(), "zeta:tool/v1".into()])
-        );
-        let index_only = describe.with_capabilities(Vec::new());
-        assert_eq!(
-            select_tool_capabilities(&index_only, ["code.read/v1"]),
-            None
-        );
     }
 }

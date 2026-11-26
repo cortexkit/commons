@@ -13,18 +13,16 @@ use cortexkit_role_tool_provider::{
     call::{SchemaPin, ToolMajorPin, CALL_KEY_FIELD, SCHEMA_PIN_FIELD},
     catalog::{
         check_flat_schema, check_modes, check_presets, check_reply, is_schema_digest,
-        params_for_capabilities, schema_digest, session_capabilities, system_text_digest,
-        CatalogAnswer,
+        schema_digest, session_capabilities, system_text_digest, CatalogAnswer,
     },
     check_capability_tag,
-    describe::{check_describe, select_tool_capabilities},
+    describe::check_describe,
     errors,
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
     lint_input_schema, ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    CallMode, CATALOG_CAPABILITY_FILTER, CATALOG_MODEL, HELD_REPLY_V1, PROVIDES,
-    TOOL_RESULT_V1_CAPABILITY,
+    CallMode, CATALOG_MODEL, HELD_REPLY_V1, PROVIDES, TOOL_RESULT_V1_CAPABILITY,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -114,7 +112,6 @@ where
     }
 
     let mut capabilities = subject.capabilities();
-    capabilities.remove(&Capability::CatalogCapabilityFilter);
     capabilities.remove(&Capability::CatalogModel);
     capabilities.remove(&Capability::SessionNotices);
     // A provider may serve every known mode on every tool. Without a
@@ -130,7 +127,7 @@ where
         .map_err(|e| format!("spawning the provider failed: {e}"));
 
     // The live role.describe answer, not a subject flag, decides whether the
-    // catalog filter and model cases are required.
+    // catalog model and session-notice cases are required.
     let catalog_capabilities = match &main {
         Ok(handle) => {
             let case = Case {
@@ -153,10 +150,6 @@ where
         Err(_) => Vec::new(),
     };
     for (token, capability) in [
-        (
-            CATALOG_CAPABILITY_FILTER,
-            Capability::CatalogCapabilityFilter,
-        ),
         (CATALOG_MODEL, Capability::CatalogModel),
         (
             cortexkit_role_tool_provider::SESSION_NOTICES_V1,
@@ -525,12 +518,7 @@ where
             "catalog_digest_only" => self.catalog_digest_only().await,
             "catalog_unknown_preset_refused" => self.catalog_unknown_preset_refused().await,
             "catalog_listed_presets_served" => self.catalog_listed_presets_served().await,
-            "catalog_capability_filter_matches_describe" => {
-                self.catalog_capability_filter_matches_describe().await
-            }
-            "catalog_filter_preserves_plan_item" => self.catalog_filter_preserves_plan_item().await,
             "catalog_model_malformed_refused" => self.catalog_model_malformed_refused().await,
-            "catalog_filter_model_refused" => self.catalog_filter_model_refused().await,
             "system_text_digests_match_text" => self.system_text_digests_match_text().await,
             "system_text_facts_accepted"
             | "system_text_facts_malformed_refused"
@@ -640,17 +628,6 @@ where
             .map_err(|e| format!("tool.catalog answer does not decode: {e}"))
     }
 
-    fn remove_unadvertised_catalog_filter(&self, arguments: &mut Value) {
-        if !self
-            .capabilities
-            .contains(&Capability::CatalogCapabilityFilter)
-        {
-            if let Some(params) = arguments.get_mut("params").and_then(Value::as_object_mut) {
-                params.remove("capabilities");
-            }
-        }
-    }
-
     async fn catalog_with(
         &self,
         route: &S::Route,
@@ -660,7 +637,6 @@ where
         if digest_only {
             arguments["digest_only"] = json!(true);
         }
-        self.remove_unadvertised_catalog_filter(&mut arguments);
         self.catalog_for(route, arguments).await
     }
 
@@ -973,8 +949,7 @@ where
     /// provider, so a pass says nothing about that promise.
     async fn catalog_emits_events_boolean(&self) -> CaseResult {
         let route = self.plain_route().await?;
-        let mut arguments = self.subject.catalog_arguments();
-        self.remove_unadvertised_catalog_filter(&mut arguments);
+        let arguments = self.subject.catalog_arguments();
         let body = expect_response(
             "tool.catalog",
             request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
@@ -1124,22 +1099,6 @@ where
         Ok(())
     }
 
-    async fn catalog_filter_preserves_plan_item(&self) -> CaseResult {
-        let route = self.plain_route().await?;
-        let arguments = self.subject.catalog_arguments();
-        if arguments["params"].get("capabilities").is_some() {
-            return Err(
-                "catalog_arguments must supply an ordinary plan-item request without capabilities"
-                    .into(),
-            );
-        }
-        let catalog = self.catalog_for(&route, arguments).await?;
-        if catalog.tools.is_empty() {
-            return Err("an ordinary plan-item request must return a non-empty catalog".into());
-        }
-        Ok(())
-    }
-
     async fn catalog_model_malformed_refused(&self) -> CaseResult {
         let route = self.plain_route().await?;
         let vectors: Value =
@@ -1150,9 +1109,6 @@ where
             .ok_or("missing model refusal vectors")?
         {
             let mut arguments = self.subject.catalog_arguments();
-            if let Some(params) = arguments["params"].as_object_mut() {
-                params.remove("capabilities");
-            }
             arguments["params"]["model"] = case["params"]["model"].clone();
             let what = format!("tool.catalog with malformed model: {}", case["name"]);
             let error = expect_error(
@@ -1165,127 +1121,9 @@ where
         Ok(())
     }
 
-    async fn catalog_filter_model_refused(&self) -> CaseResult {
-        let route = self.plain_route().await?;
-        let error = expect_error(
-            "tool.catalog filter carrying model",
-            request(
-                &route,
-                op_body(
-                    ops::TOOL_CATALOG,
-                    json!({
-                        "params": {
-                            "capabilities": [],
-                            "model": {"provider": "example", "model": "example-model"}
-                        }
-                    }),
-                ),
-            )
-            .await?,
-        )?;
-        expect_invalid_field(&error, "params.model")
-    }
-
-    async fn catalog_capability_filter_matches_describe(&self) -> CaseResult {
-        let route = self.plain_route().await?;
-        let answer = self.describe(&route).await?;
-        let describe = check_describe(&answer)
-            .map_err(|problems| format!("role.describe refused: {problems:?}"))?;
-        if !describe
-            .capabilities
-            .iter()
-            .any(|capability| capability == CATALOG_CAPABILITY_FILTER)
-        {
-            return Err("role.describe no longer advertises catalog capability filtering".into());
-        }
-        let all_tags = select_tool_capabilities(&describe, &describe.tool_capabilities)
-            .ok_or("the advertised catalog filter was not selected")?;
-        if all_tags != describe.tool_capabilities {
-            return Err(format!(
-                "selecting all advertised tool capabilities returned {all_tags:?}; expected {:?}",
-                describe.tool_capabilities
-            ));
-        }
-
-        let all = self
-            .catalog_for(
-                &route,
-                json!({ "params": params_for_capabilities(&all_tags) }),
-            )
-            .await?;
-        let mut union: Vec<String> = all
-            .tools
-            .iter()
-            .flat_map(|tool| tool.capabilities.iter().cloned())
-            .collect();
-        union.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-        union.dedup();
-        if union != describe.tool_capabilities {
-            return Err(format!(
-                "catalog capability union {union:?} does not match role.describe tool_capabilities {:?}",
-                describe.tool_capabilities
-            ));
-        }
-        if all.tools.iter().any(|tool| {
-            !tool
-                .capabilities
-                .iter()
-                .any(|tag| all_tags.iter().any(|requested| requested == tag))
-        }) {
-            return Err("the filtered catalog contains a tool with no requested capability".into());
-        }
-
-        let explicitly_empty = self
-            .catalog_for(
-                &route,
-                json!({ "params": params_for_capabilities(std::iter::empty::<&str>()) }),
-            )
-            .await?;
-        if !explicitly_empty.tools.is_empty() {
-            return Err("an empty capability list must select no tools".into());
-        }
-        if all.generation != explicitly_empty.generation
-            || all.catalog_digest == explicitly_empty.catalog_digest
-        {
-            return Err(format!(
-                "filtering changed generation or failed to change the filtered digest: all=({}, {}), explicitly empty=({}, {})",
-                all.generation,
-                all.catalog_digest,
-                explicitly_empty.generation,
-                explicitly_empty.catalog_digest
-            ));
-        }
-
-        if let Some(first_tag) = all_tags.first() {
-            let single = self
-                .catalog_for(
-                    &route,
-                    json!({ "params": params_for_capabilities([first_tag]) }),
-                )
-                .await?;
-            if single.generation != all.generation {
-                return Err(format!(
-                    "generation changed with the filter: all {:?}, single {:?}",
-                    all.generation, single.generation
-                ));
-            }
-            let all_names: std::collections::BTreeSet<_> =
-                all.tools.iter().map(|tool| &tool.name).collect();
-            let single_names: std::collections::BTreeSet<_> =
-                single.tools.iter().map(|tool| &tool.name).collect();
-            if all_names != single_names && all.catalog_digest == single.catalog_digest {
-                return Err(
-                    "catalog_digest did not change when filtering changed the tools".into(),
-                );
-            }
-        }
-        Ok(())
-    }
-
     async fn catalog_unknown_preset_refused(&self) -> CaseResult {
         let route = self.plain_route().await?;
         let mut arguments = self.subject.catalog_arguments();
-        self.remove_unadvertised_catalog_filter(&mut arguments);
         arguments[PRESET_FIELD] = json!(UNDEFINED_PRESET);
         let error = expect_error(
             &format!("tool.catalog with preset {UNDEFINED_PRESET:?}"),
@@ -1298,7 +1136,6 @@ where
     /// `system_text`: the request whose answer lists the served presets.
     fn preset_less_arguments(&self) -> Value {
         let mut arguments = self.subject.catalog_arguments();
-        self.remove_unadvertised_catalog_filter(&mut arguments);
         if let Some(members) = arguments.as_object_mut() {
             for member in [PRESET_FIELD, "digest_only", "system_text"] {
                 members.remove(member);
@@ -1340,11 +1177,10 @@ where
     }
 
     fn system_text_arguments(&self) -> Result<Value, String> {
-        let mut arguments = self
+        let arguments = self
             .subject
             .system_text_catalog_arguments()
             .ok_or("declares system_text but supplies no system-text catalog arguments")?;
-        self.remove_unadvertised_catalog_filter(&mut arguments);
         if !arguments["system_text"].is_object() {
             return Err(format!(
                 "request system_text received {}; expected {{preset, params}}",

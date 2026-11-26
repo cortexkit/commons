@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.22
+
+- Pin tool-provider `=0.15.20` and remove the catalog capability-filter request
+  from the kit and fake provider. The `tool_capabilities` index and per-tool
+  capability tags remain for discovery.
+- Remove `catalog_capability_filter_matches_describe`,
+  `catalog_filter_preserves_plan_item`, and `catalog_filter_model_refused`
+  cases; every non-filter case is unchanged. The now-unused
+  `Capability::CatalogCapabilityFilter` remains for source compatibility and
+  goes at the next minor release.
+
 ## 0.15.21
 
 - Pin tool-provider `=0.15.19`. `role_describe_shape` accepts a tag index

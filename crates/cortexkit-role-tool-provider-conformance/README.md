@@ -235,32 +235,6 @@ really never makes the provider emit an event, directly or relayed from
 upstream, cannot be observed from outside the provider, so a pass says
 nothing about that promise.
 
-## Catalog capability filtering
-
-Version **0.15.21** pins provider **0.15.19**. `role_describe_shape` accepts
-a valid `tool_capabilities` tag index even when the provider does not advertise
-the deprecated catalog filter. The kit does not send `params.capabilities`
-to providers that do not advertise it.
-
-`catalog_capability_filter_matches_describe` runs only when the live
-`role.describe` answer advertises `tool-catalog-capability-filter/v1`; otherwise
-it is reported as a named skip. The case requests the full discovered
-`tool_capabilities` list and checks that the filtered catalog's tag union is
-exactly that list. It also checks that an empty list selects no tools,
-that filtering does not change `generation`, and that a changed tool selection
-changes `catalog_digest`. No subject flag can opt out of a live advertisement.
-
-`catalog_filter_preserves_plan_item` runs under the same live filter token.
-Supply `catalog_arguments()` as an ordinary plan-item request: no
-`params.capabilities`, the provider's documented params when supported, and
-optionally a preset it serves. The case requires a non-empty catalog and fails
-on a refusal, including one naming a documented `params.<key>`. This keeps
-discovery's filter requests separate from ordinary plan items.
-
-`catalog_filter_model_refused` also requires only the live filter token. It
-sends `capabilities` with a well-formed `model` and requires `invalid_request`
-naming `params.model`, even if the provider also advertises model support.
-
 ## Catalog model selectors
 
 `catalog_model_malformed_refused` runs only when the live `role.describe`
@@ -269,7 +243,7 @@ from the shared `catalog-model.json` samples on ordinary requests and requires
 `invalid_request` naming `params.model` for each. A selector is exactly an
 object with non-empty `provider` and `model` strings, with no `variant` or
 other member. Consumers send model selectors only to providers advertising
-this token, and never on filter requests. How a provider treats a model it
+this token. How a provider treats a model it
 does not recognise remains its own documented rule. The case is skipped by
 name without the live token, not opted out by a subject flag.
 

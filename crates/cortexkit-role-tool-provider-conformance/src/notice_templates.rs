@@ -26,9 +26,6 @@ pub(crate) async fn check<R: ToolRoute>(
         .ok_or_else(|| format!("{CASE}: catalog arguments must be an object"))?;
     request.remove("notice_templates");
     request.remove("digest_only");
-    if let Some(params) = request.get_mut("params").and_then(Value::as_object_mut) {
-        params.remove("capabilities");
-    }
     let ObservedFrame::Response(unasked) = catalog(route, arguments.clone()).await? else {
         return Err(format!("{CASE}: unasked catalog must answer normally"));
     };

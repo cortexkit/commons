@@ -21,15 +21,10 @@ constant for each file, including `held-reply-v1.json` and `held-update-v1.json`
 the crate package, pinned by `SHA256SUMS`.
 
 Any provider may publish a `tool_capabilities` tag index in `role.describe`
-for discovery. Consumers must not send `params.capabilities` unless the
-provider still advertises the deprecated `tool-catalog-capability-filter/v1`
-token, which will be removed in a later release. Ordinary plan items without
-`params.capabilities` retain the provider's documented params and preset.
-`catalog::check_capability_params` rejects other keys only on filter requests.
-Providers accepting `params.model` advertise `CATALOG_MODEL`
+for discovery. Providers accepting `params.model` advertise `CATALOG_MODEL`
 (`tool-catalog-model/v1`) in `role.describe`; consumers send it only to those
-providers and never on filter requests. `catalog::check_model_param` validates
-the selector's exact `{provider, model}` shape.
+providers. `catalog::check_model_param` validates the selector's exact
+`{provider, model}` shape.
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-tool-provider-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 

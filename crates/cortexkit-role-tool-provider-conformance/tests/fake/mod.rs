@@ -38,8 +38,8 @@ use cortexkit_role_tool_provider_conformance::{
             check_versioned_call, SchemaPin, ToolCallRequest, VersionedSchemaPin, CALL_KEY_FIELD,
         },
         catalog::{
-            check_model_param, composition_digest, schema_digest, select_by_capabilities,
-            serves_call_mode, system_text_digest, CatalogRequest, CatalogTool, ToolVersion,
+            check_model_param, composition_digest, schema_digest, serves_call_mode,
+            system_text_digest, CatalogRequest, CatalogTool, ToolVersion,
         },
         consumer_reads_held_reply_v1, consumer_reads_tool_result_v1,
         describe::{Major, RoleDescribe},
@@ -54,7 +54,7 @@ use cortexkit_role_tool_provider_conformance::{
             check_record_scope, parse_withdraw_request, resolve_carrier, CallerProblem,
             CarrierResolution, CompletedResult, StartedOutcome, WithdrawAnswer,
         },
-        CallMode, CATALOG_CAPABILITY_FILTER, CATALOG_MODEL, REQUIRED_OPS,
+        CallMode, CATALOG_MODEL, REQUIRED_OPS,
     },
     CallModeProbe, CallSpec, Capability, Exchange, MinorVersionProbe, ObservedFrame, RouteFailure,
     ScopedPrincipals, ToolProviderSubject, ToolRoute, ToolVersionFixture,
@@ -224,18 +224,10 @@ pub struct Defects {
     pub malformed_result: bool,
     /// Send tool-result/v1 even when the route's bind does not declare support.
     pub ignore_consumer_capabilities: bool,
-    /// Do not advertise capability filtering in `role.describe`.
-    pub omit_catalog_capability_filter: bool,
     /// Do not advertise the optional catalog model selector.
     pub omit_catalog_model: bool,
-    /// Treat an ordinary plan item as an empty filter request.
-    pub empty_ordinary_catalog: bool,
-    /// Apply filter-only parameter rules to the documented `scope` param.
-    pub refuse_ordinary_scope: bool,
     /// Accept malformed model selectors instead of checking their shape.
     pub accept_malformed_model: bool,
-    /// Ignore a model selector on a capability-filter request.
-    pub accept_filter_model: bool,
     /// The quick tool's `emits_events` is this JSON text instead of `false`.
     pub emits_events_override: Option<&'static str>,
     /// Send the `held` marker to content-only routes without `held-reply/v1`.
@@ -518,9 +510,6 @@ impl Module {
             "fake-0",
         )
         .with_tool_capabilities(self.tool_capabilities());
-        if !self.defects.omit_catalog_capability_filter {
-            role.capabilities.push(CATALOG_CAPABILITY_FILTER.into());
-        }
         if !self.defects.omit_catalog_model {
             role.capabilities.push(CATALOG_MODEL.into());
         }
@@ -603,7 +592,7 @@ impl Module {
                 .map_err(|e| errors::invalid_request("facts", e.to_string()))?;
             }
         }
-        let mut request: CatalogRequest = serde_json::from_value(arguments.clone())
+        let request: CatalogRequest = serde_json::from_value(arguments.clone())
             .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
         let provides = self
             .defects
@@ -614,27 +603,27 @@ impl Module {
         cortexkit_role_tool_provider_conformance::wire::catalog::check_notice_templates_request(
             &request, &provides,
         )?;
-        let filter_request = request.params.contains_key("capabilities");
-        assert!(
-            !filter_request || !self.defects.omit_catalog_capability_filter,
-            "a filtered catalog request requires a live filter advertisement"
-        );
-        if filter_request && self.defects.accept_filter_model {
-            request.params.remove("model");
+        // The fake documents only scope and model as catalog params.
+        if let Some(param) = request
+            .params
+            .keys()
+            .find(|param| !["scope", "model"].contains(&param.as_str()))
+        {
+            return Err(errors::invalid_request(
+                &format!("params.{param}"),
+                "unsupported catalog parameter",
+            ));
         }
-        if !filter_request {
-            if !self.defects.accept_malformed_model {
-                check_model_param(&request.params)?;
-            }
-            // The fake documents scope=workspace on its ordinary plan item.
-            if self.defects.refuse_ordinary_scope
-                || request
-                    .params
-                    .get("scope")
-                    .is_some_and(|scope| scope != "workspace")
-            {
-                return Err(errors::invalid_request("params.scope", "unsupported scope"));
-            }
+        if !self.defects.accept_malformed_model {
+            check_model_param(&request.params)?;
+        }
+        // The fake documents scope=workspace on its ordinary plan item.
+        if request
+            .params
+            .get("scope")
+            .is_some_and(|scope| scope != "workspace")
+        {
+            return Err(errors::invalid_request("params.scope", "unsupported scope"));
         }
         // An absent preset means the default variant; any other name is
         // refused rather than mapped to the closest variant.
@@ -683,15 +672,11 @@ impl Module {
             })
             .collect::<Result<_, _>>()
             .map_err(|e| errors::invalid_request("catalog", e.to_string()))?;
-        let mut tools: Vec<Value> = if !filter_request && self.defects.empty_ordinary_catalog {
-            Vec::new()
-        } else {
-            select_by_capabilities(&request.params, &definitions)?
-                .into_iter()
-                .map(serde_json::to_value)
-                .collect::<Result<_, _>>()
-                .map_err(|e| errors::invalid_request("catalog", e.to_string()))?
-        };
+        let mut tools: Vec<Value> = definitions
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()
+            .map_err(|e| errors::invalid_request("catalog", e.to_string()))?;
         if let Some(text) = override_emits_events {
             for tool in tools.iter_mut().filter(|tool| tool["name"] == QUICK) {
                 tool["emits_events"] = serde_json::from_str(text).unwrap();

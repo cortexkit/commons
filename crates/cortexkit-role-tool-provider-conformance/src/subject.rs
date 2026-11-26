@@ -77,8 +77,8 @@ pub enum Capability {
     /// a held reply when both consumer capabilities are declared.
     /// See [`ToolProviderSubject::held_reply_call`].
     HeldReplyV1,
-    /// The provider advertises `tool-catalog-capability-filter/v1` in
-    /// `role.describe`. Inferred from the live answer, not a subject flag.
+    /// Source-compatibility name for the removed catalog filter. No
+    /// conformance case infers or requires this capability.
     CatalogCapabilityFilter,
     /// The provider advertises `tool-catalog-model/v1` in `role.describe`.
     /// Inferred from the live answer, not a subject flag.
@@ -306,11 +306,9 @@ pub trait ToolProviderSubject: Harness {
     fn scoped_principals(&self) -> Option<ScopedPrincipals>;
 
     /// The arguments of the `tool.catalog` request: the plan item's params
-    /// this provider serves and, optionally, a preset it defines. Supply an
-    /// ordinary request without `params.capabilities`, including documented
-    /// params when the provider supports them; its catalog must be non-empty.
-    /// The
-    /// `catalog_unknown_preset_refused` case sends these arguments with the
+    /// this provider serves and, optionally, a preset it defines. Its catalog
+    /// must be non-empty. The `catalog_unknown_preset_refused` case sends these
+    /// arguments with the
     /// preset replaced by one no provider defines, and expects a refusal.
     /// The `catalog_listed_presets_served` case sends them without the
     /// preset to read the provider's `presets` list, then once per listed

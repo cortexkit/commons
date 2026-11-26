@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.20
+
+- Remove the catalog capability-filter request from the contract.
+  `tool_capabilities` in `role.describe` and per-tool capability tags remain
+  for discovery. Under the existing §3 rule for undocumented provider params,
+  a provider adopting this release refuses a leftover `params.capabilities` as
+  `invalid_request` naming `params.capabilities`, unless it independently
+  documents that param.
+- Keep `CATALOG_CAPABILITY_FILTER`,
+  `catalog::{params_for_capabilities, check_capability_params, select_by_capabilities}`,
+  `describe::select_tool_capabilities`,
+  `DescribeProblem::ToolCapabilitiesWithoutFilter`, and
+  `vectors::CATALOG_CAPABILITIES_JSON` as deprecated compatibility items; they
+  are deleted at the next minor release. Because the public vector constant and
+  `vectors::FILES` name `catalog-capabilities.json`, that file remains too, but
+  the contract and vector README no longer define its filter behavior.
+
 ## 0.15.19
 
 - Accept a `tool_capabilities` tag index without `tool-catalog-capability-filter/v1`.
