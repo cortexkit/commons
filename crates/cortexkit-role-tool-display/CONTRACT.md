@@ -443,8 +443,11 @@ the bare module id of the notice record's writer, and `id` is that writer's
 record id. Both obey the opaque-field rule in §2; in particular, `id` is 1–256
 printable non-space ASCII bytes. For an awaited-work notice, the wake writer
 copies `notice_record` unchanged from the `awaited_work.finish` or
-`awaited_work.progress` that produced the notice. The pointer does not change
-`items`: those items remain the wake's own card and its fallback. An item is
+`awaited_work.progress` that produced the notice. A writer sets `notice_record`
+only on a wake whose `items` hold exactly that one notice, with no
+`omittedItems`: the pointed card replaces the whole wake, so a wake carrying
+anything else must not point. The pointer does not change `items`: those items
+remain the wake's own card and its fallback. An item is
 `{kind, refs, from?, to?, at, excerpt}`. Field spelling is snake_case for refs
 and envelope fields; `omittedItems` deliberately reuses the existing display
 cut marker. `at` is an i64 JSON integer in milliseconds since Unix epoch.
@@ -518,12 +521,14 @@ structural decode failures must also be mapped to `invalid_params`.
 
 A reader that understands `notice_record` looks up the notice record under
 `(session, writer, id)`, where `id` is the notice write's `send_id`. It shows
-that writer's notice record in place of the wake's own card only when the record
-exists and is readable, its attested writer is the module named by `writer`, its
-session is the wake's session, its body and served view pass schema validation,
-and that writer serves its view. The reader shows exactly one card, never both.
+that writer's notice record in place of the wake's own card only when the wake
+holds exactly one item and no `omittedItems`, the record exists and is
+readable, its attested writer is the module named by `writer`, its session is
+the wake's session, its body and served view pass schema validation, and that
+writer serves its view. The reader shows exactly one card, never both.
 
-With no pointer, or when the record is missing or unreadable, fails schema
+With no pointer, for a wake with more than one item or with `omittedItems`, or
+when the record is missing or unreadable, fails schema
 validation, has a different attested writer or session, or its writer does not
 serve its view, the reader shows the wake's own `items` card. The pointer is
 display-only: it changes no send, notice delivery, wake delivery, retry or
