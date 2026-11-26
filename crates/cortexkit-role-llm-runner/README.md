@@ -1,5 +1,10 @@
 # cortexkit-role-llm-runner
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-llm-runner is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Version **0.8.20** adds opt-in `send_ids`, requiring `message_senders` and
 `read_display_facts`, to guarantee caller-visible `send_id` beside `sender` on
 opted-in raw reads and raw history. Readers rely on declaring runners or a

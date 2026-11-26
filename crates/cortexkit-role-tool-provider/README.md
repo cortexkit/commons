@@ -1,5 +1,10 @@
 # cortexkit-role-tool-provider
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-tool-provider is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Wire types and vectors for `tool-provider/v1`: tool catalogs, calls, results, and withdrawal.
 
 Add to `Cargo.toml`:

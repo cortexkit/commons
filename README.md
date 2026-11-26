@@ -1,5 +1,10 @@
 # cortexkit/commons
 
+> [!WARNING]
+> **Alpha.** commons is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role contracts and conformance suites, mutation testing, test support, leases and private files, bus and store adapters, and model catalog types.
 
 ## Crates

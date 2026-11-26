@@ -1,5 +1,10 @@
 # cortexkit-role-agent-inbox
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-agent-inbox is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Transport-free serde types, deterministic envelope neutralization and packaged
 vectors for `agent-inbox/v1`. Version 0.1.0.
 

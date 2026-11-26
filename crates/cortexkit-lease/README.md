@@ -1,5 +1,10 @@
 # cortexkit-lease
 
+> [!WARNING]
+> **Alpha.** cortexkit-lease is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Durable single-writer leases using OS advisory locks. Persisted epoch numbers let storage backends reject writes from a superseded writer.
 
 Add to `Cargo.toml`:

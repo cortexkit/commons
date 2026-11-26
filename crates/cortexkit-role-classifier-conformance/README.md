@@ -1,5 +1,10 @@
 # cortexkit-role-classifier-conformance
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-classifier-conformance is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The conformance suite for the `classifier/v1` role
 (`crates/cortexkit-role-classifier/CONTRACT.md`). A classifier module adds it
 as a dev-dependency and runs it in its own CI against its real module over

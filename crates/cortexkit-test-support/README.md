@@ -1,5 +1,10 @@
 # cortexkit-test-support
 
+> [!WARNING]
+> **Alpha.** cortexkit-test-support is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Portable CortexKit test helpers. **Use as a dev-dependency only**, not in production.
 Licensed under MIT. This crate contains no application-store dependencies.
 

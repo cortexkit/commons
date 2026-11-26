@@ -1,5 +1,10 @@
 # cortexkit-usage-steps
 
+> [!WARNING]
+> **Alpha.** cortexkit-usage-steps is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The wire contract of the live usage step feed, contract version 1: the
 `usage.steps.subscribe` notice stream and the paged `usage.steps.read`. Apps on
 every platform decode the same shapes, so the Rust types here, the normative

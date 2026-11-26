@@ -1,5 +1,10 @@
 # cortexkit-project-identity
 
+> [!WARNING]
+> **Alpha.** cortexkit-project-identity is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Transport-independent serde types for four reads of the agent registry, which
 maps a folder or owned remote to its project and lists known workspaces and
 projects. In this crate, "the handler" means the agent registry's request handler.

@@ -1,5 +1,10 @@
 # cortexkit-role-step-transform-provider
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-step-transform-provider is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Wire types and vectors for `step-transform-provider/v2`. Its four hooks
 transform user and assistant text, tool calls before execution, and tool-result
 text. Hooks use one route per session, opened under its scope and bound to

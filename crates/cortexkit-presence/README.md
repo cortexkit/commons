@@ -1,5 +1,10 @@
 # cortexkit-presence
 
+> [!WARNING]
+> **Alpha.** cortexkit-presence is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Pure presence summaries and notification routing, with no clock, storage or
 I/O. Callers pass Unix epoch milliseconds and devices whose identity a
 trusted service has already established.

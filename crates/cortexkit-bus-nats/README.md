@@ -1,5 +1,10 @@
 # cortexkit-bus-nats
 
+> [!WARNING]
+> **Alpha.** cortexkit-bus-nats is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 NATS and JetStream implementation of the [bus traits](../cortexkit-bus-trait/README.md), using `async-nats`.
 
 Add to `Cargo.toml`:

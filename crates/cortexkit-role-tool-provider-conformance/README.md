@@ -1,5 +1,10 @@
 # Tool-provider conformance
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-tool-provider-conformance is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Version **0.15.13** pins provider **0.15.12**. `fork_calls_honour_marker`
 checks every tool marked `read_only`. Supply safe `fork_calls` probes covering
 each marked tool and `fork_observable_state` captured from native application

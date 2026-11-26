@@ -1,5 +1,10 @@
 # cortexkit-role-compaction
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-compaction is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Public wire types for **compaction-provider/v2**, served by a compaction
 provider, and **compaction-runner/v1**, served by a runner. Providers, runners,
 and view libraries share this contract without depending on an implementation.

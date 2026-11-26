@@ -1,5 +1,10 @@
 # cortexkit-role-compaction-provider
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-compaction-provider is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Setup's optional `view_features` negotiates `truncate` part edits and
 `tag_bytes_edits` runner tagging. Without the tokens, replaced bytes stay
 final as before. The runner renders truncate references with the shared

@@ -1,5 +1,10 @@
 # cortexkit-length-refusal
 
+> [!WARNING]
+> **Alpha.** cortexkit-length-refusal is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Whether a model provider refused a request because it is too long for the model's context
 window, and the token counts the refusal states. Runners share it so every runner reads the
 same refusal the same way.

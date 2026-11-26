@@ -1,5 +1,10 @@
 # cortexkit-agent-identity
 
+> [!WARNING]
+> **Alpha.** cortexkit-agent-identity is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Serde-only requests and replies for the agent registry's `context.project`,
 `context.session`, `agent.resolve`, `agent.where`, `agent.where_many`,
 `agent.session_for_ref`, `agent.session_for_runner`, `agent.session_for_harness`,

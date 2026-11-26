@@ -1,5 +1,10 @@
 # cortexkit-role-agent-orchestrator
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-agent-orchestrator is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Wire contract for operations served by the CortexKit `agent-orchestrator/v1`
 role: the module that runs agent sessions. Version 0.2.0 holds one operation
 family, `awaited-work/v1`, through which a module that runs work for an agent

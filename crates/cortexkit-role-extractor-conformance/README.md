@@ -1,5 +1,10 @@
 # cortexkit-role-extractor-conformance
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-extractor-conformance is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The conformance suite for the `extractor/v1` role
 (`crates/cortexkit-role-extractor/CONTRACT.md`): its request side, and its
 reply side against Clairic's own replies. An extractor module adds it

@@ -1,5 +1,10 @@
 # cortexkit-tokens
 
+> [!WARNING]
+> **Alpha.** cortexkit-tokens is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Token counts that every CortexKit module computes the same way. A runner (the
 module that renders model requests and holds each message's content) counts
 each part once with this crate and sends the counts; a compaction provider

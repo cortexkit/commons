@@ -1,5 +1,10 @@
 # cortexkit-bus-client
 
+> [!WARNING]
+> **Alpha.** cortexkit-bus-client is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The shared Rust connection to the local ck-bus service. The module passes its
 existing `Arc<subc_client_rs::SubcConsumer>`. Call
 `subc_client_rs::launch_nonce()` before the module spawns children, as in any

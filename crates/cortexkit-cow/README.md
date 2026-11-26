@@ -1,5 +1,10 @@
 # cortexkit-cow
 
+> [!WARNING]
+> **Alpha.** cortexkit-cow is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Cross-platform copy-on-write workspace isolation and change capture, published
 independently from [cortexkit/commons](https://github.com/cortexkit/commons) under
 MIT. Originally derived from oh-my-pi's `pi-iso` isolation platform abstraction

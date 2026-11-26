@@ -1,5 +1,10 @@
 # cortexkit-role-extractor
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-extractor is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Wire types, validation, and vectors for `extractor/v1`: `role.describe`,
 the `extract.run` request and its nine field types, admission (field
 options, items, images, reply size, the pre-call spend check), batch

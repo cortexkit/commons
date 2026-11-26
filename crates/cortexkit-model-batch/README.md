@@ -1,5 +1,10 @@
 # cortexkit-model-batch
 
+> [!WARNING]
+> **Alpha.** cortexkit-model-batch is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The batch rules every CortexKit model-batch role shares (`classifier/v1`,
 `extractor/v1`): the error vocabulary with the Cloudflare Workers AI code
 table, batch identity and its canonical hashing, the item image shape and

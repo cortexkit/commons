@@ -1,5 +1,10 @@
 # cortexkit-role-user-commands
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-user-commands is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 `user-commands/v1` wire data and pure validators for commands a person runs
 from an app. Shared by declaring modules and a relaying app server; no server
 or runtime is included.

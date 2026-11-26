@@ -1,5 +1,10 @@
 # cortexkit-compaction-view
 
+> [!WARNING]
+> **Alpha.** cortexkit-compaction-view is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The shared view library for the CortexKit compaction contract. A runner and a
 compaction provider use the same implementation to compute render plans, apply
 views, check provider rules, clean replies, and number tags.

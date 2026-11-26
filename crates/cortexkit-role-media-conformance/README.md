@@ -1,5 +1,10 @@
 # media-provider/v1 conformance kit
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-media-conformance is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 `StreamObservation::answer` also returns the raw terminal RESPONSE body, not the
 decoded answer. STREAM_DATA event bodies and referenced output-object contents

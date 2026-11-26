@@ -1,5 +1,10 @@
 # cortexkit-llm-tools
 
+> [!WARNING]
+> **Alpha.** cortexkit-llm-tools is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Shared wire contracts for `llm.classify/v1`, `llm.extract/v1` and
 `llm.complete/v1`. These are tool-provider tools for codemode programs and flows,
 not tools on an agent's direct list. This crate makes no model calls.

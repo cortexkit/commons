@@ -1,5 +1,10 @@
 # cortexkit-rich-ui-syntax
 
+> [!WARNING]
+> **Alpha.** cortexkit-rich-ui-syntax is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 A standalone Rust front end for **rich UI language v1**, with the reference
 scanner used before storing tool-output snapshots. It has no host, catalog,
 network, filesystem-resolution, or rendering dependency.

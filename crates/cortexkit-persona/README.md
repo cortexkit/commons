@@ -1,5 +1,10 @@
 # cortexkit-persona
 
+> [!WARNING]
+> **Alpha.** cortexkit-persona is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The shared engine a module uses to load, merge and render the system text
 ("persona") of its own roles: `PERSONA.md` bundles in an ordered tier ladder
 with trust classes, operator approvals for repository tiers, typed extension

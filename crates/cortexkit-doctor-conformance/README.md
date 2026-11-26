@@ -1,5 +1,10 @@
 # cortexkit-doctor-conformance
 
+> [!WARNING]
+> **Alpha.** cortexkit-doctor-conformance is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 A Unix kit for the [module doctor contract](../cortexkit-doctor/CONTRACT.md).
 Implement `Adapter` and pass it to `run(&mut impl Adapter) -> Vec<RuleResult>`.
 Each `RuleResult` has a `name` and an `Outcome`: `Passed`, `Failed { reason }`,

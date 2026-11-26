@@ -1,5 +1,10 @@
 # cortexkit-role-llm-runner-conformance
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-llm-runner-conformance is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Version **0.17.78** pins runner **0.8.64**. Checked `session.head` replies
 reject `model.default_variant` alongside `model.variant`.
 

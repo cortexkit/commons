@@ -1,5 +1,10 @@
 # cortexkit-compaction-view-wasm
 
+> [!WARNING]
+> **Alpha.** cortexkit-compaction-view-wasm is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 The WebAssembly adapter for `cortexkit-compaction-view`, with a JavaScript loader
 for runners using Node or Bun. It uses the shared Rust implementation for render
 plans, rule checks, reply cleaning, tag numbering, and checksums.

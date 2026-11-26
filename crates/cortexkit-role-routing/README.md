@@ -1,5 +1,10 @@
 # cortexkit-role-routing
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-routing is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Version 0.7.37 adds `select_workload`. Once routing advertises the group, modules
 can declare a workload such as `code` for a consumer or override it with
 `route.select`'s `requirements.workload`. Routing settings can override the

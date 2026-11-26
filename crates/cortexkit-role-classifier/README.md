@@ -1,5 +1,10 @@
 # cortexkit-role-classifier
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-classifier is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Providers can opt into routing-selected models and accounts by declaring
 `routed_models: {}` in `role.describe`. Callers may then omit `model`; a
 supplied model remains a strict pin. The reply names the model used and the

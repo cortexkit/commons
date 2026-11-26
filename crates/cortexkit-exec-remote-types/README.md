@@ -1,5 +1,10 @@
 # cortexkit-exec-remote-types
 
+> [!WARNING]
+> **Alpha.** cortexkit-exec-remote-types is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Version **0.2.22**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata

@@ -1,5 +1,10 @@
 # cortexkit-chatgpt-policy
 
+> [!WARNING]
+> **Alpha.** cortexkit-chatgpt-policy is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 A transport-independent Rust library for the policy a ChatGPT-subscription (Codex) client
 needs: resolving the ChatGPT account id, classifying the backend's refusals, and selecting the
 `x-codex-*` quota headers.

@@ -1,5 +1,10 @@
 # cortexkit-role-agent-data
 
+> [!WARNING]
+> **Alpha.** cortexkit-role-agent-data is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Wire types and vectors for `agent-data/v1`, the capability for moving an agent's data between Macs: participant operations, refusal codes, and transfer steps.
 
 Add to `Cargo.toml`:
