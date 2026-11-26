@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Pin `cortexkit-doctor` 0.3.1. The conformance checks are unchanged.
+
 ## 0.3.0
 
 - Pin `cortexkit-doctor` 0.3.0 and check full-mode output, read-only behavior,

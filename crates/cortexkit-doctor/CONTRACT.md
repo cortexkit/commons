@@ -255,6 +255,12 @@ as the module helper:
 
 ```rust,ignore
 fn check(program: impl AsRef<Path>, mode: Mode, options: &Options) -> Result<CheckOutput, RunError>;
+fn check_cancellable(
+    program: impl AsRef<Path>,
+    mode: Mode,
+    options: &Options,
+    cancel: &Cancel,
+) -> Result<CheckOutput, RunError>;
 fn manifest(program: impl AsRef<Path>, options: &Options) -> Result<Manifest, RunError>;
 fn fix(
     program: impl AsRef<Path>,
@@ -274,6 +280,13 @@ from the selected plan, and the mode from the check that reported it. The
 runner must own waiting for its child; don't have a separate SIGCHLD handler
 reap it or enable automatic reaping. Serialize foreground fixes on any one
 terminal.
+
+Create a `Cancel` with `Cancel::new()` and pass a shared reference to
+`check_cancellable`. Clones share the same cancellation state and can be
+sent to another thread or task. Calling `cancel()` sets the state permanently;
+use a new handle for an independent check. `check`, `manifest`, and `fix` do
+not take a cancel handle. `check_cancellable` otherwise uses the same
+arguments, limits, and output interpretation as `check`.
 
 - [pinned] The runner clears the environment and sets absolute
   `XDG_DATA_HOME` and `XDG_CONFIG_HOME`. It uses the supplied homes, or resolves
@@ -323,9 +336,17 @@ terminal.
   reaping time. The runner sends `SIGKILL` to the managed group before it
   returns; the system reaps orphaned descendants. A descendant that escapes
   the group with its own `setsid` is outside the teardown guarantee.
-- [pinned] The runner decides the result after reading, not at the provisional
-  exit notification. Bytes received during the grace count. Cleanup after the
-  decision does not change it. The first applicable result wins:
+- [pinned] If cancellation is requested before launch, `check_cancellable`
+  returns `cancelled` without starting the helper. If the runner observes
+  cancellation while the direct child is still running, it stops reading,
+  sends `SIGTERM` to the group it created, waits `term_to_kill`, sends
+  `SIGKILL` to that group while the direct child is still unreaped, then
+  reaps the child and returns `cancelled`. Cancellation after the direct
+  child exits does not interrupt the read grace or change the result.
+- [pinned] For runs not cancelled, the runner decides the result after
+  reading, not at the provisional exit notification. Bytes received during
+  the grace count. Cleanup after the decision does not change it. The first
+  applicable result wins:
   1. Spawn failed: `launch_failed`, with the I/O error kind available to the
      caller.
   2. Stdout exceeded 1 MiB before reading ended: `invalid_output` with reason
@@ -346,9 +367,10 @@ with empty stdout still surfaces as `crashed`. The runner doesn't fall back
 to a quick check by itself; the caller decides.
 
 `RunError` has variants `LaunchFailed(std::io::ErrorKind)`, `HomeRelative`,
-`Crashed(Crash)`, `TimedOut`, `InvalidOutput(DecodeError)` and `NoDoctor`.
-`Crash` is either `ExitCode(i32)` or `Signal(i32)`. `RunError::as_str()` returns
-the failure name above without details, and reports omit the launch error kind.
+`Crashed(Crash)`, `TimedOut`, `InvalidOutput(DecodeError)`, `NoDoctor`, and
+`Cancelled`. `Crash` is either `ExitCode(i32)` or `Signal(i32)`.
+`RunError::as_str()` returns the failure name without details (`cancelled` for
+`Cancelled`), and reports omit the launch error kind.
 
 ## 5. Manifest and template generator
 

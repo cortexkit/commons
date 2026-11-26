@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use cortexkit_doctor::runner::{self, Crash, Limits, Options, RunError};
+use cortexkit_doctor::runner::{self, Cancel, Crash, Limits, Options, RunError};
 use cortexkit_doctor::{
     DecodeError, Finding, FixOutput, FixResult, LogSource, Manifest, Mode, ModuleId, Template,
     MAX_OUTPUT_BYTES,
@@ -425,12 +425,11 @@ fn prompt_env() -> [(&'static str, &'static str); 4] {
     ]
 }
 
-#[test]
-fn runner_helper_group_cleanup() {
+fn group_test_subprocess(test: &str) -> bool {
     const CHILD: &str = "CK_DOCTOR_RUNNER_GROUP_CASES";
     if std::env::var_os(CHILD).is_none() {
         let output = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "runner_helper_group_cleanup", "--nocapture"])
+            .args(["--exact", test, "--nocapture"])
             .env(CHILD, "1")
             .output()
             .unwrap();
@@ -439,7 +438,7 @@ fn runner_helper_group_cleanup() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        return;
+        return false;
     }
 
     // A CI container's PID 1 may not reap orphans. Act as the reaper in this
@@ -451,6 +450,15 @@ fn runner_helper_group_cleanup() {
             unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) },
             0
         );
+    }
+
+    true
+}
+
+#[test]
+fn runner_helper_group_cleanup() {
+    if !group_test_subprocess("runner_helper_group_cleanup") {
+        return;
     }
 
     let mut limits = Limits::default();
@@ -524,6 +532,141 @@ fn runner_helper_group_cleanup() {
             _ => unreachable!(),
         }
     }
+}
+
+#[test]
+fn runner_helper_cancel_running_check() {
+    if group_test_subprocess("runner_helper_cancel_running_check") {
+        cancel_running_check("term-grandchild");
+    }
+}
+
+#[test]
+fn runner_helper_cancel_kills_term_ignoring_check() {
+    if group_test_subprocess("runner_helper_cancel_kills_term_ignoring_check") {
+        cancel_running_check("hang");
+    }
+}
+
+fn cancel_running_check(fixture_mode: &str) {
+    let fixture = Fixture::new();
+    let mut limits = Limits::default();
+    limits.full_check = Duration::from_secs(5);
+    limits.term_to_kill = Duration::from_millis(250);
+    let options = fixture.options().with_limits(limits);
+    let program = fixture.program(fixture_mode);
+    let cancel = Cancel::new();
+    let cancel_request = cancel.clone();
+    let (output, elapsed) = std::thread::scope(|scope| {
+        let run = scope.spawn(|| runner::check_cancellable(program, Mode::Full, &options, &cancel));
+        wait_for("the helper to set its TERM disposition", || {
+            fixture.data.join("ready").exists()
+        });
+        let start = Instant::now();
+        cancel_request.cancel();
+        let output = run.join().unwrap();
+        (output, start.elapsed())
+    });
+
+    assert_reaped(&fixture.start());
+    assert_eq!(output, Err(RunError::Cancelled));
+    assert!(
+        elapsed >= limits.term_to_kill,
+        "skipped TERM grace: {elapsed:?}"
+    );
+    assert!(
+        elapsed < limits.term_to_kill + Duration::from_secs(1),
+        "cancellation took {elapsed:?}"
+    );
+    if fixture_mode == "term-grandchild" {
+        assert!(
+            fixture.data.join("direct-exited").exists(),
+            "TERM did not reach the leader before the group was killed"
+        );
+    }
+}
+
+#[test]
+fn runner_helper_cancel_before_start_never_spawns() {
+    let fixture = Fixture::new();
+    let cancel = Cancel::new();
+    cancel.cancel();
+    let output = runner::check_cancellable(
+        fixture.program("probe"),
+        Mode::Quick,
+        &fixture.options(),
+        &cancel,
+    );
+    assert!(!fixture.data.join("start").exists(), "spawned after cancel");
+    assert_eq!(output, Err(RunError::Cancelled));
+    assert_eq!(RunError::Cancelled.as_str(), "cancelled");
+}
+
+#[test]
+fn runner_helper_cancel_after_exit_preserves_result() {
+    if !group_test_subprocess("runner_helper_cancel_after_exit_preserves_result") {
+        return;
+    }
+    let fixture = Fixture::new();
+    let program = fixture.program("hold");
+    let options = fixture.options();
+    let cancel = Cancel::new();
+    let output = std::thread::scope(|scope| {
+        let run =
+            scope.spawn(|| runner::check_cancellable(program, Mode::Quick, &options, &cancel));
+        wait_for("the helper to fork a grandchild", || {
+            fixture.data.join("grandchild").exists()
+        });
+        let pid = fixture.start().pid;
+        // The grandchild holds stdout open past the direct child's exit.
+        // Observe that exit without reaping the child or ending the read grace.
+        wait_for("the helper to exit", || {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: info is writable and WNOWAIT leaves the child for the runner.
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOWAIT | libc::WNOHANG,
+                )
+            };
+            if result == -1 {
+                let error = std::io::Error::last_os_error();
+                assert_eq!(error.kind(), ErrorKind::Interrupted, "waitid: {error}");
+            }
+            result == 0 && info.si_code == libc::CLD_EXITED
+        });
+        cancel.cancel();
+        run.join().unwrap()
+    });
+    assert_reaped(&fixture.start());
+    assert_eq!(
+        output.unwrap().findings()[0].id().as_str(),
+        "history.backlog"
+    );
+}
+
+fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
+    let start = Instant::now();
+    while !ready() {
+        assert!(
+            start.elapsed() < Duration::from_secs(4),
+            "waiting for {description}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn assert_reaped(child: &Start) {
+    assert_eq!(child.pid, child.pgid);
+    // SAFETY: signal zero only probes the recorded direct child's PID.
+    assert_eq!(unsafe { libc::kill(child.pid, 0) }, -1, "leader survived");
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    wait_for_group_to_empty(child.pgid);
 }
 
 fn wait_for_group_to_empty(pgid: libc::pid_t) {

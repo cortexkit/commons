@@ -20,6 +20,8 @@ pub enum RunError {
     TimedOut,
     InvalidOutput(DecodeError),
     NoDoctor,
+    /// A cancellable invocation was cancelled before launch or while running.
+    Cancelled,
 }
 
 impl RunError {
@@ -32,6 +34,7 @@ impl RunError {
             Self::TimedOut => "timed_out",
             Self::InvalidOutput(_) => "invalid_output",
             Self::NoDoctor => "no_doctor",
+            Self::Cancelled => "cancelled",
         }
     }
 }

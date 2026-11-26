@@ -7,7 +7,7 @@ use std::process::{ChildStdout, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{Crash, Limits, RunError};
+use super::{Cancel, Crash, Limits, RunError};
 use crate::{DecodeError, MAX_OUTPUT_BYTES};
 
 pub(super) fn run(
@@ -16,6 +16,7 @@ pub(super) fn run(
     subcommand: &str,
     timeout: Duration,
     limits: Limits,
+    cancel: Option<&Cancel>,
 ) -> Result<Vec<u8>, RunError> {
     let foreground = try_foreground.then(Foreground::open).flatten();
     let tty = foreground.as_ref().map(|guard| guard.tty.as_raw_fd());
@@ -23,17 +24,27 @@ pub(super) fn run(
     // inherited descriptor open until exec. The guard restores the parent's
     // foreground group even if the hook succeeded but exec failed.
     unsafe { command.pre_exec(move || start_group(tty)) };
+    if cancel.is_some_and(Cancel::is_cancelled) {
+        return Err(RunError::Cancelled);
+    }
     let start = Instant::now();
     let mut child = command
         .spawn()
         .map_err(|error| RunError::LaunchFailed(error.kind()))?;
     let pgid = child.id() as libc::pid_t;
-    let end = collect(child.stdout.take(), pgid, start, timeout, limits.exit_grace)?;
+    let end = collect(
+        child.stdout.take(),
+        pgid,
+        start,
+        timeout,
+        limits.exit_grace,
+        cancel,
+    )?;
 
     // Keep the child waitable until after the last group signal. If waitid
     // failed (for example because another waiter reaped it), do not signal:
     // the numeric ID could already belong to a different process group.
-    if matches!(end, ReadEnd::TimedOut) {
+    if matches!(end, ReadEnd::TimedOut | ReadEnd::Cancelled) {
         signal_group(pgid, libc::SIGTERM);
         thread::sleep(limits.term_to_kill);
     }
@@ -46,6 +57,7 @@ pub(super) fn run(
         return match end {
             ReadEnd::TooLarge => Err(RunError::InvalidOutput(DecodeError::TooLarge)),
             ReadEnd::TimedOut => Err(RunError::TimedOut),
+            ReadEnd::Cancelled => Err(RunError::Cancelled),
             ReadEnd::Exited { .. } => unreachable!(),
         };
     };
@@ -70,6 +82,7 @@ enum ReadEnd {
     Exited { bytes: Vec<u8>, read_failed: bool },
     TooLarge,
     TimedOut,
+    Cancelled,
 }
 
 fn collect(
@@ -78,14 +91,22 @@ fn collect(
     start: Instant,
     timeout: Duration,
     exit_grace: Duration,
+    cancel: Option<&Cancel>,
 ) -> Result<ReadEnd, RunError> {
     let mut exit = None;
     let mut bytes = Vec::new();
     let mut read_failed = false;
     let mut buffer = [0; 16 * 1024];
     loop {
-        if exit.is_none() && exited(pid).map_err(|error| RunError::LaunchFailed(error.kind()))? {
-            exit = Some(Instant::now());
+        if exit.is_none() {
+            // Sample cancellation before testing exit: a request made after
+            // the child exited must not replace its result.
+            let cancelled = cancel.is_some_and(Cancel::is_cancelled);
+            if exited(pid).map_err(|error| RunError::LaunchFailed(error.kind()))? {
+                exit = Some(Instant::now());
+            } else if cancelled {
+                return Ok(ReadEnd::Cancelled);
+            }
         }
         let wait = if let Some(exit) = exit {
             let left = exit_grace.saturating_sub(exit.elapsed());

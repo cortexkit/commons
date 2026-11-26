@@ -9,6 +9,8 @@ mod process;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use cortexkit_store_types::{resolve_config_home, resolve_data_home};
@@ -155,6 +157,51 @@ pub fn check(
     )
 }
 
+/// Shared, one-shot cancellation state for [`check_cancellable`].
+#[derive(Debug, Clone, Default)]
+pub struct Cancel(Arc<AtomicBool>);
+
+impl Cancel {
+    /// Create a handle that has not been cancelled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Request cancellation from another thread or task. Clones share this state.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Invoke [`check`] with a caller-controlled cancellation handle.
+/// If the handle is cancelled before launch, the helper is not started. If
+/// cancellation is observed while the helper is running, its process group
+/// is terminated and the direct child is reaped before returning
+/// [`RunError::Cancelled`]. An exited helper keeps its result.
+pub fn check_cancellable(
+    program: impl AsRef<Path>,
+    mode: Mode,
+    options: &Options,
+    cancel: &Cancel,
+) -> Result<CheckOutput, RunError> {
+    let (args, timeout): (&[&str], _) = match mode {
+        Mode::Quick => (&["check", "--json"], options.limits.check),
+        Mode::Full => (&["check", "--full", "--json"], options.limits.full_check),
+    };
+    invoke_with_cancel(
+        program.as_ref(),
+        args,
+        options,
+        timeout,
+        CheckOutput::decode,
+        Some(cancel),
+    )
+}
+
 /// Invoke `<program> doctor manifest` and validate its output.
 pub fn manifest(program: impl AsRef<Path>, options: &Options) -> Result<Manifest, RunError> {
     invoke(
@@ -208,6 +255,20 @@ fn invoke<T>(
     timeout: Duration,
     decode: impl FnOnce(&[u8]) -> Result<T, DecodeError>,
 ) -> Result<T, RunError> {
+    invoke_with_cancel(program, args, options, timeout, decode, None)
+}
+
+fn invoke_with_cancel<T>(
+    program: &Path,
+    args: &[&str],
+    options: &Options,
+    timeout: Duration,
+    decode: impl FnOnce(&[u8]) -> Result<T, DecodeError>,
+    cancel: Option<&Cancel>,
+) -> Result<T, RunError> {
+    if cancel.is_some_and(Cancel::is_cancelled) {
+        return Err(RunError::Cancelled);
+    }
     let data = absolute_home(&options.data_home, resolve_data_home)?;
     let config = absolute_home(&options.config_home, resolve_config_home)?;
     let is_fix = args[0] == "fix";
@@ -228,6 +289,7 @@ fn invoke<T>(
         args[0],
         timeout,
         options.limits,
+        cancel,
     )?;
     decode(&stdout).map_err(RunError::InvalidOutput)
 }

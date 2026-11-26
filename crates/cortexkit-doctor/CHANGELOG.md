@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Add `runner::check_cancellable` and a shared `runner::Cancel` handle so
+  callers can stop a running check and reap its helper before returning.
+  Existing runner calls are unchanged.
+
 ## 0.3.0
 
 - Add a read-only full check with a 30-minute limit and support full-mode

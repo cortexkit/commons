@@ -78,7 +78,7 @@ mod unix {
                 sleep();
             }
             "hold" | "late-hold" | "grace-large" | "hang" | "term-grandchild" => {
-                assert_eq!(args, ["check", "--json"]);
+                assert!(args == ["check", "--json"] || args == ["check", "--full", "--json"]);
                 return with_grandchild(mode, &home);
             }
             "fix-hang" => sleep(),
@@ -204,6 +204,11 @@ mod unix {
 
     fn with_grandchild(mode: &str, home: &Path) -> ExitCode {
         let (mut parent_death, parent_life) = UnixStream::pair().unwrap();
+        if mode == "term-grandchild" {
+            // SAFETY: set SIG_IGN before fork so TERM cannot kill the grandchild
+            // before it starts observing the direct child's death.
+            unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
+        }
         // SAFETY: this fixture is single-threaded here. The child uses only
         // inherited descriptors and pauses until the runner signals the group.
         let child = unsafe { libc::fork() };
@@ -239,11 +244,13 @@ mod unix {
             "hang" => {
                 // SAFETY: SIG_IGN keeps the direct child alive until SIGKILL.
                 unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
+                fs::write(home.join("ready"), []).unwrap();
                 sleep();
             }
             "term-grandchild" => {
                 // SAFETY: the default disposition terminates the direct child.
                 unsafe { libc::signal(libc::SIGTERM, libc::SIG_DFL) };
+                fs::write(home.join("ready"), []).unwrap();
                 sleep();
             }
             _ => unreachable!(),

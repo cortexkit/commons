@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-doctor-conformance"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -11,7 +11,7 @@ description = "Conformance runner for a CortexKit module's doctor commands"
 test-fixture = []
 
 [target.'cfg(unix)'.dependencies]
-cortexkit-doctor = { version = "=0.3.0", path = "../cortexkit-doctor", features = ["conformance"] }
+cortexkit-doctor = { version = "=0.3.1", path = "../cortexkit-doctor", features = ["conformance"] }
 rustix = { version = "1", features = ["fs"] }
 sha2 = "0.10"
 tempfile = "3"
