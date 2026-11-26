@@ -857,6 +857,7 @@ pub struct PlanNotesFixture {
     pub system_note: String,
     pub new_system_text: String,
     pub removed_tool: String,
+    pub(crate) restoration: Option<(Map<String, Value>, String)>,
 }
 
 impl PlanNotesFixture {
@@ -871,7 +872,20 @@ impl PlanNotesFixture {
             system_note: system_note.into(),
             new_system_text: new_system_text.into(),
             removed_tool: removed_tool.into(),
+            restoration: None,
         }
+    }
+
+    /// Enable the restoration cases. The plan must fetch exactly the initial
+    /// system text and tool surface. The correction must be a short, distinct
+    /// note undoing `system_note`, not part of either plan's system text.
+    pub fn with_restoration(
+        mut self,
+        plan: Map<String, Value>,
+        correction: impl Into<String>,
+    ) -> Self {
+        self.restoration = Some((plan, correction.into()));
+        self
     }
 }
 

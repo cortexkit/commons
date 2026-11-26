@@ -3097,6 +3097,10 @@ Added in 0.10.1.
   such as attempt numbers or content gaps, ride beside them, decoded
   leniently. `step` is absent on a run that is not `active` or has not started
   its first model step.
+- [pinned] A reader takes `step` only as this group defines it. Runners that
+  don't declare `step_liveness` may send a `step` object of their own without
+  `phase`; a lenient reader treats a `step` it can't decode as absent and
+  still reads the rest of the answer. Since 0.10.2.
   - `phase`: an open string. `awaiting_response`: the model request is sent
     and no response record has arrived. `streaming`: response records are
     arriving. `running_tools`: the step's tool calls are being run.
@@ -7636,12 +7640,14 @@ every request, answer and refusal.
   `pending` (§10).
 - [pinned] A pending change whose fetched tools and system text are
   byte-identical to the effective plan's touches no surface
-  (`session_change::surfaces` is empty). It applies at the start of the next
-  run whatever its rung, because the rung protects a prefix, system text or
-  history that the change leaves unchanged; waiting would only hold
-  `applied_generation` back. Such a change sends no plan note, leaves `tools`
-  unchanged so it records no signed floor (§11.1.1), and does not count as a
-  prefix, system or history rebuild for any other pending change.
+  (`session_change::surfaces` is empty). Unless its full apply would drop a
+  delivered plan note (see the reconcile rule below), it applies at the
+  start of the next run whatever its rung, because the rung protects a
+  prefix, system text or history that the change leaves unchanged; waiting
+  would only hold `applied_generation` back. If it applies under this rule,
+  it sends no plan note, leaves `tools` unchanged so it records no signed
+  floor (§11.1.1), and does not count as a prefix, system or history rebuild
+  for any other pending change.
 
 **Sender and reader admission at acceptance.**
 
@@ -7797,19 +7803,23 @@ every request, answer and refusal.
   policy `notes_until_rebuild` only to a declaring runner. A non-declaring
   runner refuses it `invalid_params {field: "policy"}`. It is a separate
   policy, not a rung in the ordered cost list `rungs::ALL`.
-- [pinned] The runner derives the change set from the difference between
-  the applied plan's fetched surface and the pending plan's fetched surface:
+- [pinned] For a full apply, the runner derives the change set from the
+  difference between the applied plan's and the pending plan's fetched surfaces:
   system text changed, tool added, tool removed, or tool changed (name,
   description or input schema). The owner supplies text only for a
   system-text change, in optional `system_note: string` on `session.refresh`.
   It is a short description of the change, not the full replacement system
   text, and has the same authority as the plan owner's system text. Its
   UTF-8 size is at most 8,192 bytes. Under `notes_until_rebuild` it is
-  required exactly when system text differs from the applied plan. When
-  system text is unchanged, a runner accepts it and ignores it: it records no
-  note and treats the refresh as if the member were absent. The joined system
-  text is the runner's own, so an owner can't always tell whether its change
-  altered it. Absence when required, excess size,
+  required exactly when system text differs from the plan the owner last
+  sent. The owner knows that state; the runner ignores a note it doesn't
+  need. A runner compares a refresh against its noted state: the applied
+  plan plus every note delivered since. A change equal to the noted state
+  needs no note and is accepted and ignored. A change that differs from the
+  noted state, including one that returns to the applied plan, is a pending
+  change: tool additions and removals get the fixed note strings, and a
+  system-text difference uses the owner's `system_note` as a new note.
+  Absence when required, excess size,
   or its presence under any other policy is `invalid_params {field:
   "system_note"}`. A runner without `plan_notes` refuses the member by that
   same name. No other note text is supplied by the owner.
@@ -7831,12 +7841,14 @@ every request, answer and refusal.
   form. The runner confirms each
   form on its own transport before enabling it. A system-role form is
   allowed for a system-text change because it is the plan owner's own
-  text. A sent note is never edited; a correction is a new note.
+  text. A sent note is never edited; a correction is a new note. A change
+  undoing a delivered note is such a correction.
 - [pinned] **No confirmed form.** A system-text change is never rendered in
   a form that carries the person's authority, such as text appended to the
   user turn or merged into a user message. When the session's current route
-  has no confirmed system-role turn form, a pending change that includes
-  system text is applied in full at that run's first request, and the runner
+  has no confirmed system-role turn form, a pending change that needs a
+  system-text note is applied in full at that run's first request, subject
+  to the reconcile rule for dropping delivered notes, and the runner
   records the reason `no_note_form`. A pending change of tools only stays
   pending to a listed reconcile point: a removed tool is still refused at the
   gate with the removal string, and an addition waits for the full apply as
@@ -7873,6 +7885,9 @@ every request, answer and refusal.
     refresh does not reset that oldest outstanding change's age;
   - the owner asks for `immediately`, the existing flush policy, or uses
     `session.flush_prefix`.
+  A full apply that would drop a delivered note waits for a reconcile point,
+  even when its change set against the applied plan is empty. A change whose
+  apply drops no delivered note follows the usual full-apply rules.
   The full apply never happens mid-run. From that request on, notes for the
   applied changes stop rendering; stored history never changes.
   Until that point `pending` remains set and `applied_generation` and
@@ -7903,8 +7918,8 @@ every request, answer and refusal.
   identical repeat includes the same `system_note` and `required` values.
   Changing policy through `session.refresh_policy` to `notes_until_rebuild`
   requires the group and an already recorded system note if the pending
-  change includes system text; otherwise the owner must send a new refresh
-  with `system_note` instead.
+  change needs a system-text note; otherwise the owner must send a new
+  refresh with `system_note` instead.
 
 **Opt-in `refresh_relaunch`.**
 
@@ -9241,7 +9256,7 @@ tool's outcome (§14.6). Added in 0.10.1.
 
 ## 15. Conformance suite
 
-`cortexkit-role-llm-runner-conformance` 0.18.1 pins this 0.10.1 contract.
+`cortexkit-role-llm-runner-conformance` 0.18.2 pins this 0.10.2 contract.
 The opt-in `restart_survival_*` cases run crash and orderly experiments when
 an adapter declares `host_survives_restart: true`; otherwise they are not
 applicable, and the existing crash cases remain unchanged.

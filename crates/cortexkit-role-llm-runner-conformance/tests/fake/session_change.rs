@@ -5,6 +5,9 @@
 //! defects below break that and the answers one at a time.
 
 use super::*;
+use cortexkit_role_llm_runner::plan_notes::{
+    tool_removal, PlanNotesRefreshRequest, NOTES_UNTIL_REBUILD,
+};
 use cortexkit_role_llm_runner_conformance::{
     wire::{
         baseline::{EffectiveBaseline, PendingChange, Rungs},
@@ -92,7 +95,10 @@ pub struct PendingRec {
     digest: String,
     tools: Vec<String>,
     senders: Vec<super::order::PlanSender>,
+    system_text: Option<String>,
     system_note: Option<String>,
+    surface_unchanged: bool,
+    notes_delivered: bool,
     compaction_item: Option<Value>,
 }
 
@@ -105,6 +111,10 @@ pub struct ChangeState {
     /// answer, which an identical repeat replays.
     refreshes: BTreeMap<u64, (String, String, Value)>,
     pending: Option<PendingRec>,
+    applied_system_text: Option<String>,
+    noted_system_text: Option<String>,
+    noted_tools: Option<Vec<String>>,
+    delivered_notes: Vec<String>,
     /// The latest applied change: generation, how, plan identity.
     effective: Option<(u64, String, String)>,
     /// A flush waits for the next run.
@@ -118,6 +128,10 @@ pub struct ChangeState {
 pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
     let change = &mut sess.change;
     match kind {
+        "start" => {
+            change.applied_system_text = record["system_text"].as_str().map(str::to_owned);
+            change.noted_system_text = change.applied_system_text.clone();
+        }
         "refresh" => {
             let generation = record["generation"].as_u64().unwrap_or_default();
             let policy = record["policy"].as_str().unwrap_or_default().to_owned();
@@ -133,7 +147,10 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 digest,
                 tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                 senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
+                system_text: record["system_text"].as_str().map(str::to_owned),
                 system_note: record["system_note"].as_str().map(str::to_owned),
+                surface_unchanged: record["surface_unchanged"] == true,
+                notes_delivered: false,
                 compaction_item: record
                     .get("compaction_item")
                     .filter(|item| !item.is_null())
@@ -156,6 +173,19 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 message.host_body = message.body.clone();
                 sess.messages.push(message);
             }
+        }
+        "plan_notes_delivered" => {
+            let pending = change
+                .pending
+                .as_mut()
+                .expect("notes have a pending change");
+            pending.notes_delivered = true;
+            if pending.system_note.is_some() {
+                change.noted_system_text = pending.system_text.clone();
+            }
+            change.noted_tools = serde_json::from_value(record["noted_tools"].clone()).unwrap();
+            let notes: Vec<String> = serde_json::from_value(record["notes"].clone()).unwrap();
+            change.delivered_notes.extend(notes);
         }
         "refresh_policy" => {
             change.policies.insert(
@@ -188,6 +218,10 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 sess.plan_digest = Some(pending.digest);
                 sess.has_compaction_item = pending.compaction_item.is_some();
                 sess.compaction_item = pending.compaction_item;
+                change.applied_system_text = pending.system_text;
+                change.noted_system_text = change.applied_system_text.clone();
+                change.noted_tools = None;
+                change.delivered_notes.clear();
             }
             sess.change.flush = false;
             if record["rewrite_history"] == true {
@@ -245,25 +279,38 @@ impl Module {
                 if self.world.serves(groups::PLAN_NOTES)
                     || self.world.defects.plan_notes == Some("undeclared_policy") =>
             {
-                let request: cortexkit_role_llm_runner::plan_notes::PlanNotesRefreshRequest =
-                    match serde_json::from_value(params) {
-                        Ok(request) => request,
-                        Err(error) => return Ok(missing(error)),
-                    };
+                let request: PlanNotesRefreshRequest = match serde_json::from_value(params) {
+                    Ok(request) => request,
+                    Err(error) => return Ok(missing(error)),
+                };
                 let groups = if self.world.defects.plan_notes == Some("undeclared_policy") {
                     vec![groups::PLAN_NOTES.to_owned()]
                 } else {
                     self.world.groups.clone()
                 };
-                if let Err(field) = request.check(&groups, request.plan.contains_key("system_text"))
-                {
+                let change = &sess.change;
+                let system_text = request.plan.get("system_text").and_then(Value::as_str);
+                let old_rule = self.world.defects.plan_notes == Some("applied_plan_notes");
+                let last_sent = match &change.pending {
+                    Some(pending) if !old_rule => pending.system_text.as_deref(),
+                    _ => change.applied_system_text.as_deref(),
+                };
+                if let Err(field) = request.check(&groups, system_text != last_sent) {
                     return Ok(invalid(field));
                 }
+                let noted = if old_rule {
+                    &change.applied_system_text
+                } else {
+                    &change.noted_system_text
+                };
+                let note = request
+                    .system_note
+                    .filter(|_| system_text != noted.as_deref());
                 self.refresh(
                     session,
                     &sess,
                     RefreshRequest::new(request.plan, request.policy, request.generation),
-                    request.system_note,
+                    note,
                 )
             }
             ops::SESSION_REFRESH => match serde_json::from_value(params) {
@@ -317,7 +364,7 @@ impl Module {
                 return Ok(invalid(field));
             }
         }
-        let notes = request.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD;
+        let notes = request.policy == NOTES_UNTIL_REBUILD;
         if let Err(field) = if notes
             && (self.world.serves(groups::PLAN_NOTES)
                 || self.world.defects.plan_notes == Some("undeclared_policy"))
@@ -414,8 +461,15 @@ impl Module {
             ));
         }
         let running = sess.runs.iter().any(|run| run.state == "active");
-        let applies =
-            request.policy == rungs::IMMEDIATELY || change.flush || defects.refresh_claims_next_run;
+        let system_text = request.plan.get("system_text").and_then(Value::as_str);
+        // The fake's rendered definitions are the registered host definitions.
+        let surface_unchanged = names == sess.tools
+            && outside.is_empty()
+            && system_text == change.applied_system_text.as_deref();
+        let applies = request.policy == rungs::IMMEDIATELY
+            || change.flush
+            || defects.refresh_claims_next_run
+            || (notes && change.notes_apply_next_run(surface_unchanged, defects));
         let answer = RefreshReply::new(
             PendingChange {
                 generation: request.generation,
@@ -434,6 +488,7 @@ impl Module {
                     "senders": request.plan.get("senders").cloned().unwrap_or_else(|| json!([])),
                     "defer_senders": defects.refreshed_senders_wait_for_next_run,
                     "readers": request.plan.get("readers"),
+                    "system_text": system_text, "surface_unchanged": surface_unchanged,
                     "system_note": system_note,
                     "store_note": notes && defects.plan_notes == Some("stored_entry"),
                     "answer": answer }),
@@ -561,12 +616,79 @@ impl Module {
         let flush = change.flush && !defects.flush_ignored;
         let immediate = change.pending.as_ref().is_some_and(|pending| {
             pending.policy == rungs::IMMEDIATELY && !defects.immediately_waits_for_rebuild
-                || pending.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD
-                    && defects.plan_notes == Some("early_apply")
+                || pending.policy == NOTES_UNTIL_REBUILD
+                    && (defects.plan_notes == Some("early_apply")
+                        || change.notes_apply_next_run(pending.surface_unchanged, defects))
         });
         if flush || immediate {
             let applied_by = if flush { "fold" } else { "append" };
             self.apply_change(session, applied_by)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn observe_plan_notes(
+        &self,
+        observation: &mut cortexkit_role_llm_runner_conformance::ModelRequestObservation,
+        sess: &Sess,
+        run_id: &str,
+        turn_index: usize,
+    ) -> Result<(), Killed> {
+        let change = &sess.change;
+        let defects = &self.world.defects;
+        let mut notes = Vec::new();
+        if let Some(pending) = change
+            .pending
+            .as_ref()
+            .filter(|pending| pending.policy == NOTES_UNTIL_REBUILD && !pending.notes_delivered)
+        {
+            let is_first_request =
+                !self
+                    .world
+                    .model_calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(session, run, index)| {
+                        session == &sess.name && run == run_id && *index != turn_index
+                    });
+            if is_first_request {
+                let mut noted_tools = change.noted_tools.as_ref().unwrap_or(&sess.tools).clone();
+                // Without a callable native addition form, the fake only notes removals.
+                noted_tools.retain(|tool| {
+                    let still_offered = pending.tools.contains(tool);
+                    if !still_offered {
+                        notes.push(tool_removal(tool));
+                    }
+                    still_offered
+                });
+                if let Some(note) = &pending.system_note {
+                    notes.push(if defects.plan_notes == Some("full_system_text") {
+                        pending
+                            .system_text
+                            .clone()
+                            .expect("fixture changes system text")
+                    } else {
+                        note.clone()
+                    });
+                }
+                if !notes.is_empty() {
+                    self.commit(&sess.name, json!({ "kind": "plan_notes_delivered", "notes": &notes, "noted_tools": noted_tools }))?;
+                }
+            }
+        }
+        for text in change.delivered_notes.iter().chain(&notes) {
+            observation.rendered.push(text.clone());
+            observation
+                .system_text
+                .get_or_insert_with(Vec::new)
+                .push(text.clone());
+            if defects.cleared_ride == Some("plan_note") {
+                observation
+                    .cleared_system_text
+                    .get_or_insert_with(Vec::new)
+                    .push(text.clone());
+            }
         }
         Ok(())
     }
@@ -615,6 +737,13 @@ impl Module {
     }
 }
 
+impl ChangeState {
+    fn notes_apply_next_run(&self, surface_unchanged: bool, defects: &Defects) -> bool {
+        surface_unchanged
+            && (self.delivered_notes.is_empty() || defects.plan_notes == Some("applied_plan_notes"))
+    }
+}
+
 pub fn notes_fixture() -> cortexkit_role_llm_runner_conformance::PlanNotesFixture {
     let mut plan = refresh_plan(RefreshVariant::ChangedTools).unwrap().plan;
     plan.insert("tools".into(), json!([EXTRA_TOOL]));
@@ -628,39 +757,10 @@ pub fn notes_fixture() -> cortexkit_role_llm_runner_conformance::PlanNotesFixtur
         "Replacement system text with detailed instructions, not a change note.",
         SCRIPTED_TOOL,
     )
-}
-
-pub fn observe_notes(
-    observation: &mut cortexkit_role_llm_runner_conformance::ModelRequestObservation,
-    sess: &Sess,
-    defects: &Defects,
-) {
-    let Some(pending) = sess
-        .change
-        .pending
-        .as_ref()
-        .filter(|p| p.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD)
-    else {
-        return;
-    };
-    if let Some(note) = &pending.system_note {
-        let text = if defects.plan_notes == Some("full_system_text") {
-            notes_fixture().new_system_text
-        } else {
-            note.clone()
-        };
-        observation.rendered.push(text.clone());
-        observation
-            .system_text
-            .get_or_insert_with(Vec::new)
-            .push(text.clone());
-        if defects.cleared_ride == Some("plan_note") {
-            observation
-                .cleared_system_text
-                .get_or_insert_with(Vec::new)
-                .push(text);
-        }
-    }
+    .with_restoration(
+        Map::from_iter([("tools".into(), json!([SCRIPTED_TOOL]))]),
+        "Return to the original response style.",
+    )
 }
 
 pub fn removed_tool_message(sess: &Sess, tool_call_id: &str, defects: &Defects) -> Option<String> {
@@ -668,14 +768,19 @@ pub fn removed_tool_message(sess: &Sess, tool_call_id: &str, defects: &Defects) 
         .change
         .pending
         .as_ref()
-        .filter(|p| p.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD)?;
+        .filter(|p| p.policy == NOTES_UNTIL_REBUILD)?;
     let tool = sess
         .messages
         .iter()
         .flat_map(|message| message.body["parts"].as_array().into_iter().flatten())
         .find(|part| part["id"] == tool_call_id)?["tool"]
         .as_str()?;
-    if pending.tools.iter().any(|name| name == tool)
+    if (pending.tools.iter().any(|name| name == tool)
+        && sess
+            .change
+            .noted_tools
+            .as_ref()
+            .is_none_or(|tools| tools.iter().any(|name| name == tool)))
         || defects.plan_notes == Some("removed_dispatched")
     {
         return None;
@@ -683,7 +788,7 @@ pub fn removed_tool_message(sess: &Sess, tool_call_id: &str, defects: &Defects) 
     Some(if defects.plan_notes == Some("removal_message") {
         "tool not selected".into()
     } else {
-        cortexkit_role_llm_runner::plan_notes::tool_removal(tool)
+        tool_removal(tool)
     })
 }
 

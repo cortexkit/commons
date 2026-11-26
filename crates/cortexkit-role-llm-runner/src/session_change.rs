@@ -142,17 +142,18 @@ impl RelaunchRefreshRequest {
         check_policy(&self.policy)
     }
 
-    /// Validate the policy and system note using declarations and the fetched
-    /// surface diff. Call this instead of `check_policy` with `plan_notes`.
+    /// Validate the policy and note for a runner declaring `plan_notes`.
+    /// Compare the system text against the plan the owner last sent, not the
+    /// applied plan. Call this instead of `check_policy` with `plan_notes`.
     pub fn check_plan_notes<S: AsRef<str>>(
         &self,
         groups: &[S],
-        system_text_changed: bool,
+        system_text_changed_since_last_sent: bool,
     ) -> Result<(), &'static str> {
         crate::plan_notes::check_refresh(
             &self.policy,
             self.system_note.as_deref(),
-            system_text_changed,
+            system_text_changed_since_last_sent,
             groups,
         )
     }

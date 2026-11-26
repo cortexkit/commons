@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.2
+
+- Pin `cortexkit-role-llm-runner =0.10.2`. Check restoration after note delivery,
+  restoration before delivery, and missing required system notes on restoration.
+  Adapters opt in through `PlanNotesFixture::with_restoration`.
+
 ## 0.18.1
 
 - Pin llm-runner `=0.10.1`. Check the phase and deadlines in `run.status`,

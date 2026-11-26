@@ -1143,6 +1143,9 @@ async fn signed_tool_change_default_hook_is_inapplicable_never_failed() {
 const PLAN_NOTE_CASES: &[&str] = &[
     "plan_notes_requires_session_change",
     "plan_notes_pending_until_reconcile",
+    "plan_notes_restore_after_delivery",
+    "plan_notes_restore_before_delivery",
+    "plan_notes_restore_requires_system_note",
     "plan_notes_not_stored_entries",
     "plan_notes_removed_tool_refused",
     "plan_notes_system_note_not_full_text",
@@ -1241,6 +1244,12 @@ async fn plan_notes_faulty_fakes_fail_each_case_by_name() {
         ("removed_dispatched", "plan_notes_removed_tool_refused"),
         ("removal_message", "plan_notes_removed_tool_refused"),
         ("full_system_text", "plan_notes_system_note_not_full_text"),
+        ("applied_plan_notes", "plan_notes_restore_after_delivery"),
+        ("applied_plan_notes", "plan_notes_restore_before_delivery"),
+        (
+            "applied_plan_notes",
+            "plan_notes_restore_requires_system_note",
+        ),
     ] {
         let report = run(&note_subject(Some(defect))).await;
         println!("{defect}: {expected}: {}", failed(&report, expected));

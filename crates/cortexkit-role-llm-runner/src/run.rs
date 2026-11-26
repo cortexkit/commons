@@ -762,9 +762,23 @@ pub struct RunStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directives: Option<Vec<crate::directives::Directive>>,
     /// Present on an active run that has begun a model step, on a runner
-    /// declaring `step_liveness`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// declaring `step_liveness`. A `step` this type can't decode reads as
+    /// absent: runners that don't declare the group may send their own `step`
+    /// object, without `phase`, and it is theirs to ignore (§6.7).
+    #[serde(
+        default,
+        deserialize_with = "deserialize_step",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub step: Option<RunStatusStep>,
+}
+
+fn deserialize_step<'de, D>(deserializer: D) -> Result<Option<RunStatusStep>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| serde_json::from_value(value).ok()))
 }
 impl RunStatus {
     pub fn with_step(mut self, step: RunStatusStep) -> Self {

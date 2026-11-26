@@ -2890,7 +2890,7 @@ impl Module {
                     observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
                 observation.tool_results = model_tool_results(&sess);
                 notices::observe(&mut observation, &sess, &self.world);
-                session_change::observe_notes(&mut observation, &sess, &self.world.defects);
+                self.observe_plan_notes(&mut observation, &sess, run_id, turn_index)?;
                 observation.max_output_tokens = if capless { None } else { output_cap };
                 observation.temperature = run.temperature.filter(|_| {
                     if run.max_output_tokens.is_some() {
@@ -4716,6 +4716,7 @@ impl Module {
                         "session_class": self.world.serves(groups::SESSION_CLASS).then_some(request.session_class.as_deref()).flatten(),
                         "frozen_opener": frozen_opener,
                         "tools": tools,
+                        "system_text": request.plan.as_ref().and_then(|plan|plan.get("system_text")),
                         "selection": selection,
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "has_compaction_item": request.plan.as_ref().and_then(|plan|plan.get("compaction_item")).is_some_and(|item| !item.is_null()),

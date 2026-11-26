@@ -44,16 +44,15 @@ pub fn check_policy<S: AsRef<str>>(policy: &str, groups: &[S]) -> Result<(), &'s
     }
 }
 
-/// Validate the note against the fetched applied/pending system-text diff.
-/// The owner supplies a short change description, never replacement text.
-/// A note is required when system text changed. When it didn't, a note is
-/// accepted and the runner ignores it, because only the runner can see the
-/// joined system text the owner's change produced.
+/// Validate a short change description, never replacement text.
+/// `system_text_changed_since_last_sent` compares the refresh's system text
+/// with the plan the owner last sent. To decide whether to use the note, the
+/// runner instead compares the refresh with the applied plan plus delivered notes.
 /// Validation failures name the `invalid_params` field and write nothing.
 pub fn check_refresh<S: AsRef<str>>(
     policy: &str,
     system_note: Option<&str>,
-    system_text_changed: bool,
+    system_text_changed_since_last_sent: bool,
     groups: &[S],
 ) -> Result<(), &'static str> {
     if system_note.is_some()
@@ -63,7 +62,7 @@ pub fn check_refresh<S: AsRef<str>>(
     }
     check_policy(policy, groups)?;
     if policy == NOTES_UNTIL_REBUILD
-        && ((system_text_changed && system_note.is_none())
+        && ((system_text_changed_since_last_sent && system_note.is_none())
             || system_note.is_some_and(|note| note.len() > SYSTEM_NOTE_MAX))
     {
         return Err("system_note");
@@ -110,11 +109,12 @@ impl PlanNotesRefreshRequest {
         self
     }
 
-    /// Validate declarations and the fetched surface diff before acceptance.
+    /// Validate declarations and the note before acceptance. Compare the
+    /// system text against the plan the owner last sent, not the applied plan.
     pub fn check<S: AsRef<str>>(
         &self,
         groups: &[S],
-        system_text_changed: bool,
+        system_text_changed_since_last_sent: bool,
     ) -> Result<(), &'static str> {
         crate::session_change::check_refetch(
             self.refetch.as_deref(),
@@ -126,7 +126,7 @@ impl PlanNotesRefreshRequest {
         check_refresh(
             &self.policy,
             self.system_note.as_deref(),
-            system_text_changed,
+            system_text_changed_since_last_sent,
             groups,
         )
     }
@@ -185,7 +185,7 @@ mod tests {
         assert_eq!(request.check::<&str>(&[], false), Err("policy"));
         let mut note = request.with_system_note("é".repeat(SYSTEM_NOTE_MAX / 2));
         assert_eq!(note.check(&groups, true), Ok(()));
-        // A note with unchanged system text is accepted; the runner ignores it.
+        // A note is allowed even when the last sent system text is unchanged.
         assert_eq!(note.check(&groups, false), Ok(()));
         note.system_note.as_mut().unwrap().push('x');
         assert_eq!(note.check(&groups, true), Err("system_note"));

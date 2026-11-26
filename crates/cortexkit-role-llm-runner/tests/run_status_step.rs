@@ -60,3 +60,27 @@ fn run_status_step_vector_round_trips() {
         expected
     );
 }
+
+/// Runners that don't declare `step_liveness` may already send a `step` of
+/// their own, without `phase`. The lenient answer reads it as absent rather
+/// than refusing the whole `run.status`.
+#[test]
+fn an_undeclared_runner_step_without_phase_reads_as_absent() {
+    let status: RunStatus = serde_json::from_value(serde_json::json!({
+        "state": "active",
+        "step": {"attempt": 0, "attempt_started_at_ms": 1, "started_at_ms": 1, "step_id": 1}
+    }))
+    .unwrap();
+    assert_eq!(status.state, "active");
+    assert_eq!(status.step, None);
+
+    let status: RunStatus = serde_json::from_value(serde_json::json!({
+        "state": "active",
+        "step": {"phase": "streaming", "last_event_at_ms": 5, "step_id": 1}
+    }))
+    .unwrap();
+    assert_eq!(
+        status.step,
+        Some(RunStatusStep::new(Phase::Streaming).with_last_event_at_ms(5))
+    );
+}

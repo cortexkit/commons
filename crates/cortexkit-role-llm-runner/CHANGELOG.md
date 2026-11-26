@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.2
+
+- `plan_notes` compares a refresh with the applied plan plus delivered notes.
+  Undoing a delivered difference is a new note; any full apply that drops a
+  delivered note waits for reconciliation. `system_note` is required when the
+  system text differs from the plan the owner last sent.
+- The lenient `RunStatus` reads a `step` it can't decode as absent. 0.10.1
+  required `phase`, so a runner that doesn't declare `step_liveness` but sends
+  its own `step` object made every active `run.status` fail to decode (§6.7).
+
 ## 0.10.1
 
 - Every model step's output is bounded on a runner declaring
