@@ -9,7 +9,7 @@ mod stand_in;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cortexkit_doctor::{runner, DecodeError, FindingId};
+use cortexkit_doctor::{runner, DecodeError, FindingId, Mode};
 use scratch::Scratch;
 
 /// Supplies a program and independent test state for each conformance run.
@@ -20,6 +20,11 @@ pub trait Adapter {
     fn seed(&mut self, data: &Path, config: &Path) -> io::Result<()>;
 
     fn fixable_id(&self) -> Option<&FindingId> {
+        None
+    }
+
+    /// A fixable finding reported by the full check but not by the quick check.
+    fn full_fixable_id(&self) -> Option<&FindingId> {
         None
     }
 
@@ -66,9 +71,11 @@ pub struct RuleResult {
 /// Run the kit and report each rule by name, including skipped rules.
 pub fn run(adapter: &mut impl Adapter) -> Vec<RuleResult> {
     let check = Scratch::new(adapter).and_then(|scratch| {
-        runner::check(adapter.program(), &scratch.runner_options()).map_err(run_failure)
+        runner::check(adapter.program(), Mode::Quick, &scratch.runner_options())
+            .map_err(run_failure)
     });
-    let read_only = check_read_only(adapter);
+    let read_only = check_read_only(adapter, Mode::Quick);
+    let full = check_read_only(adapter, Mode::Full);
     // These two rules inspect different stages of the same manifest invocation.
     let manifest = Scratch::new(adapter).and_then(|scratch| {
         match runner::manifest(adapter.program(), &scratch.runner_options()) {
@@ -90,7 +97,7 @@ pub fn run(adapter: &mut impl Adapter) -> Vec<RuleResult> {
             },
         ),
     };
-    let fixes = fix_rules::run(adapter, check.is_ok());
+    let fixes = fix_rules::run(adapter, check.is_ok(), full.is_ok());
     let mut results = vec![
         RuleResult {
             name: "output.valid",
@@ -99,6 +106,10 @@ pub fn run(adapter: &mut impl Adapter) -> Vec<RuleResult> {
         RuleResult {
             name: "check.read_only",
             outcome: verdict(read_only),
+        },
+        RuleResult {
+            name: "check.full",
+            outcome: verdict(full),
         },
     ];
     results.extend(fixes);
@@ -115,13 +126,16 @@ pub fn run(adapter: &mut impl Adapter) -> Vec<RuleResult> {
     results
 }
 
-fn check_read_only(adapter: &mut impl Adapter) -> Result<(), &'static str> {
+fn check_read_only(adapter: &mut impl Adapter, mode: Mode) -> Result<(), &'static str> {
     let scratch = Scratch::new(adapter)?;
     let before = scratch.snapshot()?;
-    let check = runner::check(adapter.program(), &scratch.runner_options());
+    let check = runner::check(adapter.program(), mode, &scratch.runner_options());
     let after = scratch.snapshot()?;
     if before != after {
         return Err("home_changed");
+    }
+    if mode == Mode::Full {
+        return check.map(|_| ()).map_err(run_failure);
     }
     // Malformed stdout does not erase a measurement, but a check that never
     // launched cannot demonstrate that the program leaves both homes alone.

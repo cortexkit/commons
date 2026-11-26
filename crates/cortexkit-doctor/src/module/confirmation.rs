@@ -2,7 +2,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{Finding, ModuleId};
+use crate::{Finding, Mode, ModuleId, CONFIRMATION_LIMIT, FULL_CHECK_LIMIT, QUICK_CHECK_LIMIT};
 
 use super::{
     callback, terminal, LocalAuthenticationFailure, Outcome, Stop, Terminal, TerminalRead, Withdraw,
@@ -15,15 +15,19 @@ pub struct Timing {
     pub terminal_limit: Duration,
     pub confirm_gate: Duration,
     pub fix_gate: Duration,
+    pub full_confirm_gate: Duration,
+    pub full_fix_gate: Duration,
 }
 
 impl Default for Timing {
     fn default() -> Self {
         Self {
-            prompt_limit: Duration::from_secs(120),
-            terminal_limit: Duration::from_secs(120),
-            confirm_gate: Duration::from_secs(10),
-            fix_gate: Duration::from_secs(140),
+            prompt_limit: CONFIRMATION_LIMIT,
+            terminal_limit: CONFIRMATION_LIMIT,
+            confirm_gate: QUICK_CHECK_LIMIT,
+            fix_gate: QUICK_CHECK_LIMIT * 2 + CONFIRMATION_LIMIT,
+            full_confirm_gate: FULL_CHECK_LIMIT,
+            full_fix_gate: FULL_CHECK_LIMIT * 2 + CONFIRMATION_LIMIT,
         }
     }
 }
@@ -61,9 +65,14 @@ pub(super) fn confirm(
     entry: Instant,
     module_id: &ModuleId,
     finding: &Finding,
+    mode: Mode,
 ) -> Result<(), Stop> {
+    let confirm_gate = match mode {
+        Mode::Quick => hooks.timing.confirm_gate,
+        Mode::Full => hooks.timing.full_confirm_gate,
+    };
     let budget = || {
-        if (hooks.now)().duration_since(entry) > hooks.timing.confirm_gate {
+        if (hooks.now)().duration_since(entry) > confirm_gate {
             Err(Stop::Refused("out_of_time"))
         } else {
             Ok(())

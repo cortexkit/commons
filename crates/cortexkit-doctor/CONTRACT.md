@@ -29,6 +29,15 @@ emit template ids.
   The runner clears the environment and sets only `XDG_DATA_HOME` and
   `XDG_CONFIG_HOME`, leaving `HOME` unset; checks must not look for stores
   outside those roots, including a module's old storage location.
+- [pinned] `<program> doctor check --full --json` emits the same `CheckOutput`
+  document and includes the quick findings. A full check may take up to 30
+  minutes and changes nothing; the same read-only and `store.in_use` rules
+  apply even if a deep check needs the module stopped. On `store.in_use`,
+  the caller may get the person's consent to stop the module, rerun the full
+  check, and restart it; the helper does not stop the module. The limit is
+  fixed by this contract; modules do not declare it. An older helper treats
+  `--full` as an unknown argument (exit 2 with empty stdout). The runner returns
+  `no_doctor`; the caller can then fall back to the quick check.
 - [pinned] A `Finding` has `id`, `severity`, `summary`, `evidence`, and `fix`.
   `FindingId` accepts `[a-z0-9_.-]{1,96}` subject to the secret check. An id is
   stable within the module across versions and unique in a `CheckOutput`.
@@ -49,7 +58,7 @@ emit template ids.
   digits. `CheckOutput::decode` recomputes the digest, so even a timeout-only
   change invalidates it. The digest binds the described operation, not its
   evidence. The fix flow binds the confirmed finding.
-- [pinned] `<program> doctor fix <id> --digest <digest>` emits one `FixOutput`
+- [pinned] `<program> doctor fix <id> --digest <digest> [--full]` emits one `FixOutput`
   document: `{"schema":"ck.doctor-fix/v1","result", "code"?, "evidence"?}`.
   `FixResult` is `fixed`, `refused`, or `failed`. A code matches
   `[a-z0-9_.-]{1,64}` subject to the secret check. It is absent for `fixed`
@@ -129,7 +138,7 @@ Use `cortexkit_doctor::module::run` in the module's CLI and return its
 ```rust,ignore
 fn run(
     args: &[impl AsRef<OsStr>],
-    check: impl FnMut() -> Result<Vec<Finding>, CheckError>,
+    check: impl FnMut(Mode) -> Result<Vec<Finding>, CheckError>,
     preflight: impl FnMut(&Finding) -> Result<(), PreflightError>,
     fix: impl FnOnce(Finding) -> FixOutcome,
     manifest: &str,
@@ -143,9 +152,12 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
 `FixOutcome::refused(FixRefusal) -> FixOutcome`. `FixRefusal` is
 `ModuleRunning`, `FilesInUse`, or `PlanChanged`.
 
-- [pinned] The check callback returns findings or an error. Preflight gets
-  a `&Finding` and returns success, `module_running`, `files_in_use`, or an
-  error. The fix callback gets the confirmed `Finding`. It returns `fixed`
+- [pinned] The check callback receives `Mode::Quick` by default or `Mode::Full`
+  with `--full`, for both `check` and each recheck in `fix`. Use `--full` to
+  fix a finding selected from a full check. The check callback returns
+  findings or an error. Preflight gets a `&Finding` and returns success,
+  `module_running`, `files_in_use`, or an error. The fix callback gets the
+  confirmed `Finding`. It returns `fixed`
   with evidence, `refused` with one of `module_running`, `files_in_use`, or
   `plan_changed`, or `failed` with a code and evidence. The callback result
   type admits no other refusal. A callback's own failure code is the module's.
@@ -165,12 +177,14 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
      `needs_stop` is true and the module is alive; refuse `files_in_use`
      when another process holds a file the fix changes. Preflight always runs
      before asking the person to confirm.
-  3. If more than 10 seconds have elapsed since entry, refuse `out_of_time`
-     without touching either confirmation step. Otherwise confirm as below.
+  3. If more than 10 seconds (quick) or 30 minutes (full) have elapsed since
+     entry, refuse `out_of_time` without touching either confirmation step.
+     Otherwise confirm as below.
   4. Run the check callback again. Refuse `unknown_finding` if the finding
      disappeared, or `plan_changed` if its digest or summary changed. Run
      preflight again with the original, confirmed `Finding`.
-  5. If more than 140 seconds have elapsed since entry, refuse `out_of_time`.
+  5. If more than 140 seconds (quick) or 62 minutes (full) have elapsed since
+     entry, refuse `out_of_time`.
   6. Call the fix callback with the original confirmed `Finding` and its plan.
      Changes to evidence alone on the second check do not replace it. The
      callback applies that plan and does not resolve the id again.
@@ -191,9 +205,10 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
   grant is not a person's approval. `NoPresence`, `UnsupportedPlatform`,
   `SetupRequired`, `ProviderError`, `ProviderErrorWithReason`, any other
   `LocalAuthenticationError`, and unknown outcomes fall back to the terminal.
-- [pinned] Before opening the terminal the helper rechecks the 10-second
-  gate. If more time has elapsed, it refuses `out_of_time`. Otherwise it
-  opens `/dev/tty` by default and refuses `no_terminal` if it cannot open it.
+- [pinned] Before opening the terminal the helper rechecks the confirmation
+  gate (10 seconds for quick, 30 minutes for full). If more time has elapsed,
+  it refuses `out_of_time`. Otherwise it opens `/dev/tty` by default and
+  refuses `no_terminal` if it cannot open it.
   It writes the untruncated prompt text above, a newline, and
   `Type <module_id> to confirm:` followed by a space. It reads one line
   terminated by LF within 120 seconds, strips that LF and one optional CR,
@@ -202,7 +217,8 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
   controlling terminal, not who typed it. A program that controls the
   terminal can type the public module id.
 - [pinned] `Timing` defaults to the 120-second prompt and terminal limits and
-  the 10-second and 140-second gates. The helper takes an injected monotonic
+  the 10-second and 140-second quick gates. It also provides the full gates
+  of 30 minutes and 62 minutes. The helper takes an injected monotonic
   clock, presence function, terminal opener, and `Timing` for tests. Gates
   read the injected clock. The prompt and terminal limits are real waits of
   the configured lengths; tests shorten them. The terminal seam writes a
@@ -234,16 +250,18 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
 
 ## 4. Running a doctor program
 
-The Unix-only `cortexkit_doctor::runner` exposes:
+The Unix-only `cortexkit_doctor::runner` takes the same `cortexkit_doctor::Mode`
+as the module helper:
 
 ```rust,ignore
-fn check(program: impl AsRef<Path>, options: &Options) -> Result<CheckOutput, RunError>;
+fn check(program: impl AsRef<Path>, mode: Mode, options: &Options) -> Result<CheckOutput, RunError>;
 fn manifest(program: impl AsRef<Path>, options: &Options) -> Result<Manifest, RunError>;
 fn fix(
     program: impl AsRef<Path>,
     id: &FindingId,
     digest: &str,
     timeout_ms: u64,
+    mode: Mode,
     options: &Options,
 ) -> Result<FixOutput, RunError>;
 ```
@@ -252,9 +270,10 @@ Start with `Options::new()`. `with_data_home` and `with_config_home` take an
 absolute path (`impl Into<PathBuf>`); `with_force_setsid(bool)` disables the
 terminal handoff for fixes when set to `true`. `with_limits(Limits)` overrides
 the contract defaults for tests. For `fix`, use the digest and `timeout_ms`
-from the selected plan. The runner must own waiting for its child; don't have
-a separate SIGCHLD handler reap it or enable automatic reaping. Serialize
-foreground fixes on any one terminal.
+from the selected plan, and the mode from the check that reported it. The
+runner must own waiting for its child; don't have a separate SIGCHLD handler
+reap it or enable automatic reaping. Serialize foreground fixes on any one
+terminal.
 
 - [pinned] The runner clears the environment and sets absolute
   `XDG_DATA_HOME` and `XDG_CONFIG_HOME`. It uses the supplied homes, or resolves
@@ -279,14 +298,18 @@ foreground fixes on any one terminal.
   path, including timeout and kill. Otherwise the child uses `setsid`; the
   terminal fallback cannot open `/dev/tty`. Either way the child pid equals
   the managed group id.
-- [pinned] `Limits` defaults to 10 seconds for `check`, two seconds for
-  `manifest`, and `Plan::timeout_ms` plus 150 seconds for `fix`. That allowance
-  covers five seconds before helper entry, ten seconds to start confirmation,
-  one full 120-second confirmation step, ten seconds for rechecking, and five
-  seconds to write the result and exit. The module must dispatch `doctor`
-  immediately. The helper does not know the launch time; the full callback
-  budget is guaranteed only if helper entry is within five seconds of launch.
-  A slower start can end in `timed_out`.
+- [pinned] `Limits` defaults to 10 seconds for `check`, 30 minutes for
+  `full_check`, and two seconds for `manifest`. The quick fix limit is
+  `Plan::timeout_ms` plus 150 seconds. That allowance covers five seconds
+  before helper entry, ten seconds to start confirmation, one full 120-second
+  confirmation step, ten seconds for rechecking, and five seconds to write
+  the result and exit. The full fix limit is `Plan::timeout_ms`
+  plus 62 minutes and 10 seconds: five seconds before helper entry, 30 minutes
+  to start confirmation, one full 120-second confirmation step, 30 minutes
+  for rechecking, and five seconds to write the result and exit. The module
+  must dispatch `doctor` immediately. The helper does not know the launch time;
+  the entire callback budget is guaranteed only if helper entry is within five
+  seconds of launch. A slower start can end in `timed_out`.
 - [pinned] `Limits` also defaults to a two-second post-exit read grace and a
   two-second interval between `SIGTERM` and `SIGKILL`. The runner observes the
   direct child with `waitid(WEXITED | WNOWAIT)` and reaps it only after its last
@@ -318,8 +341,9 @@ foreground fixes on any one terminal.
      parsed document. No failure carries child output text.
 
 Unlike `manifest`, `check` treats only the usage exit (2) as evidence of a
-missing subcommand, so a panic or other failed check with empty stdout still
-surfaces as `crashed`.
+missing subcommand or unsupported `--full`, so a panic or other failed check
+with empty stdout still surfaces as `crashed`. The runner doesn't fall back
+to a quick check by itself; the caller decides.
 
 `RunError` has variants `LaunchFailed(std::io::ErrorKind)`, `HomeRelative`,
 `Crashed(Crash)`, `TimedOut`, `InvalidOutput(DecodeError)` and `NoDoctor`.
@@ -567,8 +591,9 @@ or emits the original value to resolve a collision.
 
 - [pinned] `cortexkit-doctor-conformance` runs a module program through an
   adapter. The adapter seeds scratch data and config homes and may name a
-  fixable finding id and a `needs_stop` id. A `needs_stop` id needs a
-  liveness signal: a pid file (decimal pid and LF) or an `flock(LOCK_EX)`
+  quick fixable finding id, a full-only fixable id (`full_fixable_id()`), and
+  a `needs_stop` id. A `needs_stop` id needs a liveness signal: a pid file
+  (decimal pid and LF) or an `flock(LOCK_EX)`
   lock file at a path relative to the data home with no `..`.
 - [pinned] The kit never raises a real OS prompt. It runs no `doctor fix`
   unless the adapter declares that the module test build injects a
@@ -590,18 +615,26 @@ or emits the original value to resolve a collision.
   paths, entry types, symlink target strings, regular-file lengths, and
   regular-file SHA-256 hashes must match. Never open other entry types
   such as FIFOs, sockets, and devices; fail with `unsupported_entry`.
-- [pinned] `output.valid` checks that the check output decodes.
-  `check.read_only` checks that the check changes neither home. Neither rule
-  uses the stand-in. `fix.stale_digest` and `fix.no_terminal` use the fixable
-  id; `fix.module_running` uses the `needs_stop` id. A named id that is
-  missing from the baseline check or has class `none` fails with
-  `bad_adapter_input`, as does a `needs_stop` id without `needs_stop: true`.
+- [pinned] `output.valid` checks that the quick check output decodes.
+  `check.read_only` checks that the quick check changes neither home.
+  `check.full` checks that a full check decodes and changes neither home.
+  None of these rules uses the stand-in. `fix.stale_digest` and
+  `fix.no_terminal` use the quick fixable id; `fix.module_running` uses the
+  `needs_stop` id. `fix.full_recheck` uses the full-only fixable id. A named
+  id must appear in a check of the newly seeded homes before starting any
+  stand-in: a full check for `fix.full_recheck` and a quick check otherwise.
+  A missing id or class `none` fails with `bad_adapter_input`, as does a
+  `needs_stop` id without `needs_stop: true` or a full-only fixable id also
+  reported by a quick check.
 - [pinned] `fix.stale_digest` expects exactly `refused`/`plan_changed`.
   `fix.no_terminal` expects exactly `refused`/`no_terminal`.
   `fix.module_running` expects exactly `refused`/`module_running`, which
   distinguishes preflight from a confirmation attempt made first. With
   the stand-in active, the check must report the `needs_stop` finding
   with the same digest, or the rule is `skipped` as `setup_not_observable`.
+  `fix.full_recheck` expects exactly `refused`/`no_terminal` with the full-only
+  finding's digest and `--full`. It skips if no full-only id is declared or
+  if `check.full` failed.
   `fix.no_change_on_refusal` compares snapshots for every fix run no matter
   its result, and is `skipped` when no fix runs.
 - [pinned] `manifest.valid` fails for any manifest run failure except

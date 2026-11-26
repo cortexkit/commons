@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-log-manifest"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,7 +10,7 @@ readme = "README.md"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-cortexkit-doctor = { path = "../cortexkit-doctor", version = "0.2.0" }
+cortexkit-doctor = { path = "../cortexkit-doctor", version = "0.3.0" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

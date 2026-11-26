@@ -3,14 +3,14 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use cortexkit_doctor::runner::{self, Crash, Limits, Options, RunError};
 use cortexkit_doctor::{
-    DecodeError, Finding, FixOutput, FixResult, LogSource, Manifest, ModuleId, Template,
+    DecodeError, Finding, FixOutput, FixResult, LogSource, Manifest, Mode, ModuleId, Template,
     MAX_OUTPUT_BYTES,
 };
 
@@ -40,8 +40,11 @@ impl Fixture {
     fn program(&self, mode: &str) -> PathBuf {
         let source = env!("CARGO_BIN_EXE_cortexkit-doctor-runner-fixture");
         let target = self._scratch.path().join(mode);
-        if !target.exists() && fs::hard_link(source, &target).is_err() {
-            fs::copy(source, &target).unwrap_or_else(|err| panic!("copy {source:?}: {err}"));
+        // A concurrent fork can inherit an open copy's write descriptor and
+        // cause exec to fail with "Text file busy". Keep the mode in argv[0]
+        // without opening the executable for writing.
+        if !target.exists() {
+            symlink(source, &target).unwrap();
         }
         target
     }
@@ -81,12 +84,16 @@ fn fix(program: &Path, finding: &Finding, options: &Options) -> Result<FixOutput
         finding.id(),
         plan.digest(),
         plan.timeout_ms(),
+        Mode::Quick,
         options,
     )
 }
 
 fn finding(program: &Path, options: &Options) -> Finding {
-    runner::check(program, options).unwrap().findings()[0].clone()
+    runner::check(program, Mode::Quick, options)
+        .unwrap()
+        .findings()[0]
+        .clone()
 }
 
 #[test]
@@ -116,7 +123,7 @@ fn runner_helper_exit_and_output_precedence() {
     ] {
         let start = Instant::now();
         assert_eq!(
-            runner::check(fixture.program(mode), &options),
+            runner::check(fixture.program(mode), Mode::Quick, &options),
             Err(expected)
         );
         assert!(
@@ -149,7 +156,7 @@ fn runner_helper_check_no_doctor_requires_empty_usage_error() {
     ] {
         let program = fixture.program(mode);
         assert_eq!(
-            runner::check(&program, &options),
+            runner::check(&program, Mode::Quick, &options),
             Err(check_error),
             "{mode}"
         );
@@ -163,9 +170,70 @@ fn runner_helper_check_no_doctor_requires_empty_usage_error() {
         );
     }
     assert_eq!(
-        runner::check(fixture.program("exit2-text"), &options),
+        runner::check(fixture.program("exit2-text"), Mode::Quick, &options),
         Err(RunError::Crashed(Crash::ExitCode(2)))
     );
+}
+
+#[test]
+fn runner_helper_full_check_does_not_retry_older_helper() {
+    let fixture = Fixture::new();
+    let program = fixture.program("quick-only");
+    let options = fixture.options();
+    assert!(runner::check(&program, Mode::Quick, &options).is_ok());
+    assert_eq!(
+        runner::check(&program, Mode::Full, &options),
+        Err(RunError::NoDoctor)
+    );
+}
+
+#[test]
+fn runner_helper_full_check_uses_full_deadline() {
+    let fixture = Fixture::new();
+    let program = fixture.program("full-only");
+    let mut limits = Limits::default();
+    limits.check = Duration::from_secs(6);
+    limits.full_check = Duration::from_millis(100);
+    limits.term_to_kill = Duration::ZERO;
+    let options = fixture.options().with_limits(limits);
+    assert_eq!(
+        runner::check(&program, Mode::Full, &options),
+        Err(RunError::TimedOut)
+    );
+    limits.full_check = Duration::from_secs(6);
+    let options = fixture.options().with_limits(limits);
+    assert!(runner::check(&program, Mode::Quick, &options)
+        .unwrap()
+        .findings()
+        .is_empty());
+    let full = runner::check(&program, Mode::Full, &options).unwrap();
+    assert_eq!(full.findings()[0].id().as_str(), "history.backlog");
+}
+
+#[test]
+fn runner_helper_full_fix_uses_full_flag_and_allowance() {
+    let fixture = Fixture::new();
+    let program = fixture.program("full-only");
+    let mut limits = Limits::default();
+    limits.fix_allowance = Duration::ZERO;
+    limits.term_to_kill = Duration::ZERO;
+    let options = fixture
+        .options()
+        .with_force_setsid(true)
+        .with_limits(limits);
+    let full = runner::check(&program, Mode::Full, &options).unwrap();
+    let finding = &full.findings()[0];
+    let plan = finding.fix().plan().unwrap();
+    let fix = runner::fix(
+        &program,
+        finding.id(),
+        plan.digest(),
+        plan.timeout_ms(),
+        Mode::Full,
+        &options,
+    )
+    .unwrap();
+    assert_eq!(fix.result(), FixResult::Fixed);
 }
 
 #[test]
@@ -181,7 +249,7 @@ fn runner_helper_launch_error_preserves_io_kind() {
         (missing, ErrorKind::NotFound),
         (non_executable, ErrorKind::PermissionDenied),
     ] {
-        let error = runner::check(path, &options).unwrap_err();
+        let error = runner::check(path, Mode::Quick, &options).unwrap_err();
         assert_eq!(error, RunError::LaunchFailed(kind));
         assert_eq!(error.as_str(), "launch_failed");
     }
@@ -231,7 +299,7 @@ fn runner_helper_environment() {
     const SWITCH: &str = "CORTEXKIT_DOCTOR_TEST_PRESENCE";
     if std::env::var_os("CK_DOCTOR_RUNNER_RELATIVE_CASE").is_some() {
         assert_eq!(
-            runner::check("unused", &Options::new()),
+            runner::check("unused", Mode::Quick, &Options::new()),
             Err(RunError::HomeRelative)
         );
         return;
@@ -284,7 +352,7 @@ fn runner_helper_environment() {
             let options = options
                 .with_conformance_fix_marker()
                 .with_force_setsid(false);
-            runner::check(&program, &options).unwrap();
+            runner::check(&program, Mode::Quick, &options).unwrap();
             assert_eq!(env(), expected);
             runner::manifest(&program, &options).unwrap();
             assert_eq!(env(), expected);
@@ -324,7 +392,7 @@ fn runner_helper_environment() {
         fixture.options().with_config_home("relative"),
     ] {
         assert_eq!(
-            runner::check(&program, &options),
+            runner::check(&program, Mode::Quick, &options),
             Err(RunError::HomeRelative)
         );
         assert!(!fixture.data.join("start").exists());
@@ -398,7 +466,7 @@ fn runner_helper_group_cleanup() {
         let options = fixture.options().with_limits(limits);
         let program = fixture.program(mode);
         let start = Instant::now();
-        let output = runner::check(program, &options);
+        let output = runner::check(program, Mode::Quick, &options);
         let elapsed = start.elapsed();
         let child = fixture.start();
         assert_eq!(child.pid, child.pgid);

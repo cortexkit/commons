@@ -81,6 +81,7 @@ struct Scenario {
     presence: Arc<Presence>,
     terminal: Option<TerminalRead>,
     timing: Timing,
+    mode: Mode,
     after_preflight: [Option<u64>; 2],
     after_presence: Option<u64>,
     after_read: Option<u64>,
@@ -109,6 +110,7 @@ impl Scenario {
             presence: Arc::new(|_, _| Outcome::Approved),
             terminal: None,
             timing: Timing::default(),
+            mode: Mode::Quick,
             after_preflight: [None; 2],
             after_presence: None,
             after_read: None,
@@ -149,13 +151,15 @@ impl Scenario {
             digest: &self.digest,
             module_id: &ModuleId::new(MODULE).unwrap(),
             entry,
+            mode: self.mode,
         };
         let mut preflight_step = 0;
         let mut offered = Vec::new();
         let mut applied = None;
         let output = request
             .apply(
-                &mut || {
+                &mut |mode| {
+                    assert_eq!(mode, self.mode);
                     record(&trace, "check");
                     self.checks.pop_front().expect("unexpected check").call()
                 },
@@ -244,6 +248,8 @@ fn module_helper_timing_defaults() {
             terminal_limit: Duration::from_secs(120),
             confirm_gate: Duration::from_secs(10),
             fix_gate: Duration::from_secs(140),
+            full_confirm_gate: Duration::from_secs(1800),
+            full_fix_gate: Duration::from_secs(3720),
         }
     );
 }
@@ -415,6 +421,34 @@ fn module_helper_budget_gates_are_measured_from_entry() {
 
     let mut before_fix = Scenario::new();
     before_fix.after_preflight[1] = Some(141);
+    before_fix.refuses("out_of_time", RECHECK_PREFLIGHT);
+}
+
+#[test]
+fn module_helper_full_fix_budget_gates_are_measured_from_entry() {
+    let full = || Scenario {
+        mode: Mode::Full,
+        ..Scenario::new()
+    };
+
+    let mut before_prompt = full();
+    before_prompt.after_preflight[0] = Some(1801);
+    before_prompt.refuses("out_of_time", PREFLIGHT);
+
+    let mut before_terminal = full();
+    before_terminal.after_preflight[0] = Some(1799);
+    before_terminal.presence = Arc::new(|_, _| Outcome::NoPresence);
+    before_terminal.after_presence = Some(1801);
+    before_terminal.refuses("out_of_time", PROMPT);
+
+    let mut on_boundaries = full();
+    on_boundaries.presence = Arc::new(|_, _| Outcome::NoPresence);
+    on_boundaries.terminal = Some(TerminalRead::Line(b"fixture-module\n".to_vec()));
+    on_boundaries.after_preflight = [Some(1800), Some(3720)];
+    on_boundaries.expect(FixResult::Fixed, None, APPLY_TERMINAL);
+
+    let mut before_fix = full();
+    before_fix.after_preflight = [Some(1800), Some(3721)];
     before_fix.refuses("out_of_time", RECHECK_PREFLIGHT);
 }
 

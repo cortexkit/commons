@@ -1,4 +1,4 @@
-// The test-only Cargo target is copied under different names so no
+// The test-only Cargo target is invoked under different names so no
 // fixture-only environment is needed.
 #[cfg(not(unix))]
 fn main() {}
@@ -25,7 +25,7 @@ mod unix {
 
     use cortexkit_doctor::module::{self, FixOutcome, Hooks, Outcome};
     use cortexkit_doctor::{
-        CheckOutput, Finding, FindingId, Fix, LogSource, Manifest, ModuleId, Severity,
+        CheckOutput, Finding, FindingId, Fix, LogSource, Manifest, Mode, ModuleId, Severity,
         MAX_OUTPUT_BYTES,
     };
 
@@ -82,7 +82,8 @@ mod unix {
                 return with_grandchild(mode, &home);
             }
             "fix-hang" => sleep(),
-            "probe" | "terminal" | "slow" => {}
+            "quick-only" if args == ["check", "--full", "--json"] => return ExitCode::from(2),
+            "probe" | "terminal" | "slow" | "quick-only" | "full-only" => {}
             _ => panic!("unknown fixture mode"),
         }
         run_module(mode, &args)
@@ -114,7 +115,20 @@ mod unix {
         let mut first = true;
         module::run_with(
             args,
-            || {
+            |check_mode| {
+                if mode == "full-only" {
+                    if check_mode == Mode::Quick {
+                        return Ok(vec![]);
+                    }
+                    if args[0] == "check" {
+                        thread::sleep(Duration::from_millis(300));
+                    } else if first {
+                        // Spend more time rechecking than the planned runtime
+                        // so the runner must allow time for the recheck itself.
+                        let budget = finding().fix().plan().unwrap().timeout_ms();
+                        thread::sleep(Duration::from_millis(budget + 200));
+                    }
+                }
                 if slow && first {
                     thread::sleep(Duration::from_secs(9));
                 }

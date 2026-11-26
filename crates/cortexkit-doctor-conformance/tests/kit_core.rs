@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cortexkit_doctor::runner::{self, Options};
-use cortexkit_doctor::{FindingId, FixResult};
+use cortexkit_doctor::{FindingId, FixResult, Mode};
 use cortexkit_doctor_conformance::{run, Adapter, Liveness, Outcome, RuleResult};
 
 #[path = "kit_core/fix_rules.rs"]
@@ -22,6 +22,7 @@ struct Fixture {
     seeded: Vec<(PathBuf, PathBuf)>,
     fifo: bool,
     fixable: Option<FindingId>,
+    full_fixable: Option<FindingId>,
     needs_stop: Option<FindingId>,
     liveness: Option<Liveness>,
     non_prompting: bool,
@@ -41,6 +42,7 @@ impl Fixture {
             seeded: Vec::new(),
             fifo: false,
             fixable: None,
+            full_fixable: None,
             needs_stop: None,
             liveness: None,
             non_prompting: false,
@@ -73,6 +75,10 @@ impl Adapter for Fixture {
 
     fn fixable_id(&self) -> Option<&FindingId> {
         self.fixable.as_ref()
+    }
+
+    fn full_fixable_id(&self) -> Option<&FindingId> {
+        self.full_fixable.as_ref()
     }
 
     fn needs_stop_id(&self) -> Option<&FindingId> {
@@ -111,13 +117,14 @@ fn kit_core_passes_a_correct_program_with_independent_homes() {
     for rule in [
         "output.valid",
         "check.read_only",
+        "check.full",
         "manifest.valid",
         "manifest.digest",
     ] {
         assert_eq!(outcome(&runs, rule), Outcome::Passed, "{rule}");
     }
-    assert_eq!(fixture.seeded.len(), 3);
-    assert_eq!(fixture.seeded.iter().collect::<HashSet<_>>().len(), 3);
+    assert_eq!(fixture.seeded.len(), 4);
+    assert_eq!(fixture.seeded.iter().collect::<HashSet<_>>().len(), 4);
     for (data, config) in fixture.seeded {
         assert!(data.is_absolute() && config.is_absolute());
         assert!(!data.exists() && !config.exists());
@@ -135,6 +142,21 @@ fn kit_core_rejects_invalid_check_without_output_text() {
 }
 
 #[test]
+fn kit_core_rejects_invalid_full_output_or_writes_during_full_check() {
+    for (mode, reason) in [
+        ("invalid-full-check", "not_json"),
+        ("write-config-in-full-check", "home_changed"),
+    ] {
+        let runs = run(&mut Fixture::new(mode));
+        assert_eq!(
+            failures(&runs),
+            [("check.full", Outcome::Failed { reason })]
+        );
+        assert!(!format!("{runs:?}").contains("child-output-canary"));
+    }
+}
+
+#[test]
 fn kit_core_reports_missing_doctor_for_check_and_manifest() {
     let runs = run(&mut Fixture::new("no-doctor"));
     assert_eq!(
@@ -142,6 +164,12 @@ fn kit_core_reports_missing_doctor_for_check_and_manifest() {
         [
             (
                 "output.valid",
+                Outcome::Failed {
+                    reason: "no_doctor"
+                }
+            ),
+            (
+                "check.full",
                 Outcome::Failed {
                     reason: "no_doctor"
                 }
@@ -185,12 +213,12 @@ fn kit_core_rejects_fifo_in_a_snapshot() {
     let runs = run(&mut fixture);
     assert_eq!(
         failures(&runs),
-        [(
-            "check.read_only",
+        ["check.read_only", "check.full"].map(|name| (
+            name,
             Outcome::Failed {
                 reason: "unsupported_entry"
             }
-        )]
+        ))
     );
 }
 
@@ -248,7 +276,7 @@ fn kit_core_fixture_injects_presence_only_under_both_switches() {
     let options = Options::new()
         .with_data_home(scratch.path())
         .with_config_home(scratch.path());
-    let check = runner::check(fixture.program(), &options).unwrap();
+    let check = runner::check(fixture.program(), Mode::Quick, &options).unwrap();
     let finding = &check.findings()[0];
     let plan = finding.fix().plan().unwrap();
     let env = [
@@ -278,6 +306,7 @@ fn kit_core_fixture_injects_presence_only_under_both_switches() {
         finding.id(),
         plan.digest(),
         plan.timeout_ms(),
+        Mode::Quick,
         &options.with_conformance_fix_marker(),
     )
     .unwrap();

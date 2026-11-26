@@ -75,3 +75,19 @@ pub use report::{build_local_report, build_report, ReportContext, ReportError, R
 pub use run_error::{Crash, RunError};
 pub use secrets::redact_secrets;
 pub use wire::{DecodeError, MAX_OUTPUT_BYTES};
+
+/// How thoroughly the doctor check callback inspects the module's stores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// The 10-second read-only check.
+    Quick,
+    /// The 30-minute read-only check, including all quick findings.
+    Full,
+}
+
+#[cfg(unix)]
+const QUICK_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(unix)]
+const FULL_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+#[cfg(unix)]
+const CONFIRMATION_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);

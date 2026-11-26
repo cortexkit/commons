@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use serde::Serialize;
 
 use crate::{
-    is_digest, CheckOutput, DecodeError, Evidence, Finding, FindingId, FixOutput, Manifest,
+    is_digest, CheckOutput, DecodeError, Evidence, Finding, FindingId, FixOutput, Manifest, Mode,
     ModuleId, MAX_OUTPUT_BYTES,
 };
 
@@ -81,9 +81,11 @@ impl FixOutcome {
 /// Dispatch before configuring logging or opening stores. This permanently
 /// redirects process stdout to `/dev/null` and writes the document on a saved
 /// descriptor. It is a process entry point, not an in-process query API.
+/// The check callback receives [`Mode::Quick`] or [`Mode::Full`] on every
+/// call, including both rechecks for a fix.
 pub fn run(
     args: &[impl AsRef<OsStr>],
-    check: impl FnMut() -> Result<Vec<Finding>, CheckError>,
+    check: impl FnMut(Mode) -> Result<Vec<Finding>, CheckError>,
     preflight: impl FnMut(&Finding) -> Result<(), PreflightError>,
     fix: impl FnOnce(Finding) -> FixOutcome,
     manifest: &str,
@@ -99,7 +101,7 @@ pub fn run(
 /// switch out of release builds.
 pub fn run_with(
     args: &[impl AsRef<OsStr>],
-    mut check: impl FnMut() -> Result<Vec<Finding>, CheckError>,
+    mut check: impl FnMut(Mode) -> Result<Vec<Finding>, CheckError>,
     mut preflight: impl FnMut(&Finding) -> Result<(), PreflightError>,
     fix: impl FnOnce(Finding) -> FixOutcome,
     manifest: &str,
@@ -124,15 +126,16 @@ pub fn run_with(
 
     let written = match command {
         Command::Manifest => stdout.write_all(manifest.as_bytes()).is_ok(),
-        Command::Check => {
-            checked(&mut check).is_ok_and(|(_, bytes)| stdout.write_all(&bytes).is_ok())
+        Command::Check(mode) => {
+            checked(|| check(mode)).is_ok_and(|(_, bytes)| stdout.write_all(&bytes).is_ok())
         }
-        Command::Fix(id, digest) => {
+        Command::Fix(id, digest, mode) => {
             let request = FixRequest {
                 id: &id,
                 digest,
                 module_id: decoded.module_id(),
                 entry,
+                mode,
             };
             let output = request
                 .apply(&mut check, &mut preflight, fix, &hooks)
@@ -149,8 +152,8 @@ pub fn run_with(
 
 enum Command<'a> {
     Manifest,
-    Check,
-    Fix(FindingId, &'a str),
+    Check(Mode),
+    Fix(FindingId, &'a str, Mode),
 }
 
 impl<'a> Command<'a> {
@@ -158,12 +161,26 @@ impl<'a> Command<'a> {
         match args {
             [cmd] if cmd.as_ref() == "manifest" => Some(Self::Manifest),
             [cmd, json] if cmd.as_ref() == "check" && json.as_ref() == "--json" => {
-                Some(Self::Check)
+                Some(Self::Check(Mode::Quick))
             }
-            [cmd, id, flag, digest] if cmd.as_ref() == "fix" && flag.as_ref() == "--digest" => {
+            [cmd, full, json]
+                if cmd.as_ref() == "check"
+                    && full.as_ref() == "--full"
+                    && json.as_ref() == "--json" =>
+            {
+                Some(Self::Check(Mode::Full))
+            }
+            [cmd, id, flag, digest, tail @ ..]
+                if cmd.as_ref() == "fix" && flag.as_ref() == "--digest" =>
+            {
+                let mode = match tail {
+                    [] => Mode::Quick,
+                    [full] if full.as_ref() == "--full" => Mode::Full,
+                    _ => return None,
+                };
                 let id = id.as_ref().to_str()?.parse().ok()?;
                 let digest = digest.as_ref().to_str()?;
-                is_digest(digest).then_some(Self::Fix(id, digest))
+                is_digest(digest).then_some(Self::Fix(id, digest, mode))
             }
             _ => None,
         }
@@ -252,26 +269,31 @@ struct FixRequest<'a> {
     digest: &'a str,
     module_id: &'a ModuleId,
     entry: std::time::Instant,
+    mode: Mode,
 }
 
 impl FixRequest<'_> {
     fn apply(
         self,
-        check: &mut impl FnMut() -> Result<Vec<Finding>, CheckError>,
+        check: &mut impl FnMut(Mode) -> Result<Vec<Finding>, CheckError>,
         preflight: &mut impl FnMut(&Finding) -> Result<(), PreflightError>,
         fix: impl FnOnce(Finding) -> FixOutcome,
         hooks: &Hooks<'_>,
     ) -> Result<FixOutput, Stop> {
         let first = self.check_finding(check)?;
         preflight_verified(preflight, &first)?;
-        confirmation::confirm(hooks, self.entry, self.module_id, &first)?;
+        confirmation::confirm(hooks, self.entry, self.module_id, &first, self.mode)?;
 
         let current = self.check_finding(check)?;
         if current.summary() != first.summary() {
             return Err(Stop::Refused("plan_changed"));
         }
         preflight_verified(preflight, &first)?;
-        if (hooks.now)().duration_since(self.entry) > hooks.timing.fix_gate {
+        let fix_gate = match self.mode {
+            Mode::Quick => hooks.timing.fix_gate,
+            Mode::Full => hooks.timing.full_fix_gate,
+        };
+        if (hooks.now)().duration_since(self.entry) > fix_gate {
             return Err(Stop::Refused("out_of_time"));
         }
         callback(|| fix(first)).map(|result| result.0)
@@ -279,9 +301,9 @@ impl FixRequest<'_> {
 
     fn check_finding(
         &self,
-        check: &mut impl FnMut() -> Result<Vec<Finding>, CheckError>,
+        check: &mut impl FnMut(Mode) -> Result<Vec<Finding>, CheckError>,
     ) -> Result<Finding, Stop> {
-        let (output, _) = checked(check)?;
+        let (output, _) = checked(|| check(self.mode))?;
         let finding = output
             .findings()
             .iter()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Pin `cortexkit-doctor` 0.3.0 and check full-mode output, read-only behavior,
+  and rechecking of findings during a full fix.
+
 ## 0.2.0
 
 - Pin `cortexkit-doctor` 0.2.0. The wire contract is still `doctor/v1`.

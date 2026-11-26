@@ -16,7 +16,9 @@ mod unix {
     use std::sync::Arc;
 
     use cortexkit_doctor::module::{self, FixOutcome, FixRefusal, Hooks, Outcome, PreflightError};
-    use cortexkit_doctor::{Finding, FindingId, Fix, LogSource, Manifest, ModuleId, Severity};
+    use cortexkit_doctor::{
+        Finding, FindingId, Fix, LogSource, Manifest, Mode, ModuleId, Severity,
+    };
     use rustix::{fs::FlockOperation, io::Errno};
 
     pub(super) fn main() -> ExitCode {
@@ -38,20 +40,34 @@ mod unix {
         )
         .unwrap();
         let canonical = String::from_utf8(manifest.to_canonical_bytes().unwrap()).unwrap();
+        let full_check = args == ["check", "--full", "--json"];
 
         match (args[0].to_str().unwrap(), mode) {
-            ("check", "invalid-check") => {
+            ("check", "invalid-check") if !full_check => {
                 println!("child-output-canary");
                 return ExitCode::SUCCESS;
             }
-            ("check", "write-data") => fs::write(data.join("nested/item"), "new").unwrap(),
-            ("check", "write-config") => fs::write(config.join("settings"), "new").unwrap(),
-            ("check", "retarget-symlink") => {
+            ("check", "invalid-full-check") if full_check => {
+                println!("child-output-canary");
+                return ExitCode::SUCCESS;
+            }
+            ("check", "write-data") if !full_check => {
+                fs::write(data.join("nested/item"), "new").unwrap()
+            }
+            ("check", "write-config") if !full_check => {
+                fs::write(config.join("settings"), "new").unwrap()
+            }
+            ("check", "write-config-in-full-check") if full_check => {
+                fs::write(config.join("settings"), "new").unwrap()
+            }
+            ("check", "retarget-symlink") if !full_check => {
                 let link = data.join("link");
                 fs::remove_file(&link).unwrap();
                 symlink("nested//item", link).unwrap();
             }
-            ("check", "remove-empty-dir") => fs::remove_dir(data.join("empty")).unwrap(),
+            ("check", "remove-empty-dir") if !full_check => {
+                fs::remove_dir(data.join("empty")).unwrap()
+            }
             ("manifest", "invalid-manifest") => {
                 print!(
                     "{}",
@@ -86,7 +102,9 @@ mod unix {
                 }
                 let fixable = finding("history.backlog", false, "Prune history");
                 let current_digest = fixable.fix().plan().unwrap().digest();
-                let scenario = if args[1] == "history.compact" {
+                let scenario = if args[1] == "history.deep" {
+                    "full"
+                } else if args[1] == "history.compact" {
                     "running"
                 } else if args[3] != current_digest {
                     "stale"
@@ -123,7 +141,14 @@ mod unix {
                 let defer_preflight = mode == "confirmation-before-preflight";
                 return module::run_with(
                     &args,
-                    || Ok(findings(&data, mode)),
+                    |check_mode| {
+                        let check_mode = if mode == "rechecks-in-quick-mode" {
+                            Mode::Quick
+                        } else {
+                            check_mode
+                        };
+                        Ok(findings(&data, mode, check_mode))
+                    },
                     |finding| {
                         if defer_preflight {
                             Ok(())
@@ -148,7 +173,7 @@ mod unix {
         }
         module::run(
             &args,
-            || Ok(findings(&data, mode)),
+            |check_mode| Ok(findings(&data, mode, check_mode)),
             |_| Ok(()),
             |_| panic!("the fixture must never apply a fix"),
             &canonical,
@@ -167,7 +192,7 @@ mod unix {
             })
     }
 
-    fn findings(data: &Path, mode: &str) -> Vec<Finding> {
+    fn findings(data: &Path, mode: &str, check_mode: Mode) -> Vec<Finding> {
         let mut findings = vec![
             finding("history.backlog", false, "Prune history"),
             informational("history.info"),
@@ -183,6 +208,9 @@ mod unix {
                 "Compact history"
             };
             findings.push(finding("history.compact", true, step));
+        }
+        if check_mode == Mode::Full {
+            findings.push(finding("history.deep", false, "Rebuild history index"));
         }
         findings
     }

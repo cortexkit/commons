@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Add a read-only full check with a 30-minute limit and support full-mode
+  rechecks when fixing a finding. The check, fix, and manifest document
+  formats are unchanged.
+- Pass the check mode to module callbacks and require it when invoking runner
+  checks and fixes. The runner reports `no_doctor` for older helpers that
+  reject a full check so the caller can fall back to quick.
+
 ## 0.2.0
 
 - Report a missing `doctor` subcommand when `check` exits 2 with empty stdout,

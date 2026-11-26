@@ -11,15 +11,17 @@ The adapter supplies `program(&self) -> &Path` and
 empty directories with representative data and settings; do not replace the
 directories themselves. The kit creates fresh homes for each check or fix rule
 and fresh homes for the shared manifest invocation.
-`output.valid` validates the check document, and `check.read_only` compares
-both home trees before and after a separate check. The comparison includes
-relative paths, entry types, exact symlink targets, file sizes, and SHA-256
-of regular files. It does not follow symlinks. The two manifest rules inspect
-the same manifest invocation: `manifest.digest` is skipped if `manifest.valid`
-fails. A stale templates digest fails only `manifest.digest`.
+`output.valid` validates the quick check document, and `check.read_only` compares
+both home trees before and after a separate quick check. `check.full` validates
+the full check document and runs the same before-and-after comparison. The
+comparison includes relative paths, entry types, exact symlink targets, file
+sizes, and SHA-256 of regular files. It does not follow symlinks. The two
+manifest rules inspect the same manifest invocation: `manifest.digest` is
+skipped if `manifest.valid` fails. A stale templates digest fails only
+`manifest.digest`.
 
-The adapter also has optional `fixable_id()` and `needs_stop_id()` getters
-(returning `Option<&FindingId>`) and `liveness()` (returning `Option<&Liveness>`).
+The adapter has optional `fixable_id()`, `full_fixable_id()`, and `needs_stop_id()`
+getters (returning `Option<&FindingId>`) and `liveness()` (returning `Option<&Liveness>`).
 `Liveness::PidFile(PathBuf)` and `Liveness::FlockFile(PathBuf)` specify a path
 relative to the data home with no `..`. Use only a module test build for fix
 checks. Its test-only switch must check `CORTEXKIT_DOCTOR_CONFORMANCE=1` before
@@ -37,11 +39,16 @@ skips if the stand-in makes that finding disappear or changes its digest. A
 configured id must appear in the baseline check with a plan, and the needs-stop
 id must have `needs_stop` set.
 
+`fix.full_recheck` uses `full_fixable_id()` and skips if no id is supplied.
+Seed a finding with a plan that appears only in the full check. The rule passes
+its digest to `doctor fix --full` and expects `refused`/`no_terminal`, showing
+that the helper found the full-only finding before attempting confirmation.
+
 `fix.no_change_on_refusal` compares both homes across every attempted fix,
 regardless of the outcome. For the running-module rule, the stand-in is already
 active at the first snapshot and stays active through the second. If no fix
 runs, the comparison rule skips. Without the non-prompting declaration all
-four fix rules skip and the kit never invokes `doctor fix`.
+fix rules skip and the kit never invokes `doctor fix`.
 
 The kit uses scratch homes and isolates process groups; it is not a filesystem
 sandbox. Only run programs you trust. A before/after comparison does not detect

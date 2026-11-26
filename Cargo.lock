@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-doctor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cortexkit-log",
  "cortexkit-store-types",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-doctor-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cortexkit-doctor",
  "libc",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-log-manifest"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "cortexkit-doctor",

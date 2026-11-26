@@ -11,8 +11,8 @@ use std::time::Instant;
 
 use cortexkit_doctor::module::{self, CheckError, FixOutcome, Hooks, Outcome, Timing};
 use cortexkit_doctor::{
-    CheckOutput, Finding, FindingId, Fix, FixOutput, FixResult, LogSource, Manifest, ModuleId,
-    Severity,
+    CheckOutput, Finding, FindingId, Fix, FixOutput, FixResult, LogSource, Manifest, Mode,
+    ModuleId, Severity,
 };
 
 const CHILD: &str = "CK_DOCTOR_MODULE_HELPER_CHILD";
@@ -78,7 +78,8 @@ fn module_helper_fixture_child() {
     }
     let code = module::run_with(
         &args,
-        || match mode.as_str() {
+        |check_mode| match mode.as_str() {
+            "full-only" if check_mode == Mode::Quick => Ok(vec![]),
             "println" => {
                 println!("noisy callback");
                 Ok(vec![example_finding()])
@@ -174,6 +175,9 @@ fn module_helper_process_usage_errors_do_not_write() {
         &[][..],
         &["check"],
         &["check", "--json", "extra"],
+        &["check", "--full"],
+        &["check", "--full", "--json", "extra"],
+        &["check", "--full", "--full", "--json"],
         &["check", "--other"],
         &["fix", ID],
         &["fix", ID, "--digest", "sha256:bad"],
@@ -187,6 +191,7 @@ fn module_helper_process_usage_errors_do_not_write() {
         ],
         &["fix", ID, "--other", digest],
         &["fix", ID, "--digest", digest, "extra"],
+        &["fix", ID, "--digest", digest, "--full", "--full"],
         &["manifest", "extra"],
         &["unknown"],
     ] {
@@ -242,4 +247,29 @@ fn module_helper_process_fix_exit_zero_for_every_document() {
         expected.push(b'\n');
         assert_eq!(bytes, expected);
     }
+}
+
+#[test]
+fn module_helper_full_check_passes_full_mode_to_callback() {
+    let check = |args: &[&str]| CheckOutput::decode(&invoke("full-only", args, 0)).unwrap();
+    assert!(check(&["check", "--json"]).findings().is_empty());
+    assert_eq!(
+        check(&["check", "--full", "--json"]).findings(),
+        &[example_finding()]
+    );
+}
+
+#[test]
+fn module_helper_full_fix_uses_full_mode_for_both_rechecks() {
+    let finding = example_finding();
+    let args = [
+        "fix",
+        ID,
+        "--digest",
+        finding.fix().plan().unwrap().digest(),
+        "--full",
+    ];
+    let fix = |args: &[&str]| FixOutput::decode(&invoke("full-only", args, 0)).unwrap();
+    assert_eq!(fix(&args[..4]).code(), Some("unknown_finding"));
+    assert_eq!(fix(&args).result(), FixResult::Fixed);
 }

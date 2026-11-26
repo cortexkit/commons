@@ -10,6 +10,11 @@ const RULES: [&str; 4] = [
     "fix.no_terminal",
     "fix.no_change_on_refusal",
 ];
+const FULL_RECHECK: &str = "fix.full_recheck";
+
+fn full_id() -> FindingId {
+    FindingId::new("history.deep").unwrap()
+}
 
 fn with_fixes(mode: &str) -> Fixture {
     let mut fixture = Fixture::new(mode);
@@ -32,17 +37,18 @@ fn correct_fixture_passes_every_rule_with_fresh_homes_and_either_signal() {
         Liveness::FlockFile("nested/doctor.lock".into()),
     ] {
         let mut fixture = with_fixes("correct");
+        fixture.full_fixable = Some(full_id());
         fixture.liveness = Some(liveness);
         let runs = run(&mut fixture);
-        assert_eq!(runs.len(), 8);
+        assert_eq!(runs.len(), 10);
         for rule in runs {
             assert_eq!(rule.outcome, Outcome::Passed, "{}", rule.name);
         }
         let seen = invocations(&fixture);
-        assert_eq!(seen.lines().count(), 3);
-        assert_eq!(seen.lines().collect::<HashSet<_>>().len(), 3);
-        assert_eq!(fixture.seeded.len(), 6);
-        assert_eq!(fixture.seeded.iter().collect::<HashSet<_>>().len(), 6);
+        assert_eq!(seen.lines().count(), 4);
+        assert_eq!(seen.lines().collect::<HashSet<_>>().len(), 4);
+        assert_eq!(fixture.seeded.len(), 8);
+        assert_eq!(fixture.seeded.iter().collect::<HashSet<_>>().len(), 8);
         let seeded: HashSet<_> = fixture
             .seeded
             .iter()
@@ -58,9 +64,10 @@ fn correct_fixture_passes_every_rule_with_fresh_homes_and_either_signal() {
 fn no_fix_is_invoked_without_a_non_prompting_declaration() {
     let mut fixture = with_fixes("correct");
     fixture.non_prompting = false;
+    fixture.full_fixable = Some(full_id());
     let runs = run(&mut fixture);
     assert!(invocations(&fixture).is_empty());
-    for rule in RULES {
+    for rule in RULES.into_iter().chain([FULL_RECHECK]) {
         assert_eq!(
             outcome(&runs, rule),
             Outcome::Skipped {
@@ -78,7 +85,7 @@ fn missing_inputs_and_failed_prerequisite_skip_fixes() {
     missing.liveness = None;
     let runs = run(&mut missing);
     assert!(invocations(&missing).is_empty());
-    for rule in &RULES[..3] {
+    for rule in RULES[..3].iter().copied().chain([FULL_RECHECK]) {
         assert_eq!(
             outcome(&runs, rule),
             Outcome::Skipped {
@@ -94,13 +101,14 @@ fn missing_inputs_and_failed_prerequisite_skip_fixes() {
     );
 
     let mut invalid = with_fixes("invalid-check");
+    invalid.full_fixable = Some(full_id());
     let runs = run(&mut invalid);
     assert!(invocations(&invalid).is_empty());
     assert_eq!(
         failures(&runs),
         [("output.valid", Outcome::Failed { reason: "not_json" })]
     );
-    for rule in RULES {
+    for rule in RULES.into_iter().chain([FULL_RECHECK]) {
         assert_eq!(
             outcome(&runs, rule),
             Outcome::Skipped {
@@ -183,6 +191,39 @@ fn rejects_faulty_programs_by_refusal_rule() {
 }
 
 #[test]
+fn rejects_full_fix_that_rechecks_in_quick_mode() {
+    let mut fixture = with_fixes("rechecks-in-quick-mode");
+    fixture.full_fixable = Some(full_id());
+    assert_eq!(
+        failures(&run(&mut fixture)),
+        [(
+            FULL_RECHECK,
+            Outcome::Failed {
+                reason: "unexpected_fix_result"
+            }
+        )],
+    );
+}
+
+#[test]
+fn full_fix_id_must_be_full_only_and_fixable() {
+    for id in ["history.backlog", "history.missing"] {
+        let mut fixture = with_fixes("correct");
+        fixture.full_fixable = Some(FindingId::new(id).unwrap());
+        assert_eq!(
+            failures(&run(&mut fixture)),
+            [(
+                FULL_RECHECK,
+                Outcome::Failed {
+                    reason: "bad_adapter_input"
+                }
+            )],
+        );
+        assert_eq!(invocations(&fixture).lines().count(), 3);
+    }
+}
+
+#[test]
 fn every_fix_is_measured_even_on_expected_refusal_or_crash() {
     let changed = Outcome::Failed {
         reason: "home_changed",
@@ -205,5 +246,22 @@ fn every_fix_is_measured_even_on_expected_refusal_or_crash() {
             (RULES[2], Outcome::Failed { reason: "crashed" }),
             (RULES[3], changed)
         ]
+    );
+}
+
+#[test]
+fn full_fix_refusal_is_also_measured() {
+    let mut fixture = with_fixes("mutates-before-full");
+    fixture.full_fixable = Some(full_id());
+    let runs = run(&mut fixture);
+    assert_eq!(outcome(&runs, FULL_RECHECK), Outcome::Passed);
+    assert_eq!(
+        failures(&runs),
+        [(
+            RULES[3],
+            Outcome::Failed {
+                reason: "home_changed"
+            }
+        )]
     );
 }

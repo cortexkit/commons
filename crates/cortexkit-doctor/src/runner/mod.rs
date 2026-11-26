@@ -13,16 +13,23 @@ use std::time::Duration;
 
 use cortexkit_store_types::{resolve_config_home, resolve_data_home};
 
-use crate::{CheckOutput, DecodeError, FindingId, FixOutput, Manifest};
+use crate::{
+    CheckOutput, DecodeError, FindingId, FixOutput, Manifest, Mode, CONFIRMATION_LIMIT,
+    FULL_CHECK_LIMIT, QUICK_CHECK_LIMIT,
+};
 pub use crate::{Crash, RunError};
+
+// Time to enter the helper and, after the fix, write its result and exit.
+const FIX_IO_ALLOWANCE: Duration = Duration::from_secs(10);
 
 /// Process deadlines and cleanup intervals. Keep the contract defaults outside tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Limits {
     pub check: Duration,
+    pub full_check: Duration,
     pub manifest: Duration,
-    /// Extra time on top of the supplied plan's runtime.
+    /// Extra time on top of the supplied plan's runtime for a quick-mode fix.
     pub fix_allowance: Duration,
     pub exit_grace: Duration,
     pub term_to_kill: Duration,
@@ -31,9 +38,10 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            check: Duration::from_secs(10),
+            check: QUICK_CHECK_LIMIT,
+            full_check: FULL_CHECK_LIMIT,
             manifest: Duration::from_secs(2),
-            fix_allowance: Duration::from_secs(150),
+            fix_allowance: FIX_IO_ALLOWANCE + CONFIRMATION_LIMIT + QUICK_CHECK_LIMIT * 2,
             exit_grace: Duration::from_secs(2),
             term_to_kill: Duration::from_secs(2),
         }
@@ -42,9 +50,15 @@ impl Default for Limits {
 
 impl Limits {
     /// The full process deadline for a plan with the given `timeout_ms`.
-    pub fn fix_timeout(&self, timeout_ms: u64) -> Duration {
-        self.fix_allowance
-            .saturating_add(Duration::from_millis(timeout_ms))
+    pub fn fix_timeout(&self, timeout_ms: u64, mode: Mode) -> Duration {
+        let allowance = match mode {
+            Mode::Quick => self.fix_allowance,
+            Mode::Full => self
+                .full_check
+                .saturating_mul(2)
+                .saturating_add(CONFIRMATION_LIMIT + FIX_IO_ALLOWANCE),
+        };
+        allowance.saturating_add(Duration::from_millis(timeout_ms))
     }
 }
 
@@ -120,13 +134,23 @@ impl Options {
     }
 }
 
-/// Invoke `<program> doctor check --json` and validate its output.
-pub fn check(program: impl AsRef<Path>, options: &Options) -> Result<CheckOutput, RunError> {
+/// Invoke `<program> doctor check [--full] --json` and validate its output.
+/// An older helper that rejects `--full` returns [`RunError::NoDoctor`]; this
+/// function does not retry in quick mode.
+pub fn check(
+    program: impl AsRef<Path>,
+    mode: Mode,
+    options: &Options,
+) -> Result<CheckOutput, RunError> {
+    let (args, timeout): (&[&str], _) = match mode {
+        Mode::Quick => (&["check", "--json"], options.limits.check),
+        Mode::Full => (&["check", "--full", "--json"], options.limits.full_check),
+    };
     invoke(
         program.as_ref(),
-        &["check", "--json"],
+        args,
         options,
-        options.limits.check,
+        timeout,
         CheckOutput::decode,
     )
 }
@@ -142,20 +166,27 @@ pub fn manifest(program: impl AsRef<Path>, options: &Options) -> Result<Manifest
     )
 }
 
-/// Invoke `<program> doctor fix <id> --digest <digest>` and validate its output.
-/// Pass the selected plan's digest and `timeout_ms` from the preceding check.
+/// Invoke `<program> doctor fix <id> --digest <digest> [--full]` and validate its output.
+/// Pass the selected plan's digest and `timeout_ms`, and use the mode from the
+/// check that reported it.
 pub fn fix(
     program: impl AsRef<Path>,
     id: &FindingId,
     digest: &str,
     timeout_ms: u64,
+    mode: Mode,
     options: &Options,
 ) -> Result<FixOutput, RunError> {
+    let args = ["fix", id.as_str(), "--digest", digest, "--full"];
+    let args = match mode {
+        Mode::Quick => &args[..4],
+        Mode::Full => &args[..],
+    };
     invoke(
         program.as_ref(),
-        &["fix", id.as_str(), "--digest", digest],
+        args,
         options,
-        options.limits.fix_timeout(timeout_ms),
+        options.limits.fix_timeout(timeout_ms, mode),
         FixOutput::decode,
     )
 }
@@ -222,9 +253,29 @@ mod tests {
     fn runner_helper_default_limits() {
         let limits = Limits::default();
         assert_eq!(limits.check, Duration::from_secs(10));
+        assert_eq!(limits.full_check, Duration::from_secs(1800));
         assert_eq!(limits.manifest, Duration::from_secs(2));
-        assert_eq!(limits.fix_timeout(1_234), Duration::from_millis(151_234));
+        assert_eq!(
+            limits.fix_timeout(1_234, Mode::Quick),
+            Duration::from_millis(151_234)
+        );
         assert_eq!(limits.exit_grace, Duration::from_secs(2));
         assert_eq!(limits.term_to_kill, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn runner_helper_full_fix_timeout_budgets_both_checks() {
+        let mut limits = Limits::default();
+        assert_eq!(
+            limits.fix_timeout(1_234, Mode::Full),
+            Duration::from_millis(3_731_234)
+        );
+        limits.full_check = Duration::from_secs(1);
+        assert_eq!(
+            limits.fix_timeout(1_234, Mode::Full),
+            Duration::from_millis(133_234)
+        );
+        limits.full_check = Duration::MAX;
+        assert_eq!(limits.fix_timeout(1_234, Mode::Full), Duration::MAX);
     }
 }
