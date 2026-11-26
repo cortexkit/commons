@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-doctor"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,10 +18,13 @@ test-vectors = []
 cortexkit-log = { version = "0.3.7", path = "../cortexkit-log", default-features = false }
 hmac = "0.12"
 regex = "1"
+ryu-js = "0.2"
 serde = { version = "1", features = ["derive"] }
-serde_jcs = "0.2"
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
+
+[dev-dependencies]
+serde_jcs = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 cortexkit-store-types = { version = "0.2.2", path = "../cortexkit-store-types" }

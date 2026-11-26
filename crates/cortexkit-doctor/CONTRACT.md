@@ -36,8 +36,8 @@ emit template ids.
   required for `safe` or `risky`. A `Plan` carries `steps`, `digest`, and
   `timeout_ms`. There are 1 to 16 steps, each subject to the summary rules.
   The timeout is an integer from 1,000 to 600,000 milliseconds.
-- [pinned] `plan_digest` hashes the RFC 8785 canonical JSON (using
-  `serde_jcs` 0.2) of `{id, steps, needs_stop, class, timeout_ms}` with
+- [pinned] `plan_digest` hashes the RFC 8785 canonical JSON
+  of `{id, steps, needs_stop, class, timeout_ms}` with
   SHA-256. `is_digest` accepts only `sha256:` followed by 64 lowercase hex
   digits. `CheckOutput::decode` recomputes the digest, so even a timeout-only
   change invalidates it. The digest binds the described operation, not its

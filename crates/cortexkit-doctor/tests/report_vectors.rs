@@ -134,6 +134,41 @@ fn report_vectors_canonical_and_canaries() {
 }
 
 #[test]
+fn report_preserves_roundtrip_precision_of_evidence() {
+    let manifest = manifest();
+    let check = CheckOutput::decode(
+        br#"{
+            "schema": "ck.doctor-check/v1",
+            "findings": [{
+                "id": "store.ratio",
+                "severity": "info",
+                "summary": "Report the ratio.",
+                "fix": {"class": "none", "needs_stop": false},
+                "evidence": [{"name": "ratio", "kind": "ratio", "value": 9007199254740993.0}]
+            }]
+        }"#,
+    )
+    .unwrap();
+    let raw = vector("inputs.json");
+    let data: Inputs<'_> = serde_json::from_slice(&raw).unwrap();
+    let input = ReportInput::new(
+        manifest.module_id(),
+        &manifest,
+        &data.title,
+        &data.description,
+        Ok(&check),
+        usize::MAX,
+    );
+    let report = build_report(&data.context(data.report_key), &input).unwrap();
+    let text = std::str::from_utf8(&report).unwrap();
+    // The input is exactly halfway between consecutive f64 values. Round to even.
+    assert!(
+        text.contains(r#""kind":"ratio","name":"ratio","value":9007199254740992}"#),
+        "{text}"
+    );
+}
+
+#[test]
 fn report_vectors_aliases_change_with_key() {
     let raw = vector("inputs.json");
     let data: Inputs<'_> = serde_json::from_slice(&raw).unwrap();

@@ -705,13 +705,14 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-doctor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cortexkit-log",
  "cortexkit-store-types",
  "hmac 0.12.1",
  "libc",
  "regex",
+ "ryu-js 0.2.2",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -722,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-doctor-conformance"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cortexkit-doctor",
  "libc",

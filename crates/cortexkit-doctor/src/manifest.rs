@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     evidence::valid_name,
-    is_digest,
+    is_digest, jcs,
     secrets::secret_free,
     wire::{canonical_digest, frame, is_lower_hex, require, shape, string_enum, Object},
     DecodeError, EvidenceKind, ModuleId, MAX_OUTPUT_BYTES,
@@ -256,7 +256,7 @@ impl Manifest {
 
     /// Serialize the generator's exact file bytes: RFC 8785 JSON and one LF.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, DecodeError> {
-        let mut bytes = serde_jcs::to_vec(self).map_err(|_| DecodeError::Shape)?;
+        let mut bytes = jcs::to_vec(self).map_err(|_| DecodeError::Shape)?;
         if bytes.len() >= MAX_OUTPUT_BYTES {
             return Err(DecodeError::TooLarge);
         }

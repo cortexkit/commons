@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::{
     secrets::secret_free,
-    wire::{require, shape, string_enum, unsigned, Object},
+    wire::{float, require, shape, string_enum, unsigned, Object},
     DecodeError,
 };
 
@@ -96,8 +96,8 @@ impl EvidenceValue {
             EvidenceKind::Count => Self::Count(unsigned(raw, MAX_SAFE_INTEGER)?),
             EvidenceKind::Bytes => Self::Bytes(unsigned(raw, MAX_SAFE_INTEGER)?),
             EvidenceKind::TimestampMs => Self::TimestampMs(unsigned(raw, MAX_SAFE_INTEGER)?),
-            EvidenceKind::DurationMs => Self::DurationMs(shape(raw.get())?),
-            EvidenceKind::Ratio => Self::Ratio(shape(raw.get())?),
+            EvidenceKind::DurationMs => Self::DurationMs(float(raw)?),
+            EvidenceKind::Ratio => Self::Ratio(float(raw)?),
             EvidenceKind::Bool => Self::Bool(shape(raw.get())?),
             EvidenceKind::Code => Self::Code(shape(raw.get())?),
             EvidenceKind::Version => Self::Version(shape(raw.get())?),

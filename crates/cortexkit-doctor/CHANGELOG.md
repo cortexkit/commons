@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- No output change; drop `serde_jcs` as a normal dependency so dependents don't
+  get `serde_json`'s `float_roundtrip` feature.
+
 ## 0.1.0
 
 - Add strict validation for doctor check, fix and manifest documents, with fixed

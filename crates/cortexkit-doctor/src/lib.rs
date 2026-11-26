@@ -51,6 +51,7 @@
 //! canonical JSON using a per-report [`ReportContext`] and [`ReportInput`].
 
 mod evidence;
+mod jcs;
 mod manifest;
 #[cfg(unix)]
 pub mod module;

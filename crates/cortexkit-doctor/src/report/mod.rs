@@ -6,7 +6,7 @@ use std::{borrow::Cow, fmt, path::PathBuf};
 use serde::Serialize;
 
 use crate::{
-    redact_secrets, CheckOutput, Crash, FindingId, FixClass, FixOutput, FixResult, Manifest,
+    jcs, redact_secrets, CheckOutput, Crash, FindingId, FixClass, FixOutput, FixResult, Manifest,
     ModuleId, RunError, Severity,
 };
 
@@ -287,7 +287,7 @@ impl Status<'_> {
 
 fn encode(value: &impl Serialize) -> Vec<u8> {
     // Report values contain only string keys and validated finite numbers.
-    serde_jcs::to_vec(value).expect("report values are canonical JSON")
+    jcs::to_vec(value).expect("report values are canonical JSON")
 }
 
 fn encode_with_limit(mut report: Report<'_>, max_bytes: usize) -> Result<Vec<u8>, ReportError> {

@@ -108,8 +108,18 @@ pub(crate) fn unsigned(raw: &RawValue, max: u64) -> Result<u64, DecodeError> {
         .ok_or(DecodeError::Shape)
 }
 
+pub(crate) fn float(raw: &RawValue) -> Result<f64, DecodeError> {
+    // RawValue already validates JSON syntax. Parse the token directly for
+    // correct rounding regardless of serde_json's enabled features.
+    raw.get()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .ok_or(DecodeError::Shape)
+}
+
 pub(crate) fn canonical_digest<T: Serialize + ?Sized>(data: &T) -> Result<String, DecodeError> {
-    let bytes = serde_jcs::to_vec(data).map_err(|_| DecodeError::Shape)?;
+    let bytes = crate::jcs::to_vec(data).map_err(|_| DecodeError::Shape)?;
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
