@@ -393,6 +393,29 @@ pub(crate) fn delivered_once(
     }
 }
 
+/// `marker`, sent with a string `delivery`, was delivered exactly once. Such
+/// an entry may omit `delivered_as` (contract §9.7), so the mode is checked
+/// only when the runner recorded one.
+pub(crate) fn string_send_delivered_once(
+    messages: &[ReadMessage],
+    marker: &str,
+    mode: &str,
+) -> Result<(), String> {
+    match holding(messages, marker).as_slice() {
+        [entry] => match &entry.delivered_as {
+            None => Ok(()),
+            Some(delivered) if delivered.mode == mode => Ok(()),
+            Some(other) => Err(format!(
+                "the entry holding {marker} records delivery {other:?}, not {mode}"
+            )),
+        },
+        other => Err(format!(
+            "{} entries hold {marker}, expected it delivered exactly once",
+            other.len()
+        )),
+    }
+}
+
 fn never_delivered(messages: &[ReadMessage], marker: &str, what: &str) -> Check {
     match holding(messages, marker).len() {
         0 => Ok(()),

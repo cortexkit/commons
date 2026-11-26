@@ -667,8 +667,9 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   when (`written_at`, milliseconds since the Unix epoch, of the write or of
   the runner's first ingest of a message its host stored), its part keys
   (when carried), its run (`run`, §6), its tool calls (`tool_calls`, §5) and,
-  for a `delivery_order` send, the mode it went out in (`delivered_as`,
-  §9.7). `role` and `written_at` are
+  for a `delivery_order` send, meaning one whose `delivery` is a list, the
+  mode it went out in (`delivered_as`, §9.7; a string send's entry may
+  omit it). `role` and `written_at` are
   optional: a runner sets them whenever it knows them, which is always for a
   message it wrote itself, and an absent one means not known. A consumer
   never decodes `message` for any of these facts, so a reader of several
@@ -5029,14 +5030,20 @@ say who may send and which texts are system text.
   eligible results in one batch or put them all on the last eligible
   result: that choice is made and recorded at delivery. Rendering never
   chooses a carrier again; it reads the recorded `call_key`.
-- [pinned] Every other delivery (`steer`, `idle_start`, `interrupt`, a
-  standalone `turn_system`, and `queue`) remains a transcript entry of its
+- [pinned] Every other delivery of a list send (`steer`, `idle_start` and a
+  standalone `turn_system`) remains a transcript entry of its
   own, carrying `delivered_as: {mode, call_key?, call_carrier?}`
   (`delivery_order::EntryDelivery`) in its envelope (§4.2), with
   `call_carrier` following §9.16. Readers and a
   resumed run render from that entry. Once delivered, its bytes, role and
   `delivered_as` never change. Provider rendering may change on a later
   route as the `turn_system` authority fall-through below specifies.
+- [pinned] An entry written for a send whose `delivery` is a string or
+  absent (`queue`, `steer`, `interrupt`) may carry `delivered_as` or omit
+  it. When present it names the mode the words actually went out in, and
+  it follows the same never-changes rule. Readers never require it on such
+  an entry, and a conformance check of a string send only checks the mode
+  when the member is present.
 - [pinned] A ride's `forms` are the send's `delivery` list restricted to
   `tool_result`, `turn_system` and `turn_system_cleared`, in list order. Old rides without `forms`
   use `[tool_result]`. At rendering, the first supported form wins:

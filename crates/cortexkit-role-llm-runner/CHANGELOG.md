@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.11
+
+- Text only. `delivered_as` is required on entries from a send whose
+  `delivery` is a list. An entry from a string or absent `delivery`
+  (`queue`, `steer`, `interrupt`) may carry it or omit it, and readers never
+  require it there (§4.2, §9.7). The §9.7 sentence that listed `interrupt`
+  and `queue` among list deliveries named modes a list cannot hold.
+
 ## 0.9.10
 
 - A failed, timed-out, cut-off or unknown tool outcome gives the model a

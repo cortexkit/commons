@@ -11,7 +11,9 @@ use crate::{
     route::{Reply, RunnerRoute},
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
-use cortexkit_role_llm_runner::{capabilities, errors, ops, run::RunStatus, send::SendReply};
+use cortexkit_role_llm_runner::{
+    capabilities, errors, ops, read::ReadMessage, run::RunStatus, send::SendReply,
+};
 use serde_json::{json, Map, Value};
 
 pub(crate) const NON_OWNER_STEER: &str = "notice_yield_non_owner_steer";
@@ -198,8 +200,10 @@ where
         1
     };
     let tools: Vec<_> = (0..count)
-        .map(|_| {
-            let mut tool = case.mint.call(name);
+        .map(|i| {
+            // A model never sends two calls with one id in a turn, and a
+            // runner may key its buffers by id, so each call gets its own.
+            let mut tool = case.mint.call(&format!("{name}-{i}"));
             tool.hold = true;
             tool
         })
@@ -283,6 +287,16 @@ where
     if name == "notice_yield_notice_mark_admitted" {
         marked.insert("notice".into(), json!(true));
     }
+    // A list send's entry must record `delivered_as`; a string send's entry
+    // may omit it (contract §9.7), so its check accepts either.
+    let listed = marked.get("delivery").is_some_and(|d| d.is_array());
+    let landed_once = |messages: &[ReadMessage], marker: &str| {
+        if listed {
+            crate::delivery_order::delivered_once(messages, marker, "steer").is_ok()
+        } else {
+            crate::delivery_order::string_send_delivered_once(messages, marker, "steer").is_ok()
+        }
+    };
     let params = crate::send_helpers::params(case, &session, None, &text, &send_id, &marked);
     let sender_route = match sender {
         Some(sender) => Some(
@@ -392,12 +406,11 @@ where
     let (_, messages) = read_all(&session.route).await?;
     let mut evidence = Evidence {
         held_wait: status.is_held_wait() || !status.held_calls().is_empty(),
-        landed: crate::delivery_order::delivered_once(&messages, &text, "steer").is_ok(),
+        landed: landed_once(&messages, &text),
         ..Default::default()
     };
     if name == "notice_yield_second_send_never_reyields" {
-        evidence.landed &=
-            crate::delivery_order::delivered_once(&messages, &second_text, "steer").is_ok();
+        evidence.landed &= landed_once(&messages, &second_text);
     }
     for tool in &tools {
         evidence.calls.push(

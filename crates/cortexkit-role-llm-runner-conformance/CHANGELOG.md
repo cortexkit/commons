@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.94
+
+- Pin llm-runner `=0.9.11`.
+- `notice_yield_running_calls_and_steer` gives its two held calls distinct
+  ids; it gave both the same id, which no model sends.
+- The owner `notice_yield` cases send a string `"steer"` and now accept an
+  entry without `delivered_as`, checking the mode only when it is present.
+
 ## 0.17.93
 
 - Pin llm-runner `=0.9.10`. The new `tool_outcome_continues_turn` check
