@@ -1,0 +1,42 @@
+[
+  {
+    "code": "caller_not_module",
+    "message": "The route has no verified module principal."
+  },
+  {
+    "code": "not_orchestrator_session",
+    "message": "The route is not scoped to an orchestrator session."
+  },
+  {
+    "code": "session_ended",
+    "message": "The session has ended."
+  },
+  {
+    "code": "too_many_open",
+    "message": "This session already has 32 open items from the caller."
+  },
+  {
+    "code": "key_reused",
+    "message": "The caller already used this key."
+  },
+  {
+    "code": "sync_required",
+    "message": "The instance must sync first."
+  },
+  {
+    "code": "unknown_key",
+    "message": "The caller never opened this key."
+  },
+  {
+    "code": "invalid_params",
+    "message": "label: must be one line",
+    "detail": {
+      "field": "label"
+    }
+  },
+  {
+    "code": "future_refusal",
+    "message": "A future refusal code.",
+    "future_member": true
+  }
+]

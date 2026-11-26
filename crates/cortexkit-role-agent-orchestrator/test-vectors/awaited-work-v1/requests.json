@@ -1,0 +1,213 @@
+{
+  "valid": [
+    {
+      "method": "awaited_work.open",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "label": "Check the demo files"
+      }
+    },
+    {
+      "method": "awaited_work.finish",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "outcome": "done",
+        "summary": "Complete.\nTwo files checked.",
+        "more": "See the saved report"
+      }
+    },
+    {
+      "method": "awaited_work.progress",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~",
+        "text": "First file checked.\nOne remaining."
+      }
+    },
+    {
+      "method": "awaited_work.cancel",
+      "params": {
+        "instance": "demo_1-A",
+        "key": "work!42~"
+      }
+    },
+    {
+      "method": "awaited_work.sync",
+      "params": {
+        "instance": "demo_1-A",
+        "open": [
+          "work!42~",
+          "work!43~"
+        ]
+      }
+    },
+    {
+      "method": "awaited_work.list",
+      "params": {}
+    }
+  ],
+  "null_more": {
+    "method": "awaited_work.finish",
+    "params": {
+      "instance": "demo_1-A",
+      "key": "work!42~",
+      "outcome": "done",
+      "summary": "Complete.\nTwo files checked.",
+      "more": null
+    }
+  },
+  "malformed": [
+    {
+      "name": "awaited_work.open extra param",
+      "request": {
+        "method": "awaited_work.open",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "label": "Check the demo files",
+          "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "awaited_work.finish extra param",
+      "request": {
+        "method": "awaited_work.finish",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "outcome": "done",
+          "summary": "Complete.\nTwo files checked.",
+          "more": "See the saved report",
+          "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "awaited_work.progress extra param",
+      "request": {
+        "method": "awaited_work.progress",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "text": "First file checked.\nOne remaining.",
+          "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "awaited_work.cancel extra param",
+      "request": {
+        "method": "awaited_work.cancel",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "awaited_work.sync extra param",
+      "request": {
+        "method": "awaited_work.sync",
+        "params": {
+          "instance": "demo_1-A",
+          "open": [
+            "work!42~",
+            "work!43~"
+          ],
+          "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "awaited_work.list extra param",
+      "request": {
+        "method": "awaited_work.list",
+        "params": {
+          "caller": "demo-caller"
+        }
+      }
+    },
+    {
+      "name": "unknown outcome",
+      "request": {
+        "method": "awaited_work.finish",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "outcome": "lost",
+          "summary": ""
+        }
+      }
+    },
+    {
+      "name": "non-string more",
+      "request": {
+        "method": "awaited_work.finish",
+        "params": {
+          "instance": "demo_1-A",
+          "key": "work!42~",
+          "outcome": "failed",
+          "summary": "",
+          "more": 1
+        }
+      }
+    },
+    {
+      "name": "empty params array",
+      "request": {
+        "method": "awaited_work.list",
+        "params": []
+      }
+    },
+    {
+      "name": "positional open params",
+      "request": {
+        "method": "awaited_work.open",
+        "params": [
+          "demo_1-A",
+          "work!42~",
+          "Example"
+        ]
+      }
+    },
+    {
+      "name": "null params",
+      "request": {
+        "method": "awaited_work.list",
+        "params": null
+      }
+    },
+    {
+      "name": "missing params",
+      "request": {
+        "method": "awaited_work.list"
+      }
+    },
+    {
+      "name": "unknown method",
+      "request": {
+        "method": "awaited_work.unknown",
+        "params": {}
+      }
+    },
+    {
+      "name": "extra envelope member",
+      "request": {
+        "method": "awaited_work.list",
+        "params": {},
+        "caller": "demo-caller"
+      }
+    },
+    {
+      "name": "positional request envelope",
+      "request": [
+        "awaited_work.list",
+        {}
+      ]
+    }
+  ]
+}
