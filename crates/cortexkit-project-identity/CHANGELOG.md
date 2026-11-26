@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Add optional `approval` to workspace entries (`Workspace::with_approval`), the same
+  shape as a project root's approval, with the handler's `enumerate-workspace-approval.json` sample.
+
 ## 0.1.5
 
 - Add optional filesystem `fileId` values to workspace roots and root records,

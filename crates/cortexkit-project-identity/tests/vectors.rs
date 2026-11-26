@@ -182,6 +182,40 @@ fn sample_enumerate() {
     }
 }
 
+#[test]
+fn sample_enumerate_workspace_approval() {
+    let bytes = records("enumerate-workspace-approval.json");
+    let rows: Vec<Record<'_>> = serde_json::from_str(&bytes).unwrap();
+    assert_eq!(rows.len(), 1);
+    let Outcome::Success(reply) = check_reply::<EnumerateReply>(rows[0].reply) else {
+        panic!("expected success");
+    };
+    let states: Vec<_> = reply
+        .result
+        .workspaces
+        .iter()
+        .map(|workspace| {
+            let approval = workspace
+                .approval
+                .as_ref()
+                .expect("a workspace with a root carries approval");
+            (
+                workspace.workspace_id.as_str(),
+                approval.state.clone(),
+                approval.journal_seq,
+            )
+        })
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("approved", ApprovalState::Approved, Some(3)),
+            ("replaced", ApprovalState::Unapproved, None),
+            ("unapproved", ApprovalState::Unapproved, None),
+        ]
+    );
+}
+
 /// A `resolve` record from the root-record captures: decodes, round-trips its
 /// exact bytes, and returns its only root record with the reply.
 fn root_record(index: usize, via: Via, generation: i64) -> (ResolveReply, RootRecord) {
@@ -389,6 +423,7 @@ fn published_samples_match_sha256sums() {
     assert_eq!(
         names,
         [
+            "enumerate-workspace-approval.json",
             "enumerate.json",
             "resolve-project-id.json",
             "resolve-remote.json",

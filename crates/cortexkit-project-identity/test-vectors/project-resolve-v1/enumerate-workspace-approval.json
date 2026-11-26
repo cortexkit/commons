@@ -1,0 +1,3 @@
+[
+  {"request":{"method":"enumerate","params":{}},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"generation":8,"incarnation":"0123456789abcdef","projects":[],"workspaces":[{"approval":{"journalSeq":3,"state":"approved"},"fileId":"unix:1:100","name":"Approved","root":"/fixture/approved","workspaceId":"approved"},{"approval":{"journalSeq":null,"state":"unapproved"},"fileId":"unix:1:101","name":"Replaced","root":"/fixture/replaced","workspaceId":"replaced"},{"approval":{"journalSeq":null,"state":"unapproved"},"fileId":"unix:1:102","name":"Unapproved","root":"/fixture/unapproved","workspaceId":"unapproved"}]}}}
+]

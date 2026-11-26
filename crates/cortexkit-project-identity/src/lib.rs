@@ -365,6 +365,12 @@ wire_struct!(Workspace {
     /// `unix:<dev>:<ino>` or `windows:<volumeSerial>:<fileIndex>`, with decimal numbers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     file_id: String,
+    /// Whether the person approved this workspace root on this computer, in the
+    /// same shape as a project root's approval. Sent only on entries with a
+    /// `root`. It is tied to the folder's `fileId` when approved, so a replaced
+    /// folder reads unapproved. Absent from handlers that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approval: Approval,
 });
 wire_struct!(Project {
     project_id: String, name: String, roots: Vec<String>, implicit: bool, ref_kind: RefKind,
@@ -398,6 +404,12 @@ impl Workspace {
     /// Sets the optional filesystem identity of the workspace root.
     pub fn with_file_id(mut self, file_id: Option<String>) -> Self {
         self.file_id = file_id;
+        self
+    }
+
+    /// Sets the optional approval of the workspace root.
+    pub fn with_approval(mut self, approval: Option<Approval>) -> Self {
+        self.approval = approval;
         self
     }
 }
