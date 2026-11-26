@@ -1,0 +1,43 @@
+[
+  {
+    "state": "active",
+    "step": {
+      "phase": "awaiting_response",
+      "idle_deadline_ms": 1700000030000,
+      "content_deadline_ms": 1700000120000
+    }
+  },
+  {
+    "state": "active",
+    "step": {
+      "phase": "streaming",
+      "last_event_at_ms": 1700000001000,
+      "idle_deadline_ms": 1700000031000,
+      "content_deadline_ms": 1700000121000,
+      "attempt": 2
+    }
+  },
+  {
+    "state": "active",
+    "step": {
+      "phase": "running_tools",
+      "last_event_at_ms": 1700000002000
+    }
+  },
+  {
+    "state": "active",
+    "reason": "context_ceiling_wait",
+    "deadline_ms": 1700000180000,
+    "step": {
+      "phase": "waiting"
+    }
+  },
+  {
+    "state": "active",
+    "step": {
+      "phase": "future_phase",
+      "idle_deadline_ms": 1700000032000,
+      "content_deadline_ms": 1700000122000
+    }
+  }
+]

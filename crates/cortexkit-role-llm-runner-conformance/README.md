@@ -675,6 +675,36 @@ the adapter must provide both fixtures; missing support fails the named case.
 The kit checks that each outcome reaches the next model request, that the next
 scripted answer completes the run, and that the provider received only one call.
 
+## Step limits and liveness (0.18.1)
+
+`step_liveness_shape` uses the existing held-model hooks on a runner declaring
+`step_liveness` and `run_status`. Hold before the first response record,
+including any keepalive, and resolve `await_model_step` once the request
+reaches the provider. The case checks the `awaiting_response` shape, not elapsed
+deadlines or transitions into other phases.
+
+- `cut_call_not_run` and `three_cut_steps_end_run` use `run_tool_calls` and
+  `run_ops`. Opt in with `supports_tool_argument_prefixes()` (default `false`).
+  For each call with `ScriptedTurn::tool_argument_prefix(call_id)`, stream that
+  raw prefix instead of the structured `arguments`; do not repair the JSON or
+  close the call normally. End the step with the scripted length reason in
+  `model_finish_reason_source()`'s vocabulary. Leave complete siblings alone.
+  Use the existing `tool_invocations` and `model_requests` observations,
+  including actual model-visible tool results. The checks require the reason
+  and nonempty error text, but do not grade the wording of the recovery advice.
+- `runner_enforced_cap` requires both `max_output_tokens` and `finish_reason`.
+  Implement `configure_runner_enforced_cap(session)` to select a real provider
+  path that takes no request cap. Return `false` (the default) if the fixture
+  is unavailable. Stream the text in small deltas (one word per delta is
+  enough) and finish normally if the runner keeps reading. Do not truncate
+  in the adapter or fill in a cap in `model_requests` if none was received.
+  The fixture offers 1,024 copies of `hello ` with a caller cap of 16 tokens.
+  The case allows up to eight of these six-byte words per token (768 bytes
+  total) for estimator and delta-boundary differences. It checks the final
+  output, not how many bytes the transport buffered before it stopped.
+
+When either optional fixture is unavailable, its cases are not applicable.
+
 ## Scope and verdicts
 
 The kit tests behavior through public routes and genuinely independent

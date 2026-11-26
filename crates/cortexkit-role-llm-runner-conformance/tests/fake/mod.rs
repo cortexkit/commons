@@ -257,6 +257,10 @@ pub struct Defects {
     pub tool_input_name_json_on_continuation: Option<&'static str>,
     pub finish_first_step: bool,
     pub finish_length_as_stop: bool,
+    pub step_liveness_missing_deadline: bool,
+    pub cut_call_dispatched_with_complete_sibling: bool,
+    pub consecutive_cuts_ignored: bool,
+    pub runner_cap_ignored: bool,
     pub finish_without_model_step: bool,
     pub finish_status_omitted: bool,
     /// Reports `length` only for a run that sent a caller cap, treating the
@@ -797,6 +801,7 @@ struct World {
     model_requests: Mutex<BTreeMap<String, Vec<ModelRequestObservation>>>,
     service_tiers: Mutex<BTreeMap<String, service_tier::State>>,
     pending_model_holds: Mutex<BTreeSet<String>>,
+    capless_models: Mutex<BTreeSet<String>>,
     held_models: Mutex<BTreeMap<String, String>>,
     staging_holds: Mutex<BTreeSet<String>>,
     invocations: Mutex<BTreeMap<String, usize>>,
@@ -1021,6 +1026,7 @@ struct RunRec {
     directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
     max_steps: Option<u64>,
     max_output_tokens: Option<u64>,
+    consecutive_cuts: usize,
     temperature: Option<f64>,
     finish: Option<cortexkit_role_llm_runner::finish::Finish>,
     no_tools: bool,
@@ -2237,6 +2243,7 @@ impl Module {
                         cortexkit_role_llm_runner::usage::SessionUsage::new(&run_id)
                     });
                     sess.runs.push(RunRec {
+                        consecutive_cuts: 0,
                         awaits: None,
                         route_decision_id: record["route_decision_id"].as_str().map(str::to_owned),
                         account_route: record
@@ -2307,6 +2314,11 @@ impl Module {
                     }
                 }
                 if let Some(run) = sess.run_mut(&run_id) {
+                    if record["cut_arguments"] == json!(true) {
+                        run.consecutive_cuts += 1;
+                    } else {
+                        run.consecutive_cuts = 0;
+                    }
                     if !self.world.defects.finish_first_step || run.usage.steps == 0 {
                         run.finish = cortexkit_role_llm_runner::finish::normalize(
                             "ai-sdk",
@@ -2826,6 +2838,7 @@ impl Module {
                 .max_output_tokens
                 .filter(|_| !self.world.defects.max_output_tokens_ignored)
                 .map(|cap| cap.min(32));
+            let capless = self.world.capless_models.lock().unwrap().contains(session);
             if received {
                 if turn_index == 0 {
                     if let Some(peer) = self.world.routing_peers.lock().unwrap().get(session) {
@@ -2878,7 +2891,7 @@ impl Module {
                 observation.tool_results = model_tool_results(&sess);
                 notices::observe(&mut observation, &sess, &self.world);
                 session_change::observe_notes(&mut observation, &sess, &self.world.defects);
-                observation.max_output_tokens = output_cap;
+                observation.max_output_tokens = if capless { None } else { output_cap };
                 observation.temperature = run.temperature.filter(|_| {
                     if run.max_output_tokens.is_some() {
                         !self.world.defects.temperature_with_output_cap_lost
@@ -2947,7 +2960,7 @@ impl Module {
             // The output-cap fixture is text-only. Its fake provider uses
             // whitespace-delimited tokens and one allowance across all parts,
             // reporting the number returned rather than merely clamping usage.
-            if let Some(cap) = output_cap {
+            if let Some(cap) = output_cap.filter(|_| !capless) {
                 if turn
                     .parts
                     .iter()
@@ -2979,10 +2992,27 @@ impl Module {
                     }
                 }
             }
+            if capless && !self.world.defects.runner_cap_ignored {
+                if let Some(cap) = output_cap {
+                    for part in &mut turn.parts {
+                        if let ScriptedPart::Text(text) = part {
+                            if let Some((cut, _)) = text.char_indices().nth(cap as usize * 4) {
+                                text.truncate(cut);
+                                turn.finish_reason = Some("length".into());
+                            }
+                        }
+                    }
+                }
+            }
             let ordinal = sess.messages.len();
             let mut parts = Vec::new();
             let mut calls = Vec::new();
             let mut tools = Vec::new();
+            let mut incomplete = Vec::new();
+            let dispatch_incomplete = self.world.defects.cut_call_dispatched_with_complete_sibling
+                && turn.parts.iter().any(|part| {
+                    matches!(part, ScriptedPart::ToolCall(call) if turn.tool_argument_prefix(&call.tool_call_id).is_none())
+                });
             for (index, part) in turn.parts.iter().enumerate() {
                 match part {
                     ScriptedPart::Text(text) => parts.push(json!({ "type": "text", "text": text })),
@@ -2995,10 +3025,21 @@ impl Module {
                         } else {
                             format!("{}.{ordinal}.{index}", sess.lineage)
                         };
+                        let mut arguments = call.arguments.clone();
+                        if let Some(prefix) = turn.tool_argument_prefix(&call.tool_call_id) {
+                            if turn.finish_reason.as_deref() == Some("length")
+                                && serde_json::from_str::<Value>(prefix).is_err()
+                            {
+                                incomplete.push(key.clone());
+                                if !dispatch_incomplete {
+                                    arguments = json!(prefix);
+                                }
+                            }
+                        }
                         parts.push(json!({ "type": "tool_call", "id": call.tool_call_id,
-                                           "tool": call.tool, "arguments": call.arguments }));
+                                           "tool": call.tool, "arguments": arguments }));
                         calls.push(json!({ "call_key": key, "tool_call_id": call.tool_call_id,
-                                           "arguments": call.arguments }));
+                                           "arguments": arguments }));
                         tools.push(call.tool.clone());
                     }
                 }
@@ -3027,8 +3068,26 @@ impl Module {
                 session,
                 json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls,
                         "input_spent": input_spent, "usage": usage,
-                        "finish_reason": turn.finish_reason }),
+                        "finish_reason": turn.finish_reason, "cut_arguments":!incomplete.is_empty() }),
             )?;
+            if !incomplete.is_empty() {
+                if run.consecutive_cuts == 2 && !self.world.defects.consecutive_cuts_ignored {
+                    return self.commit(session, json!({
+                        "kind":"terminal", "run_id":run_id, "state":"error", "blocked":calls,
+                        "error":{"class":"permanent", "provider_code":errors::provider_codes::OUTPUT_LIMIT,
+                            "message":"Three consecutive steps reached the output limit with incomplete calls."}
+                    }));
+                }
+                if !dispatch_incomplete {
+                    for key in incomplete {
+                        self.commit(session, json!({"kind":"result", "call_key":key,
+                            "content":{"executed":false, "error":{
+                                "code":errors::tool_result_reasons::ARGUMENTS_INCOMPLETE,
+                                "message":"The call was not run: the reply reached the output limit before the arguments were complete. Re-issue the call with complete arguments and split large payloads into smaller calls."
+                            }}}))?;
+                    }
+                }
+            }
             // The limit cuts the run off only when this step asked for a
             // tool call that would lead to another step. A step with no call
             // completes the run, and one calling `submit_result` ends it the
@@ -5919,6 +5978,17 @@ impl Module {
                 body.as_object_mut().unwrap().remove("finish");
             }
             let held = self.held_status(session, &run_id);
+            if self.world.serves(groups::STEP_LIVENESS)
+                && body["state"] == "active"
+                && self.world.held_models.lock().unwrap().get(session) == Some(&run_id)
+            {
+                let at_ms = self.world.now();
+                body["step"] =
+                    json!({"phase":"awaiting_response", "idle_deadline_ms":at_ms + 30_000});
+                if !self.world.defects.step_liveness_missing_deadline {
+                    body["step"]["content_deadline_ms"] = json!(at_ms + 120_000);
+                }
+            }
             if !held.is_empty() {
                 body["held_calls"] = json!(held);
                 body["reason"] = json!("tool_held");
@@ -6574,6 +6644,7 @@ pub struct FakeSubject {
     pub missing_routing_hook: Option<&'static str>,
     pub route_decision_fixture_calls: AtomicUsize,
     pub finish_reason_fixture: bool,
+    pub step_limit_fixtures: bool,
     pub model_failure_fixture: bool,
     pub step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
     pub incarnation_fixtures: bool,
@@ -6747,6 +6818,7 @@ impl FakeSubject {
             incarnation_fixtures: false,
             model_failure_fixture: true,
             finish_reason_fixture: true,
+            step_limit_fixtures: false,
             output_refs_group: false,
             without_compaction_item: false,
             call_identity_group: false,
@@ -6921,6 +6993,7 @@ impl FakeSubject {
                     user_commands: Mutex::new(user_commands::Commands::default()),
                     system_text_default: Mutex::new(BTreeMap::new()),
                     pending_model_holds: Mutex::new(BTreeSet::new()),
+                    capless_models: Mutex::new(BTreeSet::new()),
                     held_models: Mutex::new(BTreeMap::new()),
                     staging_holds: Mutex::new(BTreeSet::new()),
                     invocations: Mutex::new(BTreeMap::new()),
@@ -7314,6 +7387,21 @@ impl LlmRunnerSubject for FakeSubject {
     }
     fn model_finish_reason_source(&self) -> Option<&'static str> {
         self.finish_reason_fixture.then_some("ai-sdk")
+    }
+
+    fn supports_tool_argument_prefixes(&self) -> bool {
+        self.step_limit_fixtures
+    }
+
+    async fn configure_runner_enforced_cap(&self, session: &str) -> Result<bool, HarnessError> {
+        if self.step_limit_fixtures {
+            self.world()
+                .capless_models
+                .lock()
+                .unwrap()
+                .insert(session.into());
+        }
+        Ok(self.step_limit_fixtures)
     }
 
     fn supports_model_failure_fixture(&self) -> bool {

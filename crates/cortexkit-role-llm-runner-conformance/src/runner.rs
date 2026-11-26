@@ -436,6 +436,20 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             reason: "finish_reason is not declared".into(),
         });
     }
+    if spec.name == "step_liveness_shape" && !declared.contains(&Capability::StepLiveness) {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "step_liveness is not declared".into(),
+        });
+    }
+    if spec.name == "runner_enforced_cap" {
+        for group in [Capability::MaxOutputTokens, Capability::FinishReason] {
+            if !declared.contains(&group) {
+                return Some(CaseOutcome::Inapplicable {
+                    reason: format!("{} is not declared", group.name()),
+                });
+            }
+        }
+    }
     if spec.name.starts_with("archive_pruning_")
         && !declared.contains(&Capability::ArchivePrunesReasoning)
     {

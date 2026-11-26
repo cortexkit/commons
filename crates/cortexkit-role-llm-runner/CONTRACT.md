@@ -2425,7 +2425,7 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?, resume_not_before_ms?, held_calls?, usage?, directives?, finish?, awaits?}`,
+  structured_output?, context_ceiling?, deadline_ms?, resume_not_before_ms?, held_calls?, usage?, directives?, finish?, awaits?, step?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason` and
   `retries_used` stay runner members, not pinned. The normalized `finish`
@@ -2466,6 +2466,8 @@ state, polled without reading the transcript.
     for the run, on a runner declaring `finish_reason` (§6.6).
   - `usage`: the run's token usage so far, on a runner that declares
     `run_usage` (§6.4).
+  - `step`: on an `active` run, the current model step's phase and deadlines,
+    on a runner declaring `step_liveness` (§6.7).
 - [pinned] For this account-limit pause, `run.result` carries `state: "paused"`,
   `reason: "account_limit"` and the run's original structured `error`, with
   `provider_code: "account_limit_exhausted"` and `retry_after_secs` and/or
@@ -3078,6 +3080,48 @@ The executable samples in `test-vectors/llm-runner-v1/finish-reason.json`
 pin each documented raw value for each source, unknown raw reasons, missing
 reasons, the tool-call override, and an unknown source. None of the tables
 permits inferring an unreported reason.
+
+### 6.7 `step_liveness`: is a quiet run alive
+
+A model can think for many minutes without sending anything a caller can
+see, and a stalled request looks the same from outside. Only the runner sees
+the provider's records, so the runner decides when an attempt has stalled,
+and tells callers its deadlines. A caller then needs no timer of its own.
+Added in 0.10.1.
+
+- [pinned] A runner declares the describe group `step_liveness`
+  (`capabilities::STEP_LIVENESS`) when it serves the `step` member below and
+  keeps its deadlines. The group requires `run_status`.
+- [pinned] On a declaring runner, `run.status` of an `active` run carries
+  `step`, an object with the pinned members below. A runner's own members,
+  such as attempt numbers or content gaps, ride beside them, decoded
+  leniently. `step` is absent on a run that is not `active` or has not started
+  its first model step.
+  - `phase`: an open string. `awaiting_response`: the model request is sent
+    and no response record has arrived. `streaming`: response records are
+    arriving. `running_tools`: the step's tool calls are being run.
+    `waiting`: between steps, in a wait the run's `reason` and `deadline_ms`
+    describe (§6.1). A reader treats an unknown phase as alive while the
+    deadlines below hold.
+  - `last_event_at_ms`: Unix-epoch milliseconds of the last record the
+    provider sent for the current attempt, keepalives included. Absent until
+    the first record.
+  - `idle_deadline_ms`: Unix-epoch milliseconds at which the attempt fails if
+    no record of any kind arrives before it. Present in `awaiting_response`
+    and `streaming`.
+  - `content_deadline_ms`: Unix-epoch milliseconds at which the attempt fails
+    if no content arrives before it. Content is text, tool-call arguments or
+    reasoning; keepalives are not content. Present in `awaiting_response` and
+    `streaming`.
+- [pinned] **The runner keeps its deadlines.** When an attempt passes either
+  deadline, the runner fails it and retries it under its own retry policy,
+  or ends the run. It never leaves an attempt running past a deadline it
+  reported. So a caller reads a run whose step is inside its deadlines as
+  alive, and reads `run.status` again after the earlier deadline to see what
+  happened. A retried attempt reports fresh deadlines. Tool calls in
+  `running_tools` are bounded by their own rules (§14.6), not by these.
+- [pinned] `test-vectors/llm-runner-v1/run-status-step.json` shows a
+  `run.status` answer in each of the four phases.
 
 ## 7. `streaming`: `session.subscribe`
 
@@ -4028,6 +4072,19 @@ A runner that declares `retract` serves `session.retract`.
   non-integers and overflow) is
   refused `invalid_params` naming `generation.max_output_tokens`; a
   non-object `generation` names `generation`.
+- [pinned] **Every step's output is bounded.** Added in 0.10.1. A runner
+  declaring `max_output_tokens` caps every model step, including steps of runs
+  that send no `generation.max_output_tokens`. Without that member the cap is
+  the runner's own default, which the runner documents and which never
+  exceeds the model's output maximum. Where the provider applies a cap the
+  runner sends, the provider enforces it. Where the provider takes no cap on
+  the request, the runner enforces it itself: it counts, by its own token
+  estimate, the output it receives for the step (text, tool-call arguments
+  and the reasoning the provider streams), and ends the step at the cap with
+  finish `length`, as a provider-enforced cap would (§6.6, §14.7). Output the
+  provider reports only after the step ends, such as reasoning it does not
+  stream, cannot be counted as it is produced, so a runner-enforced cap may be
+  passed by that amount.
 - [pinned] `generation.temperature` is a finite number from 0 to 2 inclusive,
   frozen at admission and applied to every model response of the run. On a
   runner declaring `temperature`, any other value (a non-number, NaN or
@@ -8447,6 +8504,8 @@ The provider codes this role names:
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 | `context_overflow` | the provider refused the request as exceeding the model's context window. Not the ceiling: a stop the runner decides itself before sending is the `context_ceiling` run state or refusal (§6, §12.1), never this code |
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |
+| `output_limit` | three consecutive model steps ended at the output limit with an unfinished tool call (§14.7); `class: "permanent"` |
+| `tool_loop` | the runner stopped a loop of identical calls with identical results (§14.7); `class: "permanent"` |
 | `response_deadline` | the provider's response deadline ended the request |
 | `account_limit_exhausted` | the provider account's usage limit is exhausted |
 | `concurrency_full` | routing's in-flight capacity is occupied; wait, never fail the work (§12.1) |
@@ -8526,6 +8585,10 @@ above.
   a step boundary, which ended the run `context_ceiling` before the call was
   dispatched (§6). It is marked not executed, with no dispatch intent, using
   the same native result as other hard stops.
+- [pinned] `arguments_incomplete`: the step ended at the output limit before
+  the call's arguments were complete, so the call was not run (§14.7). No
+  dispatch intent exists. The error text asks the model to re-issue the call
+  with complete arguments and to split a large payload into smaller calls.
 - [pinned] Where the reason sits in a message body is the runner's message
   schema.
 
@@ -9129,9 +9192,9 @@ broken tool costs one failed call, never the run's work so far. Added in
   also fails or is cut off, the model gets its result under this section.
 - [pinned] **What still ends a run.** A run ends only for reasons that are not
   a tool's outcome: the run's own stop conditions and hard stops (§6), a
-  caller's cancel, an error of the model request itself, the runner or its
-  host stopping under the run (§6.5, §14 property 3), and the end of the
-  run's own scope. When the run's scope ends (its owner ended it, so its
+  caller's cancel, an error of the model request itself, the runner's own
+  output-limit and loop stops (§14.7), the runner or its host stopping under
+  the run (§6.5, §14 property 3), and the end of the run's own scope. When the run's scope ends (its owner ended it, so its
   routes drained), every call still gets its result (`route_drained` if
   unsent, `outcome_unknown` if sent), and the run ends `interrupted` at that
   point instead of calling the model again, because no call could run any
@@ -9140,10 +9203,45 @@ broken tool costs one failed call, never the run's work so far. Added in
   unknown while the runner keeps running.
 - [pinned] §14.5's rule that unrecoverable calls continue the turn is this
   rule applied to a daemon upgrade.
+- [pinned] A call its provider answered `held` (§6.1 `held_calls`) is not
+  bounded by this section. It waits for its terminal late entry as long as the
+  provider holds it, and gets the `outcome_unknown` result only when the late
+  results can no longer be read.
+
+## 14.7 Steps cut at the output limit, and tool loops
+
+Two stops the runner decides itself, from what the model did, not from a
+tool's outcome (§14.6). Added in 0.10.1.
+
+- [pinned] **A call cut off mid-arguments is not run.** When a model step
+  ends `length` (§6.6) while a tool call's arguments are still incomplete,
+  that call is never dispatched. It gets a not-run result with reason
+  `arguments_incomplete` (§12.3), whose text tells the model the call was not
+  run because the reply reached the output limit before its arguments were
+  complete, and asks it to re-issue the call with complete arguments and to
+  split a large payload into smaller calls. Calls of the same step whose
+  arguments were complete run as usual. The run continues with its next model
+  step, as for any other result.
+- [pinned] **Three cut steps in a row end the run.** When three consecutive
+  model steps each end `length` with an incomplete call, the third ends the
+  run `error` with `provider_code: "output_limit"` and `class: "permanent"`
+  (§12.2). The calls of that third step get the never-executed result of a
+  hard stop (§6). Any step that does not end `length` resets the count. A
+  step that ends `length` with no tool call is a truncated final reply and
+  ends the run as §6.6 describes, not under this rule.
+- [pinned] **A runner may stop a loop that makes no progress.** A runner that
+  stops loops counts consecutive calls of one tool with the same canonical
+  arguments whose results are byte-identical. Instead of dispatching the call
+  that would reach its documented threshold, it may end the run `error` with
+  `provider_code: "tool_loop"` and `class: "permanent"`; that call gets the
+  never-executed result of a hard stop (§6). A result that differs from the
+  previous one resets the count, so a poll whose answer changes never trips
+  the stop. The threshold is the runner's own and it documents it. A runner
+  that does not stop loops never sends `tool_loop`.
 
 ## 15. Conformance suite
 
-`cortexkit-role-llm-runner-conformance` 0.17.93 pins this 0.9.10 contract.
+`cortexkit-role-llm-runner-conformance` 0.18.1 pins this 0.10.1 contract.
 The opt-in `restart_survival_*` cases run crash and orderly experiments when
 an adapter declares `host_survives_restart: true`; otherwise they are not
 applicable, and the existing crash cases remain unchanged.

@@ -605,6 +605,103 @@ impl HeldCall {
     }
 }
 
+/// A model-step phase in `run.status`. Later values keep their wire spelling.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
+pub enum RunStatusStepPhase {
+    /// The model request was sent, but no provider record has arrived.
+    AwaitingResponse,
+    /// Provider records are arriving.
+    Streaming,
+    /// The step's tool calls are being run.
+    RunningTools,
+    /// Between steps, in a wait described by the run's reason and deadline.
+    Waiting,
+    /// A phase this version does not classify.
+    Unknown(String),
+}
+
+impl RunStatusStepPhase {
+    pub fn parse(value: &str) -> Self {
+        Self::from(value.to_owned())
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::AwaitingResponse => "awaiting_response",
+            Self::Streaming => "streaming",
+            Self::RunningTools => "running_tools",
+            Self::Waiting => "waiting",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl From<String> for RunStatusStepPhase {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "awaiting_response" => Self::AwaitingResponse,
+            "streaming" => Self::Streaming,
+            "running_tools" => Self::RunningTools,
+            "waiting" => Self::Waiting,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+
+impl From<RunStatusStepPhase> for String {
+    fn from(value: RunStatusStepPhase) -> Self {
+        match value {
+            RunStatusStepPhase::Unknown(value) => value,
+            known => known.as_str().to_owned(),
+        }
+    }
+}
+
+/// An active run's current model step on a runner declaring `step_liveness`.
+/// Times are in Unix-epoch milliseconds. Unknown members are ignored (§6.7).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RunStatusStep {
+    pub phase: RunStatusStepPhase,
+    /// The last provider record, including keepalives. Absent before the first record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_event_at_ms: Option<u64>,
+    /// When the attempt fails if no record arrives. Present while awaiting or streaming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_deadline_ms: Option<u64>,
+    /// When the attempt fails if no content arrives. Present while awaiting or streaming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_deadline_ms: Option<u64>,
+}
+
+impl RunStatusStep {
+    pub fn new(phase: RunStatusStepPhase) -> Self {
+        Self {
+            phase,
+            last_event_at_ms: None,
+            idle_deadline_ms: None,
+            content_deadline_ms: None,
+        }
+    }
+
+    pub fn with_last_event_at_ms(mut self, at_ms: u64) -> Self {
+        self.last_event_at_ms = Some(at_ms);
+        self
+    }
+
+    pub fn with_idle_deadline_ms(mut self, deadline_ms: u64) -> Self {
+        self.idle_deadline_ms = Some(deadline_ms);
+        self
+    }
+
+    pub fn with_content_deadline_ms(mut self, deadline_ms: u64) -> Self {
+        self.content_deadline_ms = Some(deadline_ms);
+        self
+    }
+}
+
 /// The lenient run-id `run.status` answer. Session-level answers may use a
 /// runner's own schema. An unknown run answers only `{state: "unknown"}`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -664,8 +761,17 @@ pub struct RunStatus {
     /// completed run whose send asked for them in `directives` (§9.9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directives: Option<Vec<crate::directives::Directive>>,
+    /// Present on an active run that has begun a model step, on a runner
+    /// declaring `step_liveness`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<RunStatusStep>,
 }
 impl RunStatus {
+    pub fn with_step(mut self, step: RunStatusStep) -> Self {
+        self.step = Some(step);
+        self
+    }
+
     pub fn with_awaits(mut self, awaits: crate::awaits::RunAwaits) -> Self {
         self.awaits = Some(awaits);
         self
@@ -700,6 +806,7 @@ impl RunStatus {
             held_calls: Vec::new(),
             usage: None,
             directives: None,
+            step: None,
         }
     }
     /// An `active` run waiting at the context ceiling until `deadline_ms`.

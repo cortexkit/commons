@@ -1048,6 +1048,13 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             "held_calls requires run_status".into(),
         ));
     }
+    if describe.declares(capabilities::STEP_LIVENESS)
+        && !describe.declares(capabilities::RUN_STATUS)
+    {
+        problems.push(DescribeProblem::Undecodable(
+            "step_liveness requires run_status".into(),
+        ));
+    }
     if describe.declares(capabilities::SUBMIT_STREAMED_SIBLINGS)
         && !describe.declares(capabilities::STRUCTURED_OUTPUT)
     {

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.1
+
+- Every model step's output is bounded on a runner declaring
+  `max_output_tokens`: the caller's cap, else the runner's documented default.
+  Where the provider takes no cap, the runner counts streamed output and ends
+  the step `length` itself (§9.3.1).
+- A step cut at the output limit does not run a tool call whose arguments were
+  incomplete; the call gets the new `arguments_incomplete` result and the run
+  continues. Three such steps in a row end the run with the new provider code
+  `output_limit`. A runner may stop a loop of identical calls with identical
+  results with the new code `tool_loop` (§14.7, §12.2, §12.3).
+- New describe group `step_liveness`: `run.status` of an active run carries
+  `step {phase, last_event_at_ms, idle_deadline_ms, content_deadline_ms}`, and
+  the runner fails or ends any attempt that passes a deadline it reported, so
+  callers need no timer of their own (§6.7).
+- A call its provider answered `held` waits for its late result and is not
+  bounded by §14.6.
+- Rollout: readers first. Readers of `run.status` check the `step` samples
+  before a runner declares `step_liveness`; readers of run errors accept the
+  two new codes before a runner emits them.
+
 ## 0.10.0
 
 - Add the opt-in `role.describe` `serves` member, including typed snapshots,

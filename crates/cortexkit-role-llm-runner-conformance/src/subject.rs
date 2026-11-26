@@ -2,7 +2,7 @@
 //! it declares, how to reach a session's management route, and a scripted
 //! model and tool endpoints.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use cortexkit_role_harness::{Harness, HarnessError, RouteStamp};
@@ -135,6 +135,8 @@ pub enum Capability {
     RunUsage,
     /// Normalized last-model-step finish on results and ended status.
     FinishReason,
+    /// Phase and deadlines for the active model step in `run.status`.
+    StepLiveness,
     /// Durable session spend on `session.head`.
     SessionUsage,
     /// `session.send` with `delivery_order`, plan-named senders and plan
@@ -273,6 +275,7 @@ impl Capability {
         Self::RunToolCalls,
         Self::RunUsage,
         Self::FinishReason,
+        Self::StepLiveness,
         Self::SessionUsage,
         Self::DeliveryOrder,
         Self::TemplateDatetime,
@@ -364,6 +367,7 @@ impl Capability {
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::RunUsage => groups::RUN_USAGE,
             Self::FinishReason => groups::FINISH_REASON,
+            Self::StepLiveness => groups::STEP_LIVENESS,
             Self::SessionUsage => groups::SESSION_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::TemplateDatetime => groups::TEMPLATE_DATETIME,
@@ -437,6 +441,7 @@ pub struct ScriptedTurn {
     /// it must not synthesize management replies. Used only when
     /// [`LlmRunnerSubject::supports_model_failure_fixture`] returns true.
     pub model_failure: Option<cortexkit_role_llm_runner::run::RunError>,
+    argument_prefixes: BTreeMap<String, String>,
 }
 
 /// Usage reported by one completed model request, at face value.
@@ -747,12 +752,30 @@ impl ScriptedTurn {
             finish_reason: None,
             usage: None,
             model_failure: None,
+            argument_prefixes: BTreeMap::new(),
         }
     }
 
     pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
         self.finish_reason = Some(reason.into());
         self
+    }
+
+    /// Stream `prefix` for the named tool call instead of encoding its full
+    /// arguments. The turn's raw finish reason must signal an output limit.
+    pub fn with_tool_argument_prefix(
+        mut self,
+        tool_call_id: impl Into<String>,
+        prefix: impl Into<String>,
+    ) -> Self {
+        self.argument_prefixes
+            .insert(tool_call_id.into(), prefix.into());
+        self
+    }
+
+    /// Raw argument bytes to send for this call, if it is cut off mid-JSON.
+    pub fn tool_argument_prefix(&self, tool_call_id: &str) -> Option<&str> {
+        self.argument_prefixes.get(tool_call_id).map(String::as_str)
     }
 
     pub fn with_model_failure(mut self, error: cortexkit_role_llm_runner::run::RunError) -> Self {
@@ -2299,6 +2322,20 @@ pub trait LlmRunnerSubject: Harness {
     /// the script cursor across held calls and restarts. No compaction
     /// provider fixture is installed by this kit.
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError>;
+
+    /// Whether `install_script` can stream raw tool argument prefixes without
+    /// repairing them or closing the tool call normally. The cut-step cases
+    /// also need a source from `model_finish_reason_source`.
+    fn supports_tool_argument_prefixes(&self) -> bool {
+        false
+    }
+
+    /// Select a real provider path that takes no request output cap for this
+    /// session. The scripted model streams the full answer in small text
+    /// deltas unless the runner stops reading. Return false if unsupported.
+    async fn configure_runner_enforced_cap(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
 
     /// Hold the next actual model answer for this session until explicitly
     /// released. Called before the send. Required when describe lists

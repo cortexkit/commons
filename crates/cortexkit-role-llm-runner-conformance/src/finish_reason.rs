@@ -42,8 +42,8 @@ pub(crate) fn raw_tool_calls(source: &str) -> Result<&'static str, String> {
     }
 }
 
-/// The source-specific length reason used by the provider-limit case.
-fn raw_length(source: &str) -> Result<&'static str, String> {
+/// The source-specific length reason used by the output-limit cases.
+pub(crate) fn raw_length(source: &str) -> Result<&'static str, String> {
     match source {
         "anthropic.messages" | "aws.bedrock_converse" => Ok("max_tokens"),
         "openai.chat_completions" | "ai-sdk" | "pi-ai" => Ok("length"),

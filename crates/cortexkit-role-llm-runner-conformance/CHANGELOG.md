@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.1
+
+- Pin llm-runner `=0.10.1`. Check the phase and deadlines in `run.status`,
+  incomplete calls at the output limit, the stop after three consecutive
+  cut steps, and runner-enforced output caps.
+
 ## 0.18.0
 
 - Pin llm-runner `=0.10.0`. Check that `serves` is request-only, that

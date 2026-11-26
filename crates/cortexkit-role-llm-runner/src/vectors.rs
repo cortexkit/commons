@@ -658,6 +658,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/run-awaits.json"),
     ),
     (
+        "run-status-step.json",
+        include_str!("../test-vectors/llm-runner-v1/run-status-step.json"),
+    ),
+    (
         "steer-frame-claude-code-v1/README.md",
         include_str!("../test-vectors/llm-runner-v1/steer-frame-claude-code-v1/README.md"),
     ),

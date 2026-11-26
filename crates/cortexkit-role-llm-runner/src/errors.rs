@@ -830,6 +830,24 @@ pub mod tool_result_reasons {
     pub const POST_TOOL_UNAVAILABLE: &str = "post_tool_unavailable";
     /// The call was never sent: its route closed under a drained scope.
     pub const ROUTE_DRAINED: &str = "route_drained";
+    /// The step reached its output limit before the call's arguments were complete.
+    pub const ARGUMENTS_INCOMPLETE: &str = "arguments_incomplete";
+
+    /// Every tool-result reason this module names. Runners may define others.
+    pub const REASONS: &[&str] = &[
+        TOOL_RESULT_TOO_LARGE,
+        BUDGET_EXHAUSTED,
+        SKIPPED_AFTER_SUBMIT,
+        CONTEXT_CEILING,
+        OUTCOME_UNKNOWN,
+        PRE_TOOL_DENIED,
+        PRE_TOOL_UNAVAILABLE,
+        PRE_TOOL_DECLINED,
+        PRE_TOOL_EXPIRED,
+        POST_TOOL_UNAVAILABLE,
+        ROUTE_DRAINED,
+        ARGUMENTS_INCOMPLETE,
+    ];
 }
 
 /// Named top-level `cause` values for a `host_refused` run error.
@@ -866,6 +884,10 @@ pub mod provider_codes {
     pub const CONTEXT_OVERFLOW: &str = "context_overflow";
     /// The provider's output-token ceiling prevents a complete response.
     pub const OUTPUT_CEILING: &str = "output_ceiling";
+    /// Three consecutive steps reached the output limit with an incomplete call.
+    pub const OUTPUT_LIMIT: &str = "output_limit";
+    /// The runner stopped a loop of identical calls with identical results.
+    pub const TOOL_LOOP: &str = "tool_loop";
     /// The provider's response deadline ended the request.
     pub const RESPONSE_DEADLINE: &str = "response_deadline";
     /// The account's usage limit is exhausted.
@@ -910,6 +932,8 @@ pub mod provider_codes {
         PRE_USER_UNAVAILABLE,
         CONTEXT_OVERFLOW,
         OUTPUT_CEILING,
+        OUTPUT_LIMIT,
+        TOOL_LOOP,
         RESPONSE_DEADLINE,
         ACCOUNT_LIMIT_EXHAUSTED,
         ACCOUNT_SELECTION_REFUSED,

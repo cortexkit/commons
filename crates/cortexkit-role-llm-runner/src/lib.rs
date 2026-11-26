@@ -469,6 +469,8 @@ pub mod capabilities {
     pub const RUN_USAGE: &str = "run_usage";
     /// Normalized finish of the last model step on run results and ended status.
     pub const FINISH_REASON: &str = "finish_reason";
+    /// Current model-step phase and deadlines in `run.status` (§6.7).
+    pub const STEP_LIVENESS: &str = "step_liveness";
     /// Durable, incrementally maintained session spend on `session.head`.
     pub const SESSION_USAGE: &str = "session_usage";
     /// The caller's effective grant on `session.head`; absence means no grant.
@@ -639,6 +641,7 @@ pub mod capabilities {
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
         (FINISH_REASON, &[ops::RUN_RESULT]),
+        (STEP_LIVENESS, &[ops::RUN_STATUS]),
         (SESSION_USAGE, &[ops::SESSION_HEAD]),
         (HEAD_SENDER, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),

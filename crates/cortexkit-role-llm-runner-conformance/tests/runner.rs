@@ -521,6 +521,7 @@ mod message_senders;
 mod notice_keep;
 mod notices;
 mod sender_attribution;
+mod step_limits;
 mod subscribe_resume;
 mod tag_read;
 
@@ -1597,6 +1598,18 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+    if match case {
+        "step_liveness_shape" => reason == "step_liveness is not declared",
+        "cut_call_not_run" | "three_cut_steps_end_run" =>
+            reason == "adapter cannot stream raw tool argument prefixes",
+        "runner_enforced_cap" => matches!(reason.as_str(),
+            "max_output_tokens is not declared" | "finish_reason is not declared"
+            | "adapter has no scripted provider path without an output cap"),
+        _ => false,
+    }) {
+        return;
+    }
     if case == HELD_STATUS_EVENT_CASE
         && (matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("the runner does not declare "))
@@ -2384,6 +2397,20 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
                 report.outcome(spec.name),
                 Some(&CaseOutcome::Inapplicable {
                     reason: "finish_reason is not declared".into(),
+                })
+            );
+            continue;
+        }
+        if matches!(spec.name, "step_liveness_shape" | "runner_enforced_cap") {
+            let group = if spec.name == "step_liveness_shape" {
+                "step_liveness"
+            } else {
+                "max_output_tokens"
+            };
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: format!("{group} is not declared"),
                 })
             );
             continue;

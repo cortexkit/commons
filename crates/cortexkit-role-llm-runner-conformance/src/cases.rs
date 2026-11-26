@@ -139,6 +139,10 @@ where
             | "route_decision_id_fixed_per_run"
             | "send_status_both_names"
             | "read_below_host_marker" => crate::read_contract::run(self, name).await,
+            "step_liveness_shape" => crate::step_limits::liveness(self).await,
+            "cut_call_not_run" => crate::step_limits::cut_calls(self, false).await,
+            "three_cut_steps_end_run" => crate::step_limits::cut_calls(self, true).await,
+            "runner_enforced_cap" => crate::step_limits::runner_cap(self).await,
             name if name.starts_with("finish_reason_") => {
                 crate::finish_reason::run(self, name).await
             }
