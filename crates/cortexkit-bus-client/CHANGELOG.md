@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.19
+
+- The server closing a connection because its credential expired (`User Authentication Expired`) logs at debug,
+  not ERROR. ck-bus renews each credential before it expires, but NATS cannot re-authenticate a live connection,
+  so the server ends it and the client redials with the renewed credential within milliseconds. Every other
+  server error still logs at ERROR.
+- Accept subc-client-rs 0.43, so a module on the 0.43 line needs only one subc-client-rs. 0.40 to 0.42 are
+  still accepted.
+
 ## 0.1.18
 
 - Accept subc-client-rs 0.42, so a module on the 0.42 line (subc-control 0.43) needs only one subc line. 0.40 and

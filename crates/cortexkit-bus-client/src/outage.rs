@@ -1,11 +1,14 @@
 use std::{sync::Mutex, time::Duration};
 
-use async_nats::{ClientError, ConnectErrorKind, Event};
+use async_nats::{ClientError, ConnectErrorKind, Event, ServerError};
 use cortexkit_bus_nats::NatsConnectionEvent;
 use tokio::{sync::watch, time::Instant};
 
 const FIRST_REPORT: Duration = Duration::from_secs(60);
 const REPORT_INTERVAL: Duration = Duration::from_secs(600);
+/// The server's `-ERR` text when a connection's user JWT expires; async-nats
+/// 0.50 has no variant for it, so it arrives as `ServerError::Other`.
+const CREDENTIAL_EXPIRED: &str = "User Authentication Expired";
 
 struct Outage {
     server: String,
@@ -149,6 +152,20 @@ impl ConnectionObservation {
                         log.connected(server);
                     }
                     state.status = Status::Connected;
+                }
+                Event::ServerError(ServerError::Other(reason))
+                    if reason.eq_ignore_ascii_case(CREDENTIAL_EXPIRED) =>
+                {
+                    // ck-bus signs each user JWT for a short life and renews it
+                    // before then, but NATS cannot re-authenticate a live
+                    // connection: the server closes it when the JWT it connected
+                    // with expires, and the client redials with the renewed one.
+                    // That's expected and recovers on its own, so it logs at
+                    // debug, where it doesn't bury real errors.
+                    tracing::debug!(
+                        server,
+                        "bus connection credential expired; reconnecting with the renewed one"
+                    );
                 }
                 Event::ServerError(error) => tracing::error!(server, %error, "bus server error"),
                 Event::ClientError(error) => {

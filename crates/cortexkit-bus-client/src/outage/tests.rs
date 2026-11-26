@@ -240,3 +240,35 @@ async fn replacement_dial_reports_non_transient_kinds_and_keeps_the_outage_open(
     assert_eq!(lines.len(), 3, "{lines:?}");
     assert!(lines[2].contains("restored") && lines[2].contains("reported_failed_retries=2"));
 }
+
+#[test]
+fn expired_credential_reconnect_stays_out_of_errors_and_other_server_errors_do_not() {
+    let (capture, _subscriber) = Capture::start();
+    let log = OutageLog::new();
+    let connection = ConnectionObservation::default();
+    connection.ready(&log, SERVER);
+    // async-nats strips the quotes from `-ERR 'User Authentication Expired'`.
+    emit(
+        &connection,
+        &log,
+        Event::ServerError(ServerError::Other("User Authentication Expired".into())),
+    );
+    emit(
+        &connection,
+        &log,
+        Event::ServerError(ServerError::Other("user authentication expired".into())),
+    );
+    emit(
+        &connection,
+        &log,
+        Event::ServerError(ServerError::Other("Maximum Connections Exceeded".into())),
+    );
+
+    let lines = capture.lines();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].trim_start().starts_with("ERROR")
+            && lines[0].contains("Maximum Connections Exceeded"),
+        "{lines:?}"
+    );
+}
