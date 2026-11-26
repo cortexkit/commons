@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-client"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -575,12 +575,13 @@ dependencies = [
  "cortexkit-bus-nats",
  "cortexkit-bus-testkit",
  "cortexkit-bus-trait",
+ "cortexkit-log",
  "futures-util",
  "nkeys",
  "serde",
  "serde_json",
  "subc-client-rs",
- "subc-protocol 0.37.1",
+ "subc-protocol 0.37.11",
  "subc-transport",
  "tempfile",
  "thiserror",
@@ -624,9 +625,9 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-testkit"
-version = "0.9.2"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cb58a16b243d5ce03f2134ab7ac8e419e040dc41eb73036d9d9dafae83d73c2"
+checksum = "d4c715d7f249b2abdde1adab7bc8b11573e25bafbe339bb98b5baa547219a8ad"
 dependencies = [
  "async-trait",
  "base64",
@@ -637,7 +638,7 @@ dependencies = [
  "subc-client-rs",
  "subc-control",
  "subc-os",
- "subc-protocol 0.37.1",
+ "subc-protocol 0.37.11",
  "subc-transport",
  "tempfile",
  "tokio",
@@ -1497,7 +1498,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2838,7 +2839,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3210,9 +3211,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "subc-client-rs"
-version = "0.40.3"
+version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50ad1670c324adcdb29af3d6ced11c9c9d1641860a9af90f1b110acf4774ac59"
+checksum = "14abcc71efce4eaf759e3f98896dfbeaf4edf0ff3fd617e26ae2728051f32262"
 dependencies = [
  "async-trait",
  "serde",
@@ -3221,7 +3222,7 @@ dependencies = [
  "subc-config",
  "subc-control",
  "subc-os",
- "subc-protocol 0.37.1",
+ "subc-protocol 0.37.11",
  "subc-transport",
  "tokio",
  "tokio-util",
@@ -3230,9 +3231,9 @@ dependencies = [
 
 [[package]]
 name = "subc-config"
-version = "0.1.0"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "701a3c1b6e06ed0fcec46bb155b09ed194c9d4871aefade0447eb67eebd6c324"
+checksum = "98ffa2a100c56e5fd8e9cb5feb47f9e0f9c2ad05e3a50f56721cd4ec0985010e"
 dependencies = [
  "regex",
  "ryu",
@@ -3243,24 +3244,25 @@ dependencies = [
 
 [[package]]
 name = "subc-control"
-version = "0.40.2"
+version = "0.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abdac42a79a76838ff75fa7c2000c1117875c40d4bcf135f64bcf1d8d6a90194"
+checksum = "56843066ad357ecd24c85f960aa2bf525345c6ad924d3f57ed186c0dde9e4ee6"
 dependencies = [
  "serde",
  "serde_json",
  "subc-config",
- "subc-protocol 0.37.1",
+ "subc-protocol 0.37.11",
 ]
 
 [[package]]
 name = "subc-os"
-version = "0.1.39"
+version = "0.1.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47304270d356c5c1edf9fc778aa8a8666aeabd2a64104d5c59a8a471ec723e9c"
+checksum = "256bf8fb8c9b14c2eba092a53cd8b6dc0ae7b771802113c2fd731590c6fc4f14"
 dependencies = [
  "libc",
  "rustix",
+ "socket2",
  "tokio",
  "windows-sys 0.61.2",
  "zeroize",
@@ -3295,9 +3297,9 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.37.1"
+version = "0.37.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "107cd64a47aeedb9d01758f2b8a6ed669e649c124ac0c2d3b912fec29715d8ce"
+checksum = "5c96714021b69db8397317ce3413702b0dad75128d6e5a264ba2411d5a9522a4"
 dependencies = [
  "base64",
  "serde",
@@ -3318,7 +3320,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "subc-os",
- "subc-protocol 0.37.1",
+ "subc-protocol 0.37.11",
  "subtle",
  "tokio",
 ]
@@ -3369,10 +3371,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3736,7 +3738,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

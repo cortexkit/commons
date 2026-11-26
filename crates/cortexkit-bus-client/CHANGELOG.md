@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.18
 
+- Accept subc-client-rs 0.42, so a module on the 0.42 line (subc-control 0.43) needs only one subc line. 0.40 and
+  0.41 are still accepted.
+- The README's `cortexkit-log` example now compiles as a doctest (dev-dependency on cortexkit-log 0.3.7).
 - Document how to keep bus outage logs and suppress async-nats reconnect logs
   with `cortexkit-log` 0.3.7 or later.
 
