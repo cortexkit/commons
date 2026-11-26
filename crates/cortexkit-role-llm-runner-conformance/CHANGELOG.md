@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.93
+
+- Pin llm-runner `=0.9.10`. The new `tool_outcome_continues_turn` check
+  requires a completed turn after either a provider error or a cut-off reply,
+  with a model-visible result and exactly one dispatch in each run.
+- Adapters eligible for the check must implement `set_scripted_tool_outcome`
+  and record `ModelRequestObservation::tool_results` from the model's actual
+  input. Missing fixture or observation support fails the check.
+
 ## 0.17.92
 
 - Pin llm-runner `=0.9.9` and cover refusal fallback without a provider

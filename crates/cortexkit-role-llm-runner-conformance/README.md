@@ -656,6 +656,25 @@ has an intentionally incorrect fixture runner rejected by name. This seam does
 not claim executable coverage of durable-write atomicity, every relaunch path,
 offline rebuild, or compaction capability negotiation.
 
+## Tool outcome fixtures (0.17.93)
+
+The kit pins runner `=0.9.10`. `tool_outcome_continues_turn` uses the existing
+`RunToolCalls`, `Queue` and `TranscriptReads` capability gate. When these apply,
+the adapter must provide both fixtures; missing support fails the named case.
+
+- Implement `set_scripted_tool_outcome(session, arguments, outcome)`. For
+  `ProviderError`, the scripted provider receives the call and answers with an
+  error carrying the supplied message. For `CutOff`, it receives the call and
+  closes the route without replying, leaving the runner and model up. Count the
+  dispatch in `tool_invocations` in both cases.
+- Populate `ModelRequestObservation::tool_results` in `model_requests` from the
+  request actually received by the scripted model. Record the native call ID,
+  error flag, result reason (when present) and model-visible text. Do not infer
+  any of these from the script, transcript or terminal run state.
+
+The kit checks that each outcome reaches the next model request, that the next
+scripted answer completes the run, and that the provider received only one call.
+
 ## Scope and verdicts
 
 The kit tests behavior through public routes and genuinely independent

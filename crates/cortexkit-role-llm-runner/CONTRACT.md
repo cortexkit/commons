@@ -8423,7 +8423,10 @@ above.
   a restart, or a daemon upgrade cut it off and its result couldn't be
   recovered (§14.5); it may or may not have run, and is never re-dispatched
   under that key. `restart_survival` first resolves custody under §14.4 R7; only
-  Pure tools may be tried again under a fresh key there.
+  Pure tools may be tried again under a fresh key there. A call that was sent
+  and whose reply was lost while the runner kept running also gets this result
+  (§14.6), for example when its route closes or its provider goes silent past
+  the keepalive bound.
 - [pinned] `pre_tool_denied`, `pre_tool_unavailable`, `pre_tool_declined`,
   `pre_tool_expired`: the call was denied before it executed. No dispatch
   intent exists.
@@ -9016,9 +9019,50 @@ announcement, and a runner restart, keep §14 property 4 and §14.4 R7.
 - [pinned] A call whose result was already given to the model stays as
   given and is never sent again.
 
+## 14.6 A tool's outcome never ends the run
+
+A tool call can fail, run past its deadline, go silent past the provider's
+keepalive bound, lose its route, or end with an outcome nobody knows. None of
+these is a reason to end the run that asked for it. The model asked for the
+call, so the model gets its result and decides what to do next. One stuck or
+broken tool costs one failed call, never the run's work so far. Added in
+0.9.10.
+
+- [pinned] **The turn continues.** When a dispatched call fails, times out,
+  is cut off or its outcome is unknown, the runner gives the model a result
+  for that call and makes its next model call as for any other result. The
+  run stays active. This holds for every tool, whatever it does.
+- [pinned] **The result says what happened.** A call the provider answered
+  with an error gets that error. A call the runner gave up on gets an error
+  result naming why (its deadline passed, its provider went silent, its route
+  closed). A call that was sent and may have run gets the `outcome_unknown`
+  result (§12.3); its error text says the call may have run, so the model
+  checks before it acts on it again.
+- [pinned] **The runner never repeats the call on its own.** A call closed
+  this way is never dispatched again under its key (§14 property 4). Only the
+  model may ask for it again, which is a new call with a new key. One
+  exception: a call whose frozen catalog entry is `execution_mode: "pure"`
+  (it changes nothing), cut off by a restart of the runner (§14.4 R7), of its
+  provider module, or by a daemon upgrade (§14.5), may be dispatched once more
+  under a fresh key, because running it twice is harmless. If that attempt
+  also fails or is cut off, the model gets its result under this section.
+- [pinned] **What still ends a run.** A run ends only for reasons that are not
+  a tool's outcome: the run's own stop conditions and hard stops (§6), a
+  caller's cancel, an error of the model request itself, the runner or its
+  host stopping under the run (§6.5, §14 property 3), and the end of the
+  run's own scope. When the run's scope ends (its owner ended it, so its
+  routes drained), every call still gets its result (`route_drained` if
+  unsent, `outcome_unknown` if sent), and the run ends `interrupted` at that
+  point instead of calling the model again, because no call could run any
+  more. That is the owner stopping the run, not a tool's outcome. A runner never ends
+  a run `interrupted` or `error` because a call failed or its outcome is
+  unknown while the runner keeps running.
+- [pinned] §14.5's rule that unrecoverable calls continue the turn is this
+  rule applied to a daemon upgrade.
+
 ## 15. Conformance suite
 
-`cortexkit-role-llm-runner-conformance` 0.17.22 pins this 0.8.18 contract.
+`cortexkit-role-llm-runner-conformance` 0.17.93 pins this 0.9.10 contract.
 The opt-in `restart_survival_*` cases run crash and orderly experiments when
 an adapter declares `host_survives_restart: true`; otherwise they are not
 applicable, and the existing crash cases remain unchanged.

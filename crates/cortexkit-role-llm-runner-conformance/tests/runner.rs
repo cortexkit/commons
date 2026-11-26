@@ -4929,6 +4929,32 @@ async fn a_runner_listing_tool_calls_passes_and_reversed_order_fails_by_name() {
 }
 
 #[tokio::test]
+async fn tool_outcome_continues_turn_rejects_interrupted_runs_by_name() {
+    let name = "tool_outcome_continues_turn";
+    let report = run(&declaring(Capability::RunToolCalls, Defects::default())).await;
+    assert_passed(&report, name);
+    let report = run(&declaring(
+        Capability::RunToolCalls,
+        Defects {
+            tool_outcome_interrupts_run: true,
+            ..Defects::default()
+        },
+    ))
+    .await;
+    let reason = failed(&report, name);
+    eprintln!("FAIL {name}: {reason}");
+    assert!(
+        reason.contains("provider error: run ended interrupted"),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("cut-off reply: run ended interrupted"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
 async fn a_runner_honouring_delivery_order_passes_its_cases() {
     only_these_fail(
         Capability::DeliveryOrder,

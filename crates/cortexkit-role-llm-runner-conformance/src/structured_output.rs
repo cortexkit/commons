@@ -1186,12 +1186,16 @@ where
             "the run after the restart did not submit {answer}: {output:?}"
         ));
     }
-    // The frozen request is its tools and schemas; the history it carries
-    // grows from one request to the next, so `rendered` is not compared.
+    // The history can grow between requests while the tools and schemas
+    // stay frozen. Ignore rendered history and tool results in the comparison.
     let seen: Vec<ModelRequestObservation> = requests(subject, &name)
         .await?
         .into_iter()
-        .map(|request| request.with_rendered(Vec::new()))
+        .map(|mut request| {
+            request.rendered.clear();
+            request.tool_results.clear();
+            request
+        })
         .collect();
     match seen.as_slice() {
         [first, .., last] if first == last => offers_submit(first),

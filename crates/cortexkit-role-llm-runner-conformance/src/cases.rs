@@ -284,9 +284,13 @@ where
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
             name if name.starts_with("adopt_") => crate::adopt::run(self, name).await,
             name if name.starts_with("host_start_") => crate::host_start::run(self, name).await,
-            name if name.starts_with("run_tool_calls_") => crate::tool_calls::run(self, name)
-                .await
-                .map(|()| Ending::Passed),
+            name if name.starts_with("run_tool_calls_")
+                || name == "tool_outcome_continues_turn" =>
+            {
+                crate::tool_calls::run(self, name)
+                    .await
+                    .map(|()| Ending::Passed)
+            }
             name if name.starts_with("run_usage_") => crate::run_usage::run(self, name)
                 .await
                 .map(|()| Ending::Passed),

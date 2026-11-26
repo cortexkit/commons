@@ -1,20 +1,22 @@
-//! `run_tool_calls` cases, run only when the subject declares
-//! `run_tool_calls`: a run's tool calls read as a list, without decoding any
-//! message body.
+//! Tool-call listing and continuation cases for subjects that declare
+//! `run_tool_calls`.
 
 use cortexkit_role_llm_runner::{
     capabilities as groups, errors, ops,
     read::ReadMessage,
+    run::RunState,
     tool_calls::{outcomes, RunToolCall, ToolCallsPage, ToolCallsRequest, LIMIT_FIELD},
 };
 use serde_json::{json, Map, Value};
 
 use crate::{
     cases::Case,
-    drive::{call, decode, expect_code, expect_error, expect_field, expect_ok, head, read_all},
+    drive::{
+        call, decode, expect_code, expect_error, expect_field, expect_ok, head, holding, read_all,
+    },
     route::{Reply, RunnerRoute},
     send_helpers::send_and_wait,
-    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
+    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedToolOutcome, ScriptedTurn},
 };
 
 type Check = Result<(), String>;
@@ -33,8 +35,123 @@ where
         "run_tool_calls_indeterminate_until_result" => indeterminate(case, false).await,
         "run_tool_calls_positions_identify_siblings" => positions(case).await,
         "run_tool_calls_result_ordinal_tracks_storage" => indeterminate(case, true).await,
+        "tool_outcome_continues_turn" => outcomes_continue(case).await,
         other => Err(format!("unknown run_tool_calls case {other}")),
     }
+}
+
+async fn outcomes_continue<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let message = case.mint.next("provider-error-message");
+    let failed = outcome_continues(
+        case,
+        "provider-error",
+        ScriptedToolOutcome::ProviderError { message },
+    )
+    .await;
+    let unknown = outcome_continues(case, "cut-off-reply", ScriptedToolOutcome::CutOff).await;
+    let failures: Vec<_> = [("provider error", failed), ("cut-off reply", unknown)]
+        .into_iter()
+        .filter_map(|(label, check)| check.err().map(|error| format!("{label}: {error}")))
+        .collect();
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+async fn outcome_continues<S>(
+    case: &Case<'_, S>,
+    label: &str,
+    outcome: ScriptedToolOutcome,
+) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let tool = case.mint.call(label);
+    let (last, final_text) = case.mint.text("after-tool-outcome");
+    let mut session = case
+        .open(
+            label,
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool.clone())]),
+                    ScriptedTurn::new(vec![last]),
+                ],
+            },
+        )
+        .await?;
+    case.subject
+        .set_scripted_tool_outcome(&session.name, &tool.arguments, outcome.clone())
+        .await
+        .map_err(|error| format!("configuring scripted tool outcome: {error}"))?;
+    let prompt = case.mint.next("tool-outcome-prompt");
+    let run_id = send_and_wait(case, &mut session, None, &prompt, &Map::new()).await?;
+    let last = head(&session.route)
+        .await?
+        .last_run_state
+        .ok_or("head has no last run state")?;
+    if last.run_id != run_id || RunState::parse(&last.state) != RunState::Completed {
+        return Err(format!("run ended {}; expected completed", last.state));
+    }
+    let invocations = case.subject.tool_invocations(&tool.arguments).await;
+    if invocations != 1 {
+        return Err(format!(
+            "scripted tool dispatched {invocations} times; expected once"
+        ));
+    }
+    let requests = case
+        .subject
+        .model_requests(&session.name)
+        .await
+        .map_err(|error| format!("observing model requests: {error}"))?;
+    let [first, next] = requests.as_slice() else {
+        return Err(format!(
+            "model received {} requests; expected two",
+            requests.len()
+        ));
+    };
+    if !first.tool_results.is_empty() {
+        return Err("first model request already carried a tool result".into());
+    }
+    let [result] = next.tool_results.as_slice() else {
+        return Err(format!(
+            "next model request carried {} tool results; expected one",
+            next.tool_results.len()
+        ));
+    };
+    if result.tool_call_id != tool.tool_call_id || !result.is_error {
+        return Err(format!(
+            "next model request did not carry an error result for {}: {result:?}",
+            tool.tool_call_id
+        ));
+    }
+    match outcome {
+        ScriptedToolOutcome::ProviderError { message } if !result.text.contains(&message) => {
+            return Err(format!(
+                "tool result lost the provider's error message: {result:?}"
+            ));
+        }
+        ScriptedToolOutcome::CutOff
+            if result.code.as_deref() != Some(errors::tool_result_reasons::OUTCOME_UNKNOWN)
+                || result.text.trim().is_empty() =>
+        {
+            return Err(format!(
+                "expected an outcome_unknown error with model-visible text: {result:?}"
+            ));
+        }
+        _ => {}
+    }
+    let (_, messages) = read_all(&session.route).await?;
+    if holding(&messages, &final_text) != 1 {
+        return Err("completed run did not store the final scripted answer exactly once".into());
+    }
+    Ok(())
 }
 
 async fn raw<R: RunnerRoute>(route: &R, params: Value) -> Result<Reply, String> {

@@ -714,6 +714,8 @@ pub const CASES: &[CaseSpec] = &[
         "run.tool_calls, followed one call a page through next, lists a run's three calls in dispatch order with their names, ids, exact args, succeeded outcome, dispatch module, stored result size and carrying ordinal"),
     case("run_tool_calls_unknown_run_refused", TOOL_CALLS,
         "an unknown run_id is refused unknown_run; a run without calls lists none; a misspelled cursor and limit 0 are refused invalid_params by name"),
+    case("tool_outcome_continues_turn", TOOL_CALLS,
+        "a provider error and a reply lost after dispatch each reach the next model request as an error result for the original call; both runs complete without redispatch"),
     case("run_tool_calls_indeterminate_until_result", &[Capability::RunToolCalls, Queue, TranscriptReads, HoldToolCalls],
         "a held call lists as indeterminate with no stored result, then as succeeded with one once released"),
     case("run_usage_counts_reported_steps", USAGE,

@@ -116,10 +116,11 @@ pub use routed_accounts::RecordingRoutingPeer;
 pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
     ArchivePruningPart, AttributionFixture, Capability, LiveIdsObservation, LlmRunnerSubject,
-    ModelRequestObservation, PlanNotesFixture, PlanSenderIdentity, RawModelRequestObservation,
-    RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall,
-    ScriptedTurn, ScriptedUsage, SystemTextDefaultObservation, ToolResultLimitObservation,
-    ToolResultObservation, UserCommandFixture, UserCommandObservation,
+    ModelRequestObservation, ModelToolResultObservation, PlanNotesFixture, PlanSenderIdentity,
+    RawModelRequestObservation, RefreshPlan, RefreshVariant, Script, ScriptedLateEntry,
+    ScriptedPart, ScriptedToolCall, ScriptedToolOutcome, ScriptedTurn, ScriptedUsage,
+    SystemTextDefaultObservation, ToolResultLimitObservation, ToolResultObservation,
+    UserCommandFixture, UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

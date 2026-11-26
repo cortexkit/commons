@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.10
+
+- A failed, timed-out, cut-off or unknown tool outcome gives the model a
+  result and the turn continues (§14.6). The runner neither ends the run
+  because of that outcome nor dispatches the call again under its key. A Pure
+  call cut off by a restart or daemon upgrade can be retried once under a
+  fresh key.
+- Rollout: runners adopt this rule on their own schedule. No reader or wire
+  changes.
+
 ## 0.9.9
 
 - A refusal fallback may omit `category` on a step event (§14.3) and its read

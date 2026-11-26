@@ -58,8 +58,9 @@ use cortexkit_role_llm_runner_conformance::{
         subscribe::{SubscribeFrom, SubscribeRequest},
         PROVIDES,
     },
-    Capability, LlmRunnerSubject, ModelRequestObservation, PlanSenderIdentity, Reply, RouteFailure,
-    RunnerRoute, Script, ScriptedPart, ScriptedToolCall, SubscribeOutcome, SCRIPTED_TOOL,
+    Capability, LlmRunnerSubject, ModelRequestObservation, ModelToolResultObservation,
+    PlanSenderIdentity, Reply, RouteFailure, RunnerRoute, Script, ScriptedPart, ScriptedToolCall,
+    ScriptedToolOutcome, SubscribeOutcome, SCRIPTED_TOOL,
 };
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
@@ -466,6 +467,8 @@ pub struct Defects {
     pub order_template_part_gone_accepted: bool,
     /// `run.tool_calls` lists a run's calls in reverse dispatch order.
     pub run_tool_calls_reversed: bool,
+    /// A provider error or a lost tool reply ends the run as interrupted.
+    pub tool_outcome_interrupts_run: bool,
     /// A `delivery_order` list without `idle_start` starts a run on an idle
     /// session.
     pub order_starts_runs_without_idle_start: bool,
@@ -795,6 +798,7 @@ struct World {
     held_models: Mutex<BTreeMap<String, String>>,
     staging_holds: Mutex<BTreeSet<String>>,
     invocations: Mutex<BTreeMap<String, usize>>,
+    tool_outcomes: Mutex<BTreeMap<String, ScriptedToolOutcome>>,
     held: Mutex<BTreeSet<String>>,
     released: Mutex<BTreeSet<String>>,
     /// Every `session.read` and `session.head` request received, served or
@@ -888,9 +892,14 @@ impl World {
         mode.is_declared_by(&describe)
     }
 
-    /// The scripted tool provider: count the call, and answer its scripted
-    /// result unless the script holds it.
     fn invoke(&self, arguments: &Value) -> Option<Value> {
+        self.dispatch_tool(arguments)
+            .expect("this scripted call has no provider fault configured")
+    }
+
+    /// Count receipt at the scripted provider before answering, holding or
+    /// cutting off the call.
+    fn dispatch_tool(&self, arguments: &Value) -> Result<Option<Value>, ScriptedToolOutcome> {
         let key = arguments.to_string();
         *self
             .invocations
@@ -898,16 +907,22 @@ impl World {
             .unwrap()
             .entry(key.clone())
             .or_default() += 1;
+        if let Some(outcome) = self.tool_outcomes.lock().unwrap().get(&key) {
+            return Err(outcome.clone());
+        }
         let scripts = self.scripts.lock().unwrap();
-        let call = scripts
+        let Some(call) = scripts
             .values()
             .flat_map(|script| script.tool_calls())
-            .find(|call| &call.arguments == arguments)?;
+            .find(|call| &call.arguments == arguments)
+        else {
+            return Ok(None);
+        };
         if call.hold && !self.released.lock().unwrap().contains(&key) {
             self.held.lock().unwrap().insert(key);
-            return None;
+            return Ok(None);
         }
-        Some(call.result.clone())
+        Ok(Some(call.result.clone()))
     }
 
     fn result_of(&self, arguments: &Value) -> Value {
@@ -1208,6 +1223,26 @@ fn rendered_texts(sess: &Sess) -> Vec<String> {
                         .map(str::to_owned)
                 })
                 .collect()
+        })
+        .collect()
+}
+
+fn model_tool_results(sess: &Sess) -> Vec<ModelToolResultObservation> {
+    sess.messages
+        .iter()
+        .filter(|message| message.ordinal >= sess.first_ordinal && message.body["role"] == "tool")
+        .filter_map(|message| {
+            let id = message.body["tool_call_id"].as_str()?;
+            let content = &message.body["content"];
+            let error = &content["error"];
+            Some(ModelToolResultObservation::new(
+                id,
+                !error.is_null(),
+                error["code"].as_str().map(str::to_owned),
+                error["message"]
+                    .as_str()
+                    .map_or_else(|| result_text(content), str::to_owned),
+            ))
         })
         .collect()
 }
@@ -2670,12 +2705,36 @@ impl Module {
                     self.record_held_status(session, run_id, held)?;
                     return Ok(());
                 }
-                match self.world.invoke(&call.arguments) {
-                    Some(content) => self.commit(
+                match self.world.dispatch_tool(&call.arguments) {
+                    Ok(Some(content)) => self.commit(
                         session,
                         json!({ "kind": "result", "call_key": key, "content": content }),
                     )?,
-                    None => return Ok(()),
+                    Ok(None) => return Ok(()),
+                    Err(outcome) => {
+                        let error = match outcome {
+                            ScriptedToolOutcome::ProviderError { message } => {
+                                json!({"message": message})
+                            }
+                            ScriptedToolOutcome::CutOff => json!({
+                                "code": errors::tool_result_reasons::OUTCOME_UNKNOWN,
+                                "message": "The tool route closed before replying; the call may have run."
+                            }),
+                            other => panic!("unexpected scripted tool outcome {other:?}"),
+                        };
+                        self.commit(
+                            session,
+                            json!({"kind":"result", "call_key":key,
+                            "content":{"error":error}}),
+                        )?;
+                        if self.world.defects.tool_outcome_interrupts_run {
+                            return self.commit(
+                                session,
+                                json!({"kind":"terminal", "run_id":run_id,
+                                "state":"interrupted"}),
+                            );
+                        }
+                    }
                 }
                 continue;
             }
@@ -2814,6 +2873,7 @@ impl Module {
                 };
                 let mut observation =
                     observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
+                observation.tool_results = model_tool_results(&sess);
                 notices::observe(&mut observation, &sess, &self.world);
                 session_change::observe_notes(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
@@ -6842,6 +6902,7 @@ impl FakeSubject {
                     held_models: Mutex::new(BTreeMap::new()),
                     staging_holds: Mutex::new(BTreeSet::new()),
                     invocations: Mutex::new(BTreeMap::new()),
+                    tool_outcomes: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),
                     transcript_calls: AtomicUsize::new(0),
@@ -8208,6 +8269,20 @@ impl LlmRunnerSubject for FakeSubject {
             .get(&arguments.to_string())
             .copied()
             .unwrap_or(0)
+    }
+
+    async fn set_scripted_tool_outcome(
+        &self,
+        _session: &str,
+        arguments: &Value,
+        outcome: ScriptedToolOutcome,
+    ) -> Result<(), HarnessError> {
+        self.world()
+            .tool_outcomes
+            .lock()
+            .unwrap()
+            .insert(arguments.to_string(), outcome);
+        Ok(())
     }
 
     async fn dispatched_schema_pin(

@@ -495,6 +495,34 @@ impl ToolResultObservation {
     }
 }
 
+/// One tool result as received by the scripted model, in its native input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModelToolResultObservation {
+    pub tool_call_id: String,
+    pub is_error: bool,
+    /// The reason carried by the result, if present.
+    pub code: Option<String>,
+    /// The model-visible text of the result.
+    pub text: String,
+}
+
+impl ModelToolResultObservation {
+    pub fn new(
+        tool_call_id: impl Into<String>,
+        is_error: bool,
+        code: Option<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            tool_call_id: tool_call_id.into(),
+            is_error,
+            code,
+            text: text.into(),
+        }
+    }
+}
+
 /// What one model request carried, as the scripted model received it.
 /// Recorded by the runner adapter outside the runner, never reconstructed
 /// from configuration or replies.
@@ -529,6 +557,9 @@ pub struct ModelRequestObservation {
     /// observed at model ingress, not inferred from send modes. Required when
     /// `turn_system_cleared_supported` opts into the cleared-ride cases.
     pub cleared_system_text: Option<Vec<String>>,
+    /// Results in request order with their native model call IDs. Decode them
+    /// at model ingress, not from the script or session transcript.
+    pub tool_results: Vec<ModelToolResultObservation>,
 }
 
 /// A raw request captured by the scripted model, outside the runner's state.
@@ -637,6 +668,16 @@ pub struct ScriptedToolCall {
     /// Hold the call in the tool provider until the case releases it.
     /// Only set when the runner adapter declares [`Capability::HoldToolCalls`].
     pub hold: bool,
+}
+
+/// What the scripted provider does instead of returning a successful result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ScriptedToolOutcome {
+    /// Respond to the dispatched call with a provider error carrying `message`.
+    ProviderError { message: String },
+    /// Close the route after receiving the call without replying to it.
+    CutOff,
 }
 
 /// An entry the scripted provider publishes after its held first reply.
@@ -1640,6 +1681,8 @@ pub trait LlmRunnerSubject: Harness {
     /// [`Capability::NoTools`], [`Capability::MaxOutputTokens`],
     /// [`Capability::Temperature`] and
     /// [`Capability::RenderedModelInput`].
+    /// Also required, with `tool_results` populated, for
+    /// `tool_outcome_continues_turn`.
     async fn model_requests(
         &self,
         _session: &str,
@@ -2432,6 +2475,21 @@ pub trait LlmRunnerSubject: Harness {
     /// reset by every kill, and the at-most-once crash checks would then pass
     /// whatever the runner does.
     async fn tool_invocations(&self, arguments: &Value) -> usize;
+
+    /// Before the first send, configure the scripted provider outcome for the
+    /// call in `session` with these `arguments`. Count the dispatch normally
+    /// even if the provider closes the route without replying. Required for
+    /// `tool_outcome_continues_turn`.
+    async fn set_scripted_tool_outcome(
+        &self,
+        _session: &str,
+        _arguments: &Value,
+        _outcome: ScriptedToolOutcome,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "scripted tool outcomes are not implemented",
+        ))
+    }
 
     /// Decode a not-executed result for this model call id from a real
     /// `session.read` message body. Override only to locate the native call id
