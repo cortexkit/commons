@@ -186,6 +186,8 @@ pub enum Capability {
     StepEvents,
     /// Sign-in methods whose accounts the runner admits through routing.
     RoutedAccounts,
+    /// On-request lists of the providers and models the runner can drive.
+    Serves,
     /// Routing's provider and model names for runner-owned account admission.
     AccountRoute,
     /// Runner-held admissions and runner-sent blocking account observations.
@@ -292,6 +294,7 @@ impl Capability {
         Self::RunCause,
         Self::StepEvents,
         Self::RoutedAccounts,
+        Self::Serves,
         Self::AccountRoute,
         Self::AdmissionReports,
         Self::ForkAnswer,
@@ -381,6 +384,7 @@ impl Capability {
             Self::RunCause => groups::RUN_CAUSE,
             Self::StepEvents => groups::STEP_EVENTS,
             Self::RoutedAccounts => groups::ROUTED_ACCOUNTS,
+            Self::Serves => groups::SERVES,
             Self::AccountRoute => groups::ACCOUNT_ROUTE,
             Self::AdmissionReports => groups::ADMISSION_REPORTS,
             Self::ForkAnswer => groups::FORK_ANSWER,
@@ -1064,6 +1068,14 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "routing_runner_declaration is not implemented",
         ))
+    }
+
+    /// Read the harness ids from the routing manifest of the runner under
+    /// test. Return an empty list when it declares none, or `None` when the
+    /// adapter cannot supply the manifest facts. The ids must describe the
+    /// same runner as the management route, not be inferred from its list.
+    fn serves_harnesses(&self) -> Option<Vec<String>> {
+        None
     }
 
     /// Public ids `{provider, account_id, credential_id}` for the listed

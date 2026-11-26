@@ -78,7 +78,7 @@ pub mod wire;
 pub use declarations::{
     parse_consumer_declarations, parse_consumer_declarations_serving, ConsumerDeclaration,
     ConsumerDeclarations, DeclarationError, DemandDefaults, HarnessLimits, HarnessLimitsError,
-    RunnerDeclaration, RunnerPair, StandingLimits,
+    RunnerDeclaration,
 };
 pub use engine_declarations::{
     parse_engine_declarations, EngineDeclarationError, EngineDeclarations,
@@ -156,7 +156,7 @@ pub mod capabilities {
     pub const CONSUMER_DECLARATIONS: &str = "consumer_declarations";
     /// Consumer scheduling priority, independent of demand defaults.
     pub const CONSUMER_PRIORITY: &str = "consumer_priority";
-    /// Per-harness session starts, capabilities and route exclusions.
+    /// Per-harness session starts and capabilities.
     pub const RUNNER_HARNESS_FACTS: &str = "runner_harness_facts";
     /// Decisions bind the chosen runner module and harness.
     pub const DECISION_HARNESS: &str = "decision_harness";

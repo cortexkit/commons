@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.6
+
+- Pin classifier `=0.6.6`. The suite checks the same wire contract.
+
 ## 0.8.5
 
 - Accept subc-protocol 0.37.

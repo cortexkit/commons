@@ -207,6 +207,11 @@ where
             "role_describe_shape" => passed(self.role_describe_shape().await),
             "role_describe_cacheable" => passed(self.role_describe_cacheable().await),
             "role_describe_groups_complete" => passed(self.role_describe_groups_complete().await),
+            "role_describe_serves_opt_in" => passed(self.role_describe_serves_opt_in().await),
+            "role_describe_serves_list" | "role_describe_serves_generation" => {
+                self.role_describe_serves(name == "role_describe_serves_generation")
+                    .await
+            }
             "extra_op_still_admitted" => passed(self.extra_op_still_admitted().await),
             "describe_states_max_bytes" => passed(self.describe_states_max_bytes().await),
             "baseline_owner_only" => passed(self.baseline_owner_only().await),
@@ -647,6 +652,66 @@ where
             ));
         }
         Ok(())
+    }
+
+    async fn role_describe_serves_opt_in(&self) -> Check {
+        let session = self.open("describe", Script::default()).await?;
+        for params in [
+            json!({}),
+            json!({"serves": false}),
+            json!({"serves": "true"}),
+        ] {
+            let raw = expect_ok(
+                "role.describe",
+                call(&session.route, ops::ROLE_DESCRIBE, params.clone()).await?,
+            )?;
+            if raw.get("serves").is_some() {
+                return Err(format!(
+                    "role.describe sent serves without an opt-in: {params}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    async fn role_describe_serves(&self, compare: bool) -> Result<Ending, String> {
+        let Some(harnesses) = self.subject.serves_harnesses() else {
+            return Ok(Ending::Inapplicable(
+                "serves_harnesses is unsupported".into(),
+            ));
+        };
+        let declared = (!harnesses.is_empty()).then_some(harnesses.as_slice());
+        let session = self.open("describe", Script::default()).await?;
+        let read = async || {
+            let raw = expect_ok(
+                "role.describe",
+                call(
+                    &session.route,
+                    ops::ROLE_DESCRIBE,
+                    ops::role_describe_serves_params(),
+                )
+                .await?,
+            )?;
+            let list = raw
+                .get("serves")
+                .ok_or("role.describe omitted requested serves")?;
+            let serves = cortexkit_role_llm_runner::serves::decode_serves(list, declared)
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((serves.generation, list.clone()))
+        };
+        let (generation, first) = read().await?;
+        if compare {
+            let (next_generation, next) = read().await?;
+            if generation == next_generation
+                && (first.get("harnesses") != next.get("harnesses")
+                    || first.get("entries") != next.get("entries"))
+            {
+                return Err(format!(
+                    "role.describe changed serves lists without changing generation {generation:?}"
+                ));
+            }
+        }
+        Ok(Ending::Passed)
     }
 
     async fn role_describe_groups_complete(&self) -> Check {

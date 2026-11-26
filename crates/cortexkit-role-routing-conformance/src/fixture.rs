@@ -304,9 +304,7 @@ pub fn continue_catalog() -> Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cortexkit_role_routing::declarations::{
-        ConsumerDeclarations, RunnerDeclaration, RunnerPair,
-    };
+    use cortexkit_role_routing::declarations::{ConsumerDeclarations, RunnerDeclaration};
 
     #[test]
     fn ordinary_account_serves_defaults_to_its_provider() {
@@ -330,10 +328,7 @@ mod tests {
             for runner in &catalog.runners {
                 for provider in &runner.tool_providers {
                     for tag in &provider.capabilities {
-                        let mut declaration = RunnerDeclaration::new(vec![RunnerPair::new(
-                            crate::wire::spellings::WIRE_APIS[0],
-                            crate::wire::spellings::AUTH_METHODS[1],
-                        )]);
+                        let mut declaration = RunnerDeclaration::new();
                         declaration.tool_capabilities = vec![tag.clone()];
                         let result = ConsumerDeclarations::new()
                             .with_runner(declaration)

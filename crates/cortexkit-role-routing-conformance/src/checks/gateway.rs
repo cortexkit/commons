@@ -1,5 +1,4 @@
 use super::*;
-use crate::RunnerRouteFacts;
 
 impl<S: RoutingSubject> Suite<'_, S> {
     pub(super) async fn gateway_check(&self, name: &str) -> Result<Ending, String> {
@@ -10,32 +9,13 @@ impl<S: RoutingSubject> Suite<'_, S> {
         let model = &catalog.models[0];
         let key = format!("anthropic-gw-example/{}", model.model);
         catalog.runners.truncate(1);
-        catalog.runners[0].route_keys = vec![key.clone()];
+        catalog.runners[0].route_keys.clear();
+        catalog.runners[0].harnesses = Some(vec![fixture::HARNESS.into()]);
         catalog.accounts.truncate(1);
         catalog.accounts[0].provider = "anthropic-gw-example".into();
         catalog.accounts[0].serves = vec![model.provider.clone()];
         catalog.accounts[0].method = "gateway".into();
         self.subject.configure_catalog(&catalog).await?;
-        if !self
-            .subject
-            .configure_runner_route_facts(&[RunnerRouteFacts::new(
-                &key,
-                "anthropic.messages",
-                "gateway",
-            )])
-            .await?
-        {
-            return Ok(Ending::NotApplicable(
-                "configure_runner_route_facts is unsupported".into(),
-            ));
-        }
-        // The gateway credential owns its endpoint, so a catalog endpoint is
-        // unnecessary for this pair's default requires_wire_api=false.
-        if !self.subject.configure_route_wire_api(&key, None).await? {
-            return Ok(Ending::NotApplicable(
-                "configure_route_wire_api is unsupported".into(),
-            ));
-        }
         self.subject
             .configure_catalog_declarations(&[CatalogModule {
                 principal: fixture::RUNNER_ONE.into(),
@@ -43,14 +23,25 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 role_declarations: [(
                     crate::wire::ROLE_DECLARATIONS_KEY.into(),
                     json!({"runner": {
-                        "pairs": [{"wire_api": "anthropic.messages", "auth_method": "gateway"}],
+                        "harnesses": [fixture::HARNESS],
                         "follows_account_choice": true
                     }}),
                 )]
                 .into(),
             }])
             .await?;
-
+        let snapshot = json!({"generation": "one", "harnesses": {(fixture::HARNESS): [
+            {"provider": catalog.accounts[0].provider, "models": "all"}
+        ]}});
+        if !self
+            .subject
+            .configure_runner_serves(fixture::RUNNER_ONE, &snapshot)
+            .await?
+        {
+            return Ok(Ending::NotApplicable(
+                "configure_runner_serves is unsupported".into(),
+            ));
+        }
         let consumer = self.route_as(CONSUMER).await?;
         let selected = select(&consumer, &base(), name).await?;
         if selected.route.route_key() != key || selected.runner.module != fixture::RUNNER_ONE {
@@ -84,192 +75,24 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 admitted.account
             ));
         }
-        Ok(Ending::Passed)
-    }
-
-    pub(super) async fn gateway_explicit_providers_check(
-        &self,
-        name: &str,
-    ) -> Result<Ending, String> {
-        let mut catalog = fixture::catalog();
-        catalog.models.truncate(2);
-        catalog.models[0].provider = "anthropic".into();
-        catalog.models[0].model = "claude-opus-5-5".into();
-        catalog.models[1].provider = "openai".into();
-        catalog.models[1].model = "model-example".into();
-        let keys = [
-            "anthropic-gw-x/claude-opus-5-5",
-            "openai-gw-y/model-example",
-            "acme-llm/claude-opus-5-5",
-        ];
-        let unserved_key = "acme-llm/model-example";
-        catalog.runners.truncate(1);
-        catalog.runners[0].route_keys = keys
-            .iter()
-            .copied()
-            .chain([unserved_key])
-            .map(str::to_owned)
-            .collect();
-        let template = catalog.accounts[0].clone();
-        catalog.accounts = [
-            ("anthropic-gw-x", "anthropic"),
-            ("openai-gw-y", "openai"),
-            ("acme-llm", "anthropic"),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, (provider, served))| {
-            let mut account = template.clone();
-            account.provider = provider.into();
-            account.serves = vec![served.into()];
-            account.account_id = format!("gateway-account-{index}");
-            account.credential_id = format!("gateway-credential-{index}");
-            account.method = "gateway".into();
-            account
-        })
-        .collect();
-        // A native subscription is tempting but must not enter a gateway pool.
-        let mut native_account = template;
-        native_account.provider = "anthropic".into();
-        native_account.serves = vec!["anthropic".into()];
-        catalog.accounts.push(native_account);
-
-        for per_harness in [false, true] {
-            for (providers, admitted_routes, acme_serves) in [
-                (json!(["anthropic"]), [true, false, true], vec!["anthropic"]),
-                (
-                    json!(["anthropic", "anthropic-gw-x", "openai-gw-y", "acme-llm"]),
-                    [true, false, true],
-                    vec!["anthropic"],
-                ),
-                (
-                    json!(["anthropic-gw-x", "openai-gw-y", "acme-llm"]),
-                    [false, false, false],
-                    vec!["anthropic"],
-                ),
-                // Both rows must be runnable when their served providers are
-                // allowed, so an unavailable OpenAI route cannot pass a refusal.
-                (
-                    json!(["anthropic", "openai"]),
-                    [true, true, true],
-                    vec!["anthropic"],
-                ),
-                (json!(["anthropic", "openai"]), [true, true, false], vec![]),
-                (
-                    json!(["anthropic", "openai"]),
-                    [true, true, false],
-                    vec!["anthropic", "openai"],
-                ),
-            ] {
-                catalog.accounts[2].serves = acme_serves
-                    .iter()
-                    .map(|provider| (*provider).into())
-                    .collect();
-                // Rebuild the same routes so decisions cannot preserve an
-                // admission from a previous allow-list or harness variant.
-                self.fresh().await?;
-                self.subject.configure_catalog(&catalog).await?;
-                if !self
-                    .subject
-                    .configure_runner_route_facts(&[
-                        RunnerRouteFacts::new(keys[0], "anthropic.messages", "gateway"),
-                        RunnerRouteFacts::new(keys[1], "openai.responses", "gateway"),
-                        RunnerRouteFacts::new(keys[2], "anthropic.messages", "gateway"),
-                        RunnerRouteFacts::new(unserved_key, "openai.responses", "gateway"),
-                    ])
-                    .await?
-                {
-                    return Ok(Ending::NotApplicable(
-                        "configure_runner_route_facts is unsupported".into(),
-                    ));
-                }
-                let mut declaration = json!({
-                    "pairs": [
-                        {"wire_api": "anthropic.messages", "auth_method": "gateway"},
-                        {"wire_api": "openai.responses", "auth_method": "gateway"}
-                    ],
-                    "follows_account_choice": true,
-                    "harnesses": ["alpha", "beta"],
-                    "default_harness": "alpha"
-                });
-                if per_harness {
-                    declaration["harness_limits"] = json!({"alpha": {
-                        "explicit_providers": providers
-                    }});
-                } else {
-                    declaration["standing_limits"] = json!({"explicit_providers": providers});
-                }
-                self.subject
-                    .configure_catalog_declarations(&[CatalogModule {
-                        principal: fixture::RUNNER_ONE.into(),
-                        nonce_verified: true,
-                        role_declarations: [(
-                            crate::wire::ROLE_DECLARATIONS_KEY.into(),
-                            json!({"runner": declaration}),
-                        )]
-                        .into(),
-                    }])
-                    .await?;
-
-                let consumer = self.route_as(CONSUMER).await?;
-                let context = format!("{name}: per_harness={per_harness}, providers={providers}, acme serves={acme_serves:?}");
-                for (index, admitted_route) in admitted_routes.into_iter().enumerate() {
-                    let request = with(base(), "pin", json!(keys[index]));
-                    if !admitted_route {
-                        refused(
-                            &consumer,
-                            ops::ROUTE_SELECT,
-                            &request,
-                            RefusalCode::PinUnavailable,
-                            &context,
-                        )
-                        .await?;
-                        continue;
-                    }
-                    let selected = select(&consumer, &request, &context).await?;
-                    if selected.route.route_key() != keys[index]
-                        || selected.runner.module != fixture::RUNNER_ONE
-                    {
-                        return Err(format!(
-                            "{context}: expected served route {}, got {selected:?}",
-                            keys[index]
-                        ));
-                    }
-                    let runner = self.route_as(&selected.runner.module).await?;
-                    let admitted: AccountForAnswer = answer(
-                        &runner,
-                        ops::ROUTE_ACCOUNT_FOR,
-                        &json!({
-                            "provider": selected.route.provider,
-                            "model": selected.route.model,
-                            "conversation_key": format!("gateway-limit-conversation-{index}"),
-                            "admission_id": format!("gateway-limit-admission-{index}"),
-                            "decision_id": selected.decision_id
-                        }),
-                        &context,
-                    )
-                    .await?;
-                    let expected = &catalog.accounts[index];
-                    if admitted.account.provider != expected.provider
-                        || admitted.account.account_id != expected.account_id
-                        || admitted.account.credential_id != expected.credential_id
-                        || admitted.account.method != "gateway"
-                    {
-                        return Err(format!(
-                            "{context}: expected gateway credential {expected:?}, got {:?}",
-                            admitted.account
-                        ));
-                    }
-                }
-                refused(
-                    &consumer,
-                    ops::ROUTE_SELECT,
-                    &with(base(), "pin", json!(unserved_key)),
-                    RefusalCode::PinUnavailable,
-                    &context,
-                )
-                .await?;
-            }
+        // The same gateway id no longer has catalog rows if its credential
+        // names no provider or names more than one.
+        let request = with(base(), "pin", json!(key));
+        for serves in [
+            vec![],
+            vec![model.provider.clone(), "unrelated-provider".into()],
+        ] {
+            let mut unresolved = catalog.clone();
+            unresolved.accounts[0].serves = serves;
+            self.subject.configure_catalog(&unresolved).await?;
+            refused(
+                &consumer,
+                ops::ROUTE_SELECT,
+                &request,
+                RefusalCode::PinUnavailable,
+                "a gateway with no unique catalog provider gets no route",
+            )
+            .await?;
         }
         Ok(Ending::Passed)
     }
@@ -281,81 +104,7 @@ mod tests {
     use crate::checks::select_engine::fake::{Defects, FakeSubject};
 
     #[tokio::test]
-    async fn gateway_explicit_providers_compare_served_provider() {
-        for subject in [
-            FakeSubject::new(Defects::default()),
-            FakeSubject::without_extensions(Defects::default()),
-            FakeSubject::with_placement(Defects::default()),
-        ] {
-            assert_eq!(
-                Suite::new(&subject)
-                    .run("runner_gateway_explicit_providers")
-                    .await,
-                Ok(Ending::Passed)
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn gateway_explicit_providers_faulty_routers_are_rejected_by_check_name() {
-        let name = "runner_gateway_explicit_providers";
-        let spec = crate::CHECKS.iter().find(|spec| spec.name == name).unwrap();
-        for fault in [
-            name,
-            "gateway_explicit_providers_harness",
-            "gateway_explicit_providers_alias",
-            "gateway_explicit_providers_spelling",
-            "gateway_serves_ambiguous",
-        ] {
-            let subject = FakeSubject::new(Defects {
-                extension: Some(fault),
-                ..Defects::default()
-            });
-            let report = crate::runner::run_check(&Suite::new(&subject), spec).await;
-            assert_eq!(report.check, name);
-            assert!(
-                matches!(report.outcome, crate::CheckOutcome::Failed { .. }),
-                "{fault}: {report:?}"
-            );
-            if fault == "gateway_explicit_providers_harness" {
-                assert!(
-                    matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
-                    if reason.contains("per_harness=true")),
-                    "{report:?}"
-                );
-            }
-            if fault == "gateway_explicit_providers_spelling" {
-                assert!(
-                    matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
-                    if reason.contains("acme-llm/claude-opus-5-5")),
-                    "{report:?}"
-                );
-            }
-            if fault == "gateway_serves_ambiguous" {
-                assert!(
-                    matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
-                    if reason.contains("acme serves=[\"anthropic\", \"openai\"]")),
-                    "{report:?}"
-                );
-            }
-            println!("{fault}: {report:?}");
-        }
-    }
-
-    #[tokio::test]
-    async fn gateway_explicit_providers_missing_facts_are_skipped_not_passed() {
-        let subject = FakeSubject::new(Defects {
-            runner_route_facts_unsupported: true,
-            ..Defects::default()
-        });
-        assert!(
-            matches!(Suite::new(&subject).run("runner_gateway_explicit_providers").await,
-            Ok(Ending::NotApplicable(reason)) if reason.contains("configure_runner_route_facts"))
-        );
-    }
-
-    #[tokio::test]
-    async fn gateway_pair_selects_and_admits_its_credential() {
+    async fn gateway_serves_selects_and_admits_its_credential() {
         for subject in [
             FakeSubject::new(Defects::default()),
             FakeSubject::without_extensions(Defects::default()),
@@ -371,7 +120,11 @@ mod tests {
     async fn gateway_faulty_routers_are_rejected_by_check_name() {
         let name = "runner_gateway_credential";
         let spec = crate::CHECKS.iter().find(|spec| spec.name == name).unwrap();
-        for fault in [name, "gateway_wrong_account_method"] {
+        for fault in [
+            name,
+            "gateway_wrong_account_method",
+            "gateway_serves_ambiguous",
+        ] {
             let subject = FakeSubject::new(Defects {
                 extension: Some(fault),
                 ..Defects::default()
@@ -386,28 +139,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_missing_hooks_are_skipped_not_passed() {
-        for (defects, hook) in [
-            (
-                Defects {
-                    runner_route_facts_unsupported: true,
-                    ..Defects::default()
-                },
-                "configure_runner_route_facts",
-            ),
-            (
-                Defects {
-                    route_wire_api_unsupported: true,
-                    ..Defects::default()
-                },
-                "configure_route_wire_api",
-            ),
-        ] {
-            let subject = FakeSubject::new(defects);
-            assert!(
-                matches!(Suite::new(&subject).run("runner_gateway_credential").await,
-                Ok(Ending::NotApplicable(reason)) if reason.contains(hook))
-            );
-        }
+    async fn gateway_missing_serves_hook_is_skipped_not_passed() {
+        let subject = FakeSubject::new(Defects {
+            runner_serves_unsupported: true,
+            ..Defects::default()
+        });
+        assert!(
+            matches!(Suite::new(&subject).run("runner_gateway_credential").await,
+            Ok(Ending::NotApplicable(reason)) if reason.contains("configure_runner_serves"))
+        );
     }
 }

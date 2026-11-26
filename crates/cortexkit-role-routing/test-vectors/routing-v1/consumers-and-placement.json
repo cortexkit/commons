@@ -5,7 +5,7 @@
       {"name":"example-consumer.summary","iq":40,"eq":20,"ladder":["example-provider/model-b","example-provider/model-a:fast"],"placement":"caller_runner","selectors":["example-selector"],"kind":"llm"},
       {"name":"example-consumer.search","placement":{"module":"runner-one"},"kind":"search"}
     ],
-    "runner": {"pairs":[{"wire_api":"messages","auth_method":"api_key"}],"harnesses":["alpha","beta"],"default_harness":"alpha","harness_limits":{"alpha":{"starts_sessions":true,"capabilities":["one_off","fork_answer","output_cap"],"exclude":["example-provider/model-old","-example-provider/model-old/allowed"]},"beta":{"starts_sessions":false,"capabilities":[],"exclude":[]}}}
+    "runner": {"harnesses":["alpha","beta"],"default_harness":"alpha","harness_limits":{"alpha":{"starts_sessions":true,"capabilities":["one_off","fork_answer","output_cap"]},"beta":{"starts_sessions":false,"capabilities":[]}}}
   },
   "request": {"consumer":"example-consumer.summary","requirements":{"iq":50},"kind":"llm","eligible_routes":[{"provider":"example-provider","model":"model-a"}]},
   "answers": [

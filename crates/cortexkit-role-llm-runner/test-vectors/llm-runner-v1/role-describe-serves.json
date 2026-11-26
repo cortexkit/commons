@@ -1,0 +1,22 @@
+{
+  "accepted": [
+    {"name": "by_harness", "declared_harnesses": ["alpha", "beta", "pending"], "params": {"serves": true}, "answer": {"majors":[{"version":"llm-runner/v1","ops":["role.describe","session.baseline"],"stability":"alpha"}],"implementation_version":"fixture","capabilities":["serves"],"session_capabilities_from":"baseline","serves":{"generation":"g1","harnesses":{"alpha":[{"provider":"example","models":"all","except":["model/old"]}],"beta":[]}}}},
+    {"name": "without_harnesses", "params": {"serves": true}, "answer": {"majors":[{"version":"llm-runner/v1","ops":["role.describe","session.baseline"],"stability":"alpha"}],"implementation_version":"fixture","capabilities":["serves"],"session_capabilities_from":"baseline","serves":{"generation":"g2","entries":[{"provider":"example-gateway","models":["catalog/model"],"login":"none"}]}}},
+    {"name": "not_requested", "params": {}, "answer": {"majors":[{"version":"llm-runner/v1","ops":["role.describe","session.baseline"],"stability":"alpha"}],"implementation_version":"fixture","capabilities":["serves"],"session_capabilities_from":"baseline"}, "wire": "{\"majors\":[{\"version\":\"llm-runner/v1\",\"ops\":[\"role.describe\",\"session.baseline\"],\"stability\":\"alpha\"}],\"implementation_version\":\"fixture\",\"capabilities\":[\"serves\"],\"session_capabilities_from\":\"baseline\"}"}
+  ],
+  "refused": [
+    {"name":"both", "serves":{"generation":"g","harnesses":{},"entries":[]}, "code":"serves_both", "field":"serves"},
+    {"name":"unknown_harness", "declared_harnesses":["alpha"], "serves":{"generation":"g","harnesses":{"typo":[]}}, "code":"serves_unknown_harness", "field":"serves.harnesses.typo"},
+    {"name":"entries_for_harness_runner", "declared_harnesses":["alpha"], "serves":{"generation":"g","entries":[]}, "code":"serves_wrong_envelope", "field":"serves.entries"},
+    {"name":"map_for_standalone_runner", "serves":{"generation":"g","harnesses":{}}, "code":"serves_wrong_envelope", "field":"serves.harnesses"},
+    {"name":"generation_has_space", "serves":{"generation":"g 1"}, "code":"serves_invalid_generation", "field":"serves.generation"},
+    {"name":"bad_provider", "serves":{"generation":"g","entries":[{"provider":"Not-allowed","models":"all"}]}, "code":"serves_invalid_provider", "field":"serves.entries[0].provider"},
+    {"name":"duplicate_provider", "serves":{"generation":"g","entries":[{"provider":"example","models":"all"},{"provider":"example","models":["model"]}]}, "code":"serves_duplicate_provider", "field":"serves.entries[1].provider"},
+    {"name":"unknown_models_keyword", "serves":{"generation":"g","entries":[{"provider":"example","models":"any"}]}, "code":"serves_invalid_models", "field":"serves.entries[0].models"},
+    {"name":"duplicate_models", "serves":{"generation":"g","entries":[{"provider":"example","models":["model","model"]}]}, "code":"serves_invalid_models", "field":"serves.entries[0].models"},
+    {"name":"empty_except", "declared_harnesses":["alpha"], "serves":{"generation":"g","harnesses":{"alpha":[{"provider":"example","models":"all","except":[]}]}}, "code":"serves_invalid_models", "field":"serves.harnesses.alpha[0].except"},
+    {"name":"except_without_all", "serves":{"generation":"g","entries":[{"provider":"example","models":["model"],"except":["other"]}]}, "code":"serves_except_without_all", "field":"serves.entries[0].except"},
+    {"name":"invalid_login", "serves":{"generation":"g","entries":[{"provider":"example","models":"all","login":"oauth"}]}, "code":"serves_invalid_login", "field":"serves.entries[0].login"},
+    {"name":"too_many_harnesses", "declared_harnesses":["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p"], "serves":{"generation":"g","harnesses":{"a":[],"b":[],"c":[],"d":[],"e":[],"f":[],"g":[],"h":[],"i":[],"j":[],"k":[],"l":[],"m":[],"n":[],"o":[],"p":[],"q":[]}}, "code":"serves_too_large", "field":"serves.harnesses"}
+  ]
+}

@@ -317,18 +317,15 @@ fn runner_declarations() {
                 runner
                     .limits_for_harness(Some("alpha"))
                     .unwrap()
-                    .pairs
-                    .unwrap()
-                    .len(),
-                1
+                    .starts_sessions,
+                Some(false)
             );
             assert_eq!(
                 runner
                     .limits_for_harness(Some("beta"))
                     .unwrap()
-                    .pairs
-                    .as_ref(),
-                Some(&runner.pairs)
+                    .starts_sessions,
+                None
             );
         }
         assert_eq!(
@@ -342,11 +339,6 @@ fn runner_declarations() {
         assert_eq!(parsed, decoded, "{}", name(case));
     }
     for case in cases(&file, "invalid") {
-        let mut runner = case["runner"].as_object().unwrap().clone();
-        runner.insert(
-            "pairs".into(),
-            json!([{"wire_api": "api", "auth_method": "key"}]),
-        );
         let field = case["field"].as_str().unwrap().into();
         let expected = if case["unknown"] == true {
             DeclarationError::UnknownMember { field }
@@ -354,7 +346,7 @@ fn runner_declarations() {
             DeclarationError::InvalidField { field }
         };
         assert_eq!(
-            parse_consumer_declarations(&json!({"runner": runner})),
+            parse_consumer_declarations(&json!({"runner": case["runner"]})),
             Err(expected),
             "{}",
             name(case)

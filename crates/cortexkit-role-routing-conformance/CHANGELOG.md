@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.0
+
+- Pin routing `=0.8.0`. Check placement from runner describe lists, including
+  not-ready and empty harnesses, model exceptions and login-free routes.
+
 ## 0.10.46
 
 - Pin routing `=0.7.41` and check that budget quotes use the unknown output

@@ -14,10 +14,10 @@ mod head_turn;
 mod observe_success;
 mod pin_origin;
 mod placement;
-mod requires_wire_api;
 mod select_engine;
 mod select_media;
 mod select_search;
+mod serves;
 mod warm_credential;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -276,11 +276,8 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         if name == "runner_gateway_credential" {
             return self.gateway_check(name).await;
         }
-        if name == "runner_gateway_explicit_providers" {
-            return self.gateway_explicit_providers_check(name).await;
-        }
-        if name == "runner_requires_wire_api" {
-            return self.requires_wire_api_check(name).await;
+        if name.starts_with("runner_serves_") {
+            return self.serves_check(name).await;
         }
         if matches!(
             name,

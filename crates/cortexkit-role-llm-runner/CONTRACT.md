@@ -212,8 +212,9 @@ alias until the next breaking release.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, routed_accounts?, archive_prunes_reasoning?, step_hooks?, fork_idle_s?}` (`RoleDescribe`), the shape `tool-provider/v1`
-  uses. `version` is spelled as in the manifest, `llm-runner/v1`.
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, routed_accounts?, archive_prunes_reasoning?, step_hooks?, fork_idle_s?, serves?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  uses. `version` is spelled as in the manifest, `llm-runner/v1`. `serves`
+  is sent only on request (§2.1).
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
   for every session.
@@ -221,7 +222,7 @@ alias until the next breaking release.
   `routed_accounts: [<auth_method>]`: the sign-in methods for which the runner
   itself admits, renews and releases accounts through routing (§9.3.3).
   The list has 1–64 distinct entries, each matching
-  `^[a-z][a-z0-9._-]{0,63}$`, using the routing contract §1.2's `auth_method`
+  `^[a-z][a-z0-9._-]{0,63}$`, using the routing contract §1.3's `auth_method`
   spellings. The shape check accepts a token-shaped spelling routing's table
   doesn't name yet, but routing uses no method until its table names it.
   `describe::check_routed_accounts` checks the list without depending on the
@@ -299,12 +300,85 @@ alias until the next breaking release.
   this member; an absent member never implies the new mode. It still requires
   `delivery_order`, not a new capability group.
 - [pinned] The answer describes the runner build, never a session. A consumer
-  may cache it for as long as it talks to the same module incarnation.
+  may cache it until the module restarts (a new process answers on a new
+  route). The one exception is `serves` (§2.1), which describes what the
+  runner can run now and changes while the module runs.
 - [pinned] Stability is data, never part of a capability name. Each major
   carries `stability`, one of `alpha`, `beta` or `stable`, for the major it
   describes; a major that omits it is read as `alpha`. This draft is
   `alpha`. A role becomes stable only when a second, independent
   implementation passes its suite.
+
+### 2.1 `serves`: the providers and models a runner can run
+
+Routing places a model on a runner only when the runner says it can run it.
+The runner works that list out itself, from the model catalog, the vault's
+logins and its hosts. It sends no request formats and no login kinds: the
+format stays between the catalog and the runner.
+
+- [pinned] A runner that serves its list lists the module capability
+  `serves` in `role.describe.capabilities` (`capabilities::SERVES`). A
+  routing provider reads lists only from runners that declare it; a runner
+  without it offers no placeable routes.
+- [pinned] The list is sent only on request. A caller asks with
+  `role.describe` params `{"serves": true}`; any other params, including
+  `{}`, `{"serves": false}` and absent params, get the answer without
+  `serves`, byte for byte as before. A runner that doesn't declare the
+  capability ignores the member. The list can run to tens of kilobytes, and
+  other callers don't need it.
+- [pinned] The answer member is
+  `serves: {generation, harnesses?: {<harness>: [ServesEntry]}, entries?: [ServesEntry]}`
+  (`Serves`). A runner whose routing declaration lists `harnesses` uses
+  `harnesses`, keyed by those harness ids. A runner whose declaration lists
+  none uses `entries`. It never sends both. `check_serves` refuses both
+  members as `serves_both`, and a harness key the runner's declaration
+  doesn't list as `serves_unknown_harness` (the check takes the declared
+  harness list as input). It refuses `entries` from a runner that declares
+  harnesses or `harnesses` from one that declares none as `serves_wrong_envelope`.
+- [pinned] **Not ready versus nothing.** A harness absent from `harnesses`,
+  or an absent `entries`, means the runner's list for it is not ready yet.
+  Routing keeps its last good list for that harness, and places nothing
+  there if it has none. An explicit empty list `[]` means the harness serves
+  nothing. A runner never sends a partial list as if it were complete: it
+  leaves the harness out until its list is whole.
+- [pinned] `generation` is an opaque string of 1–128 printable ASCII
+  characters (`0x21`–`0x7e`). It changes whenever any part of `harnesses` or
+  `entries` changes, and an equal `generation` means identical lists. It
+  doesn't have to increase. A reader may skip work when the `generation` is
+  unchanged.
+- [pinned] A `ServesEntry` is
+  `{provider, models: "all" | [model], except?: [model], login?: "none"}`:
+  - `provider` is the account provider as the vault lists it, such as
+    `anthropic`, `anthropic-platform`, `openai-platform` or a company
+    gateway's id. It matches `^[a-z][a-z0-9._-]{0,63}$` and is unique within
+    its list.
+  - `models` is the string `"all"` or a non-empty list of unique model ids,
+    spelled as the catalog spells them under that provider. A model id is
+    1–256 bytes with no whitespace or control character; it may contain `/`.
+  - `"all"` means every model the catalog has for the provider when the
+    reader resolves the list. For a provider with no catalog rows of its
+    own, such as `anthropic-platform`, `openai-platform` or a company gateway,
+    that is the catalog provider its vault credentials' `serves` names.
+  - `except` is allowed only with `"all"`. It is a non-empty list of unique
+    model ids the runner can't run, with the same grammar.
+  - `login` absent means each model needs a usable vault login for the
+    provider. Its only value is `"none"`: the runner runs these models with
+    no login, and a reader places them without one.
+- [pinned] Bounds: at most 16 harnesses, 1,024 entries per list and 4,096
+  ids in one `models` or `except` list. `check_serves` refuses a violation
+  by field path, such as `serves.harnesses.opencode2[3].except`, with codes
+  `serves_invalid_generation`, `serves_invalid_provider`,
+  `serves_duplicate_provider`, `serves_invalid_models`,
+  `serves_except_without_all`, `serves_invalid_login` and
+  `serves_too_large`. A refused list is not applied in part; the reader
+  keeps its last good list.
+- [pinned] The list states what the runner can run, not what anyone may
+  use. Placement, logins and the operator's settings are the routing
+  contract's (routing §1.2).
+- [informative] A runner usually answers `"all"` with `except` for a
+  provider it runs, because an explicit list for a large catalog runs to
+  thousands of ids. Providers whose request format a runner can't render
+  are left out, not excepted.
 
 ## 3. Capability groups
 

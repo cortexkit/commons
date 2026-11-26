@@ -291,46 +291,6 @@ impl<'de> Deserialize<'de> for ConsumerDeclarations {
     }
 }
 
-/// One open-set wire API and authentication method a runner module can drive.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct RunnerPair {
-    pub wire_api: String,
-    pub auth_method: String,
-    /// Override the runner's endpoint requirement for this wire/auth pair.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requires_wire_api: Option<bool>,
-    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
-    pub unknown: BTreeMap<String, Value>,
-}
-
-impl RunnerPair {
-    pub fn new(wire_api: impl Into<String>, auth_method: impl Into<String>) -> Self {
-        Self {
-            wire_api: wire_api.into(),
-            auth_method: auth_method.into(),
-            requires_wire_api: None,
-            unknown: BTreeMap::new(),
-        }
-    }
-
-    pub fn with_requires_wire_api(mut self, requires_wire_api: bool) -> Self {
-        self.requires_wire_api = Some(requires_wire_api);
-        self
-    }
-}
-
-/// Provider restrictions applied to every credential a runner module may use.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct StandingLimits {
-    /// Absence means no provider limit; a present list must be non-empty.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub explicit_providers: Option<Vec<String>>,
-    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
-    pub unknown: BTreeMap<String, Value>,
-}
-
 /// Optional restrictions for one harness; absent fields inherit runner values.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -339,69 +299,8 @@ pub struct HarnessLimits {
     pub starts_sessions: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Vec<crate::placement::HarnessCapability>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exclude: Option<Vec<String>>,
-    #[serde(
-        default,
-        with = "harness_pairs",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub pairs: Option<Vec<RunnerPair>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub explicit_providers: Option<Vec<String>>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub unknown: BTreeMap<String, Value>,
-}
-
-// Harness pairs share the public pair type but only narrow identities. Keep
-// requirement members as unknown data here, including values that are not bools.
-mod harness_pairs {
-    use super::*;
-
-    #[derive(Serialize, Deserialize)]
-    struct Pair {
-        wire_api: String,
-        auth_method: String,
-        #[serde(flatten)]
-        unknown: BTreeMap<String, Value>,
-    }
-
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Vec<RunnerPair>>, D::Error> {
-        Ok(
-            Option::<Vec<Pair>>::deserialize(deserializer)?.map(|pairs| {
-                pairs
-                    .into_iter()
-                    .map(|pair| RunnerPair {
-                        wire_api: pair.wire_api,
-                        auth_method: pair.auth_method,
-                        requires_wire_api: None,
-                        unknown: pair.unknown,
-                    })
-                    .collect()
-            }),
-        )
-    }
-
-    pub fn serialize<S: serde::Serializer>(
-        pairs: &Option<Vec<RunnerPair>>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        pairs
-            .as_ref()
-            .map(|pairs| {
-                pairs
-                    .iter()
-                    .map(|pair| Pair {
-                        wire_api: pair.wire_api.clone(),
-                        auth_method: pair.auth_method.clone(),
-                        unknown: pair.unknown.clone(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .serialize(serializer)
-    }
 }
 
 impl HarnessLimits {
@@ -416,22 +315,8 @@ impl HarnessLimits {
         self.capabilities = Some(capabilities);
         self
     }
-    pub fn with_exclude(mut self, exclude: Vec<String>) -> Self {
-        self.exclude = Some(exclude);
-        self
-    }
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_pairs(mut self, pairs: Vec<RunnerPair>) -> Self {
-        self.pairs = Some(pairs);
-        self
-    }
-
-    pub fn with_explicit_providers(mut self, providers: Vec<String>) -> Self {
-        self.explicit_providers = Some(providers);
-        self
     }
 }
 
@@ -442,9 +327,6 @@ pub enum HarnessLimitsError {
     InvalidField { field: String },
     MissingHarnesses,
     UnknownHarness { harness: String },
-    EmptyPairs { harness: String },
-    PairOutsideRunner { harness: String, index: usize },
-    ProviderOutsideRunner { harness: String, index: usize },
 }
 
 impl std::fmt::Display for HarnessLimitsError {
@@ -453,30 +335,21 @@ impl std::fmt::Display for HarnessLimitsError {
             Self::InvalidField { field } => write!(f, "invalid declaration field {field}"),
             Self::MissingHarnesses => write!(f, "runner.harness_limits requires runner.harnesses"),
             Self::UnknownHarness { harness } => {
-                write!(f, "runner.harness_limits.{harness} is not in runner.harnesses")
+                write!(
+                    f,
+                    "runner.harness_limits.{harness} is not in runner.harnesses"
+                )
             }
-            Self::EmptyPairs { harness } => {
-                write!(f, "runner.harness_limits.{harness}.pairs is empty")
-            }
-            Self::PairOutsideRunner { harness, index } => write!(
-                f,
-                "runner.harness_limits.{harness}.pairs[{index}] is outside runner.pairs"
-            ),
-            Self::ProviderOutsideRunner { harness, index } => write!(
-                f,
-                "runner.harness_limits.{harness}.explicit_providers[{index}] is outside runner.standing_limits.explicit_providers"
-            ),
         }
     }
 }
 
 impl std::error::Error for HarnessLimitsError {}
 
-/// Matching inputs supplied by a runner module, not a credential or a route.
+/// Catalog-independent session programs and facts supplied by a runner module.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RunnerDeclaration {
-    pub pairs: Vec<RunnerPair>,
     /// When true, the runner calls `route.account_for` and uses its answer.
     #[serde(
         default,
@@ -484,22 +357,13 @@ pub struct RunnerDeclaration {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub follows_account_choice: bool,
-    /// Default endpoint requirement for pairs without their own override.
-    #[serde(
-        default,
-        deserialize_with = "null_default",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    pub requires_wire_api: bool,
     #[serde(
         default,
         deserialize_with = "null_default",
         skip_serializing_if = "Vec::is_empty"
     )]
     pub tool_capabilities: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub standing_limits: Option<StandingLimits>,
-    /// Exact programs this runner hosts sessions in, independently of its pairs.
+    /// Exact programs this runner hosts sessions in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harnesses: Option<Vec<String>>,
     /// Raw restrictions are decoded separately so a typo cannot remove a runner.
@@ -535,11 +399,8 @@ fn is_true(value: &bool) -> bool {
 impl Default for RunnerDeclaration {
     fn default() -> Self {
         Self {
-            pairs: Vec::new(),
             follows_account_choice: false,
-            requires_wire_api: false,
             tool_capabilities: Vec::new(),
-            standing_limits: None,
             harnesses: None,
             harness_limits: None,
             default_harness: None,
@@ -550,48 +411,8 @@ impl Default for RunnerDeclaration {
 }
 
 impl RunnerDeclaration {
-    pub fn new(pairs: Vec<RunnerPair>) -> Self {
-        Self {
-            pairs,
-            ..Self::default()
-        }
-    }
-
-    pub fn with_requires_wire_api(mut self, requires_wire_api: bool) -> Self {
-        self.requires_wire_api = requires_wire_api;
-        self
-    }
-
-    pub fn requires_wire_api(&self) -> bool {
-        self.requires_wire_api
-    }
-
-    /// Read the requirement from the matching runner pair, then the runner.
-    /// Only the supplied pair's wire API and auth method are used, so a
-    /// harness-limit pair cannot change the runner pair's requirement.
-    pub fn requires_wire_api_for_pair(&self, pair: &RunnerPair) -> bool {
-        self.pairs
-            .iter()
-            .find(|declared| {
-                declared.wire_api == pair.wire_api && declared.auth_method == pair.auth_method
-            })
-            .and_then(|declared| declared.requires_wire_api)
-            .unwrap_or(self.requires_wire_api())
-    }
-
-    /// Whether the matching runner pair admits a row's endpoint availability.
-    /// Pair membership and other routing constraints must be checked separately.
-    pub fn admits_pair_row(&self, pair: &RunnerPair, row_serves_wire_api: bool) -> bool {
-        !self.requires_wire_api_for_pair(pair) || row_serves_wire_api
-    }
-
-    /// Whether this runner admits one row's endpoint availability; reads no catalog.
-    ///
-    /// Deprecated for pair matching: this checks only the runner-level default.
-    /// Use [`Self::admits_pair_row`] to honor pair overrides. This helper retains
-    /// its original behavior for callers whose runners have no pair overrides.
-    pub fn admits_row(&self, row_serves_wire_api: bool) -> bool {
-        !self.requires_wire_api() || row_serves_wire_api
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn with_harnesses(mut self, harnesses: Vec<String>) -> Self {
@@ -627,73 +448,28 @@ impl RunnerDeclaration {
                 }
                 let path = format!("runner.harness_limits.{harness}");
                 let fields = value.as_object().ok_or_else(|| invalid(path.clone()))?;
+                if fields
+                    .get("starts_sessions")
+                    .is_some_and(|v| !v.is_null() && !v.is_boolean())
+                {
+                    return Err(invalid(format!("{path}.starts_sessions")));
+                }
+                if fields.get("capabilities").is_some_and(|v| {
+                    !v.is_null()
+                        && !v
+                            .as_array()
+                            .is_some_and(|list| list.iter().all(Value::is_string))
+                }) {
+                    return Err(invalid(format!("{path}.capabilities")));
+                }
                 let limits: HarnessLimits =
                     serde_json::from_value(value.clone()).map_err(|_| invalid(path.clone()))?;
-                if limits.exclude.as_ref().is_some_and(|list| {
-                    list.iter()
-                        .any(|spec| !crate::route_spec::is_route_spec(spec))
-                }) {
-                    return Err(invalid(format!("{path}.exclude")));
-                }
                 if limits
                     .capabilities
                     .as_ref()
                     .is_some_and(|list| list.iter().any(|cap| !is_runner_token(cap.as_str())))
                 {
                     return Err(invalid(format!("{path}.capabilities")));
-                }
-                if let Some(pairs) = &limits.pairs {
-                    if pairs.is_empty() {
-                        return Err(HarnessLimitsError::EmptyPairs {
-                            harness: harness.clone(),
-                        });
-                    }
-                    let mut seen = BTreeSet::new();
-                    for (index, pair) in pairs.iter().enumerate() {
-                        let field = format!("{path}.pairs[{index}]");
-                        if !is_runner_token(&pair.wire_api)
-                            || !is_runner_token(&pair.auth_method)
-                            || !seen.insert((&pair.wire_api, &pair.auth_method))
-                        {
-                            return Err(invalid(field));
-                        }
-                        if !self.pairs.iter().any(|runner_pair| {
-                            runner_pair.wire_api == pair.wire_api
-                                && runner_pair.auth_method == pair.auth_method
-                        }) {
-                            return Err(HarnessLimitsError::PairOutsideRunner {
-                                harness: harness.clone(),
-                                index,
-                            });
-                        }
-                    }
-                }
-                if let Some(value) = fields.get("explicit_providers").filter(|v| !v.is_null()) {
-                    validate_unique_list(
-                        value,
-                        &format!("{path}.explicit_providers"),
-                        true,
-                        is_runner_token,
-                    )
-                    .map_err(|error| match error {
-                        DeclarationError::InvalidField { field } => invalid(field),
-                        _ => invalid(path.clone()),
-                    })?;
-                }
-                if let (Some(providers), Some(runner_providers)) = (
-                    &limits.explicit_providers,
-                    self.standing_limits
-                        .as_ref()
-                        .and_then(|limits| limits.explicit_providers.as_ref()),
-                ) {
-                    for (index, provider) in providers.iter().enumerate() {
-                        if !runner_providers.contains(provider) {
-                            return Err(HarnessLimitsError::ProviderOutsideRunner {
-                                harness: harness.clone(),
-                                index,
-                            });
-                        }
-                    }
                 }
                 result.insert(harness.clone(), limits);
             }
@@ -717,7 +493,6 @@ impl RunnerDeclaration {
                     for (field, present) in [
                         ("starts_sessions", limits.starts_sessions.is_some()),
                         ("capabilities", limits.capabilities.is_some()),
-                        ("exclude", limits.exclude.is_some()),
                     ] {
                         if present {
                             return Err(HarnessLimitsError::InvalidField {
@@ -744,19 +519,6 @@ impl RunnerDeclaration {
                 .and_then(|limits| limits.starts_sessions)
                 .map(|starts| self.starts_sessions && starts),
             capabilities: entry.and_then(|limits| limits.capabilities.clone()),
-            exclude: entry.and_then(|limits| limits.exclude.clone()),
-            pairs: Some(
-                entry
-                    .and_then(|limits| limits.pairs.clone())
-                    .unwrap_or_else(|| self.pairs.clone()),
-            ),
-            explicit_providers: entry
-                .and_then(|limits| limits.explicit_providers.clone())
-                .or_else(|| {
-                    self.standing_limits
-                        .as_ref()
-                        .and_then(|limits| limits.explicit_providers.clone())
-                }),
             ..HarnessLimits::default()
         })
     }
@@ -1011,50 +773,14 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
         value,
         "runner",
         &[
-            "pairs",
             "follows_account_choice",
-            "requires_wire_api",
             "tool_capabilities",
-            "standing_limits",
             "harnesses",
             "harness_limits",
             "default_harness",
             "starts_sessions",
         ],
     )?;
-    let pairs = runner
-        .get("pairs")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid("runner.pairs".into()))?;
-    if pairs.is_empty() || pairs.len() > 64 {
-        return Err(invalid("runner.pairs".into()));
-    }
-    let mut seen = BTreeSet::new();
-    for (index, value) in pairs.iter().enumerate() {
-        let path = format!("runner.pairs[{index}]");
-        let pair = declaration_object(
-            value,
-            &path,
-            &["wire_api", "auth_method", "requires_wire_api"],
-        )?;
-        let token = |name: &str| {
-            pair.get(name)
-                .and_then(Value::as_str)
-                .filter(|value| is_runner_token(value))
-                .ok_or_else(|| invalid(format!("{path}.{name}")))
-        };
-        let wire_api = token("wire_api")?;
-        let auth_method = token("auth_method")?;
-        if pair
-            .get("requires_wire_api")
-            .is_some_and(|value| !value.is_null() && !value.is_boolean())
-        {
-            return Err(invalid(format!("{path}.requires_wire_api")));
-        }
-        if !seen.insert((wire_api, auth_method)) {
-            return Err(invalid(path));
-        }
-    }
     if runner
         .get("starts_sessions")
         .is_some_and(|value| !value.is_null() && !value.is_boolean())
@@ -1089,12 +815,6 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
     {
         return Err(invalid("runner.follows_account_choice".into()));
     }
-    if runner
-        .get("requires_wire_api")
-        .is_some_and(|value| !value.is_null() && !value.is_boolean())
-    {
-        return Err(invalid("runner.requires_wire_api".into()));
-    }
     if let Some(value) = runner
         .get("tool_capabilities")
         .filter(|value| !value.is_null())
@@ -1106,23 +826,6 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
             crate::capability_names::is_capability_name,
         )?;
     }
-    if let Some(value) = runner
-        .get("standing_limits")
-        .filter(|value| !value.is_null())
-    {
-        let limits = declaration_object(value, "runner.standing_limits", &["explicit_providers"])?;
-        if let Some(value) = limits
-            .get("explicit_providers")
-            .filter(|value| !value.is_null())
-        {
-            validate_unique_list(
-                value,
-                "runner.standing_limits.explicit_providers",
-                true,
-                is_runner_token,
-            )?;
-        }
-    }
     Ok(())
 }
 
@@ -1132,9 +835,6 @@ mod tests {
 
     fn harness_runner(limits: Value) -> RunnerDeclaration {
         parse_consumer_declarations(&json!({"runner": {
-            "pairs": [{"wire_api": "example.messages", "auth_method": "oauth"},
-                      {"wire_api": "example.responses", "auth_method": "apikey"}],
-            "standing_limits": {"explicit_providers": ["example", "other"]},
             "harnesses": ["alpha", "beta"],
             "harness_limits": limits
         }}))
@@ -1153,23 +853,15 @@ mod tests {
                 },
             ),
             (
-                json!({"alpha": {"pairs": []}}),
-                HarnessLimitsError::EmptyPairs {
-                    harness: "alpha".into(),
+                json!({"alpha": {"capabilities": ["Not-a-token"]}}),
+                HarnessLimitsError::InvalidField {
+                    field: "runner.harness_limits.alpha.capabilities".into(),
                 },
             ),
             (
-                json!({"alpha": {"pairs": [{"wire_api": "other.api", "auth_method": "oauth"}]}}),
-                HarnessLimitsError::PairOutsideRunner {
-                    harness: "alpha".into(),
-                    index: 0,
-                },
-            ),
-            (
-                json!({"alpha": {"explicit_providers": ["outside"]}}),
-                HarnessLimitsError::ProviderOutsideRunner {
-                    harness: "alpha".into(),
-                    index: 0,
+                json!({"alpha": {"starts_sessions": 1}}),
+                HarnessLimitsError::InvalidField {
+                    field: "runner.harness_limits.alpha.starts_sessions".into(),
                 },
             ),
         ] {
@@ -1198,14 +890,7 @@ mod tests {
             json!(false),
             json!([]),
             json!({"alpha": false}),
-            json!({"alpha": {"pairs": "wrong"}}),
-            json!({"alpha": {"explicit_providers": []}}),
-            json!({"alpha": {"explicit_providers": ["example", "example"]}}),
-            json!({"alpha": {"explicit_providers": ["Bad token"]}}),
-            json!({"alpha": {"pairs": [
-                {"wire_api": "example.messages", "auth_method": "oauth"},
-                {"wire_api": "example.messages", "auth_method": "oauth"}
-            ]}}),
+            json!({"alpha": {"capabilities": [false]}}),
         ] {
             let runner = harness_runner(value.clone());
             assert_eq!(runner.harness_limits, Some(value));
@@ -1223,46 +908,27 @@ mod tests {
     #[test]
     fn harness_limits_inherit_and_only_narrow() {
         let mut runner = harness_runner(json!({"alpha": {
-            "pairs": [{"wire_api": "example.messages", "auth_method": "oauth", "future": true}],
-            "explicit_providers": ["example"]
-        }, "beta": {}}));
-        // Pair matching uses wire API and auth method, not retained unknown data.
+            "starts_sessions": false, "capabilities": ["one_off"]
+        }, "beta": {"starts_sessions": null, "capabilities": null}}));
         let alpha = runner.limits_for_harness(Some("alpha")).unwrap();
-        assert_eq!(alpha.pairs.unwrap().len(), 1);
-        assert_eq!(alpha.explicit_providers.unwrap(), ["example"]);
+        assert_eq!(alpha.starts_sessions, Some(false));
+        assert_eq!(alpha.capabilities.unwrap()[0].as_str(), "one_off");
         for harness in [None, Some("beta"), Some("unlisted")] {
             let inherited = runner.limits_for_harness(harness).unwrap();
-            assert_eq!(inherited.pairs.as_ref(), Some(&runner.pairs));
-            assert_eq!(inherited.explicit_providers.unwrap(), ["example", "other"]);
+            assert_eq!(inherited.starts_sessions, None);
+            assert_eq!(inherited.capabilities, None);
         }
-        runner.harness_limits = Some(json!({"alpha": {"pairs": null, "explicit_providers": null}}));
-        assert_eq!(
-            runner.limits_for_harness(Some("alpha")).unwrap().pairs,
-            Some(runner.pairs.clone())
-        );
-        runner.standing_limits = None;
-        runner.harness_limits = Some(json!({"alpha": {"explicit_providers": ["new-provider"]}}));
+        runner.starts_sessions = false;
+        runner.harness_limits = Some(json!({"alpha": {"starts_sessions": true}}));
         assert_eq!(
             runner
                 .limits_for_harness(Some("alpha"))
                 .unwrap()
-                .explicit_providers
-                .unwrap(),
-            ["new-provider"]
-        );
-        assert_eq!(
-            runner
-                .limits_for_harness(Some("beta"))
-                .unwrap()
-                .explicit_providers,
-            None
+                .starts_sessions,
+            Some(false)
         );
         runner.harness_limits = None;
         assert_eq!(runner.typed_harness_limits(), None);
-        assert_eq!(
-            runner.limits_for_harness(Some("alpha")).unwrap().pairs,
-            Some(runner.pairs.clone())
-        );
         assert!(serde_json::to_value(&runner)
             .unwrap()
             .get("harness_limits")
@@ -1271,14 +937,11 @@ mod tests {
 
     #[test]
     fn harness_limits_builder_round_trips() {
-        let pair = RunnerPair::new("example.messages", "oauth");
-        let runner = RunnerDeclaration::new(vec![pair.clone()])
+        let runner = RunnerDeclaration::new()
             .with_harnesses(vec!["alpha".into()])
             .with_harness_limits(BTreeMap::from([(
                 "alpha".into(),
-                HarnessLimits::new()
-                    .with_pairs(vec![pair])
-                    .with_explicit_providers(vec!["example".into()]),
+                HarnessLimits::new().with_starts_sessions(false),
             )]));
         let parsed = parse_consumer_declarations(
             &serde_json::to_value(ConsumerDeclarations::new().with_runner(runner.clone())).unwrap(),
@@ -1292,12 +955,12 @@ mod tests {
     }
 
     #[test]
-    fn runner_harness_builders_and_legacy_bytes() {
-        let legacy = r#"{"runner":{"pairs":[{"wire_api":"api","auth_method":"key"}]}}"#;
-        let parsed = parse_consumer_declarations(&serde_json::from_str(legacy).unwrap()).unwrap();
+    fn runner_harness_builders_and_default_bytes() {
+        let wire = r#"{"runner":{}}"#;
+        let parsed = parse_consumer_declarations(&serde_json::from_str(wire).unwrap()).unwrap();
         assert!(parsed.runner.as_ref().unwrap().starts_sessions());
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), legacy);
-        let runner = RunnerDeclaration::new(vec![RunnerPair::new("api", "key")])
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), wire);
+        let runner = RunnerDeclaration::new()
             .with_harnesses(vec!["alpha".into(), "beta".into()])
             .with_default_harness("alpha")
             .with_starts_sessions(false);
@@ -1308,8 +971,7 @@ mod tests {
             .with_runner(runner)
             .validate()
             .unwrap();
-        let invalid =
-            RunnerDeclaration::new(vec![RunnerPair::new("api", "key")]).with_harnesses(vec![]);
+        let invalid = RunnerDeclaration::new().with_harnesses(vec![]);
         assert_eq!(
             ConsumerDeclarations::new().with_runner(invalid).validate(),
             Err(DeclarationError::InvalidField {

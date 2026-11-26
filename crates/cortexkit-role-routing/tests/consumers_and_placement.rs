@@ -120,8 +120,8 @@ fn module_roots_and_attested_selector_admission() {
 
 #[test]
 fn harness_facts_are_gated_and_never_widen_runner_starts() {
-    use cortexkit_role_routing::declarations::{HarnessLimits, RunnerDeclaration, RunnerPair};
-    let runner = RunnerDeclaration::new(vec![RunnerPair::new("messages", "api_key")])
+    use cortexkit_role_routing::declarations::{HarnessLimits, RunnerDeclaration};
+    let runner = RunnerDeclaration::new()
         .with_harnesses(vec!["alpha".into()])
         .with_starts_sessions(false)
         .with_harness_limits(
@@ -129,8 +129,7 @@ fn harness_facts_are_gated_and_never_widen_runner_starts() {
                 "alpha".into(),
                 HarnessLimits::new()
                     .with_starts_sessions(true)
-                    .with_capabilities(vec![HarnessCapability::OneOff])
-                    .with_exclude(vec!["p/m".into()]),
+                    .with_capabilities(vec![HarnessCapability::OneOff]),
             )]
             .into(),
         );
@@ -149,16 +148,6 @@ fn harness_facts_are_gated_and_never_widen_runner_starts() {
             .starts_sessions,
         Some(false)
     );
-    for bad in ["", "-", "p/"] {
-        let runner = runner.clone().with_harness_limits(
-            [(
-                "alpha".into(),
-                HarnessLimits::new().with_exclude(vec![bad.into()]),
-            )]
-            .into(),
-        );
-        assert!(runner.typed_harness_limits().unwrap().is_err());
-    }
 }
 
 #[test]

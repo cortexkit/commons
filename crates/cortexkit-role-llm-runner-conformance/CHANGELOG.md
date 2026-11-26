@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.0
+
+- Pin llm-runner `=0.10.0`. Check that `serves` is request-only, that
+  the list is valid and that equal generations describe identical lists.
+
 ## 0.17.94
 
 - Pin llm-runner `=0.9.11`.

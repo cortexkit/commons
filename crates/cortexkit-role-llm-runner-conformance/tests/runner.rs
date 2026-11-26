@@ -1922,21 +1922,22 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::RunCause,
     Capability::StepEvents,
     Capability::RoutedAccounts,
+    Capability::Serves,
 ];
 
 // The in-process fake does not declare session_retention or exercise a real
 // process kill at ReleasePending. A separate subprocess fixture covers those
 // cases. Head-error cases also need run_status, which some fixtures omit.
-// Routed-account cases use a separate opt-in credential and peer fixture.
+// Routed-account and serves cases use separate opt-in fixtures.
 // All other cases must pass.
 fn assert_only_session_retention_skipped(report: &SuiteReport) {
     assert!(
         matches!(&report.verdict,
             SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
             if skipped == &if declared.contains(&Capability::RunStatus) {
-                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::ForkEffort, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::Serves, Capability::ForkAnswer, Capability::ForkEffort, Capability::KillAt(points::RELEASE_PENDING)]
             } else {
-                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::ForkEffort, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::Serves, Capability::ForkAnswer, Capability::ForkEffort, Capability::KillAt(points::RELEASE_PENDING)]
             }
         ),
         "{}",
@@ -2549,6 +2550,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::RunCause,
                     Capability::StepEvents,
                     Capability::RoutedAccounts,
+                    Capability::Serves,
                     Capability::ForkAnswer,
                     Capability::ForkEffort,
                     Capability::RetentionClock,
@@ -2926,6 +2928,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunCause,
                     Capability::StepEvents,
                     Capability::RoutedAccounts,
+                    Capability::Serves,
                     Capability::ForkAnswer,
                     Capability::ForkEffort,
                     Capability::RetentionClock,
@@ -9826,6 +9829,44 @@ fn routed_accounts_subject(defects: Defects) -> FakeSubject {
     let mut subject = FakeSubject::new(defects);
     subject.capabilities.insert(Capability::RoutedAccounts);
     subject
+}
+
+#[tokio::test]
+async fn role_describe_serves_checks_pass_and_reject_their_faults_by_name() {
+    let cases = [
+        (
+            "role_describe_serves_opt_in",
+            "unrequested",
+            "without an opt-in",
+        ),
+        (
+            "role_describe_serves_list",
+            "invalid",
+            "serves_invalid_login",
+        ),
+        (
+            "role_describe_serves_generation",
+            "unstable",
+            "without changing generation",
+        ),
+    ];
+    let subject = |serves_describe| {
+        let mut subject = FakeSubject::new(Defects {
+            serves_describe,
+            ..Defects::default()
+        });
+        subject.capabilities.insert(Capability::Serves);
+        subject
+    };
+    let report = run(&subject(None)).await;
+    for (name, fault, reason) in cases {
+        assert_eq!(report.outcome(name), Some(&CaseOutcome::Passed), "{name}");
+        let defective = run(&subject(Some(fault))).await;
+        assert!(failed(&defective, name).contains(reason), "{name}");
+    }
+    let unsupported = run(&subject(Some("unsupported"))).await;
+    assert!(matches!(unsupported.outcome("role_describe_serves_list"),
+        Some(CaseOutcome::Inapplicable {reason}) if reason.contains("serves_harnesses")));
 }
 
 #[tokio::test]

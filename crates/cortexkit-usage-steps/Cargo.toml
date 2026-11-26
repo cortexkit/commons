@@ -23,4 +23,4 @@ serde_json = "1"
 sha2 = "0.10"
 # Only for drift tests against runner step events and service-tier spellings.
 # Never a runtime dependency.
-cortexkit-role-llm-runner = { version = "0.9", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.10", path = "../cortexkit-role-llm-runner" }

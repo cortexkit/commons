@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6
+
+- Use routing 0.8 for refusal classification, without changing classifier wire
+  shapes or public types.
+
 ## 0.6.5
 
 - Accept subc-protocol 0.37.

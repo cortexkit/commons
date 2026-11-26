@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0
+
+- Place models from runner `serves` lists instead of manifest pairs, endpoint
+  requirements and provider allow-lists. Reject the deleted top-level runner
+  members by name and keep independent harness-facts validation and fallback.
+- Breaking, a clean cut: a 0.7.x router refuses a declaration without `pairs`,
+  and 0.8.0 refuses one that still carries them. Routing and its runners move
+  together.
+
 ## 0.7.41
 
 - Treat an output limit at or above the known context window as unknown when

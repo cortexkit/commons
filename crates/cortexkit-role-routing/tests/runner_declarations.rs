@@ -1,12 +1,8 @@
 use cortexkit_role_routing::declarations::{
     parse_consumer_declarations, ConsumerDeclaration, ConsumerDeclarations, DeclarationError,
-    DemandDefaults, RunnerDeclaration, RunnerPair,
+    DemandDefaults, RunnerDeclaration,
 };
 use serde_json::{json, Value};
-
-fn pair() -> Value {
-    json!({"wire_api": "future.api-v2", "auth_method": "custom_auth"})
-}
 
 fn slot(runner: Value) -> Value {
     json!({"runner": runner})
@@ -32,52 +28,19 @@ fn round_trip(wire: &str) -> ConsumerDeclarations {
 }
 
 #[test]
-fn pure_runner_accepts_open_set_tokens_and_defaults() {
-    let parsed = round_trip(
-        r#"{"runner":{"pairs":[{"wire_api":"future.api-v2","auth_method":"custom_auth"}]}}"#,
-    );
+fn pure_runner_accepts_empty_declaration_and_defaults() {
+    let parsed = round_trip(r#"{"runner":{}}"#);
     assert!(parsed.consumers.is_empty());
     let runner = parsed.runner.unwrap();
     assert!(!runner.follows_account_choice);
     assert!(runner.tool_capabilities.is_empty());
-    assert!(runner.standing_limits.is_none());
-    assert_eq!(
-        runner.pairs[0],
-        RunnerPair::new("future.api-v2", "custom_auth")
-    );
-}
-
-#[test]
-fn gateway_pair_parses_without_requiring_a_catalog_endpoint() {
-    let parsed = round_trip(
-        r#"{"runner":{"pairs":[{"wire_api":"anthropic.messages","auth_method":"gateway"}]}}"#,
-    );
-    let runner = parsed.runner.unwrap();
-    assert_eq!(
-        runner.pairs[0],
-        RunnerPair::new("anthropic.messages", "gateway")
-    );
-    assert!(runner.admits_pair_row(&runner.pairs[0], false));
-}
-
-#[test]
-fn unknown_auth_method_keeps_the_whole_declaration() {
-    let parsed = round_trip(
-        r#"{"runner":{"pairs":[{"wire_api":"anthropic.messages","auth_method":"gateway"},{"wire_api":"anthropic.messages","auth_method":"future_auth"}]}}"#,
-    );
-    assert_eq!(
-        parsed.runner.unwrap().pairs,
-        [
-            RunnerPair::new("anthropic.messages", "gateway"),
-            RunnerPair::new("anthropic.messages", "future_auth"),
-        ]
-    );
+    assert!(runner.starts_sessions());
 }
 
 #[test]
 fn consumers_and_runner_share_the_slot() {
     let parsed = round_trip(
-        r#"{"consumers":[{"name":"example","eq":42}],"runner":{"pairs":[{"wire_api":"chat","auth_method":"api-key"}],"follows_account_choice":true,"tool_capabilities":["code.read/v1"],"standing_limits":{"explicit_providers":["example-provider"]}}}"#,
+        r#"{"consumers":[{"name":"example","eq":42}],"runner":{"follows_account_choice":true,"tool_capabilities":["code.read/v1"]}}"#,
     );
     assert_eq!(parsed.consumers[0].defaults.eq, Some(42));
     assert!(parsed.runner.unwrap().follows_account_choice);
@@ -101,7 +64,7 @@ fn slot_constructor_and_builders_validate_without_struct_literals() {
             name: "example".into(),
             defaults: DemandDefaults::default(),
         }])
-        .with_runner(RunnerDeclaration::new(vec![RunnerPair::new("chat", "key")]));
+        .with_runner(RunnerDeclaration::new());
     slot.validate().unwrap();
     assert_eq!(slot.consumers.len(), 1);
     assert!(slot.runner.is_some());
@@ -113,246 +76,46 @@ fn slot_constructor_and_builders_validate_without_struct_literals() {
 
 #[test]
 fn absent_account_choice_is_not_serialized_as_false() {
-    let parsed = parse_consumer_declarations(&slot(json!({"pairs": [pair()]}))).unwrap();
+    let parsed = parse_consumer_declarations(&slot(json!({}))).unwrap();
     let encoded = serde_json::to_value(&parsed).unwrap();
     assert!(encoded["runner"].get("follows_account_choice").is_none());
     assert!(!parsed.runner.unwrap().follows_account_choice);
 }
 
 #[test]
-fn pair_requires_wire_api_false_overrides_runner_true_only_for_that_pair() {
-    let runner = RunnerDeclaration::new(vec![
-        RunnerPair::new("google.code_assist", "antigravity").with_requires_wire_api(false),
-        RunnerPair::new("google.generate_content", "apikey"),
-    ])
-    .with_requires_wire_api(true);
-    assert!(!runner.requires_wire_api_for_pair(&runner.pairs[0]));
-    assert!(runner.admits_pair_row(&runner.pairs[0], false));
-    assert!(runner.requires_wire_api_for_pair(&runner.pairs[1]));
-    assert!(!runner.admits_pair_row(&runner.pairs[1], false));
-    assert!(runner.admits_pair_row(&runner.pairs[0], true));
-    assert!(runner.admits_pair_row(&runner.pairs[1], true));
-}
-
-#[test]
-fn pair_requires_wire_api_true_overrides_runner_false_only_for_that_pair() {
-    for explicit_default in [false, true] {
-        let mut runner = RunnerDeclaration::new(vec![
-            RunnerPair::new("openai.responses", "apikey").with_requires_wire_api(true),
-            RunnerPair::new("google.code_assist", "antigravity"),
-        ]);
-        if explicit_default {
-            runner = runner.with_requires_wire_api(false);
-        }
-        assert!(runner.requires_wire_api_for_pair(&runner.pairs[0]));
-        assert!(!runner.admits_pair_row(&runner.pairs[0], false));
-        assert!(!runner.requires_wire_api_for_pair(&runner.pairs[1]));
-        assert!(runner.admits_pair_row(&runner.pairs[1], false));
-        assert!(runner.admits_pair_row(&runner.pairs[0], true));
-        assert!(runner.admits_pair_row(&runner.pairs[1], true));
+fn deleted_runner_fields_refuse_the_whole_declaration() {
+    for member in ["pairs", "standing_limits", "requires_wire_api"] {
+        let raw = json!({"consumers": [{"name": "example"}], "runner": {member: null}});
+        let expected = DeclarationError::UnknownMember {
+            field: format!("runner.{member}"),
+        };
+        assert_eq!(parse_consumer_declarations(&raw), Err(expected.clone()));
+        let typed: ConsumerDeclarations = serde_json::from_value(raw).unwrap();
+        assert_eq!(typed.validate(), Err(expected));
     }
 }
 
 #[test]
-fn pair_requires_wire_api_non_boolean_refuses_the_declaration_by_path() {
-    for value in [json!("false"), json!(0), json!([]), json!({})] {
-        invalid(
-            slot(json!({"pairs": [pair(), {
-                "wire_api": "openai.responses", "auth_method": "apikey",
-                "requires_wire_api": value
-            }]})),
-            "runner.pairs[1].requires_wire_api",
-        );
+fn deleted_nested_fields_are_retained_but_ignored() {
+    let facts =
+        json!({"pairs": false, "explicit_providers": 42, "exclude": "-", "starts_sessions": false});
+    let parsed = parse_consumer_declarations(&slot(
+        json!({"harnesses": ["alpha"], "harness_limits": {"alpha": facts}}),
+    ))
+    .unwrap();
+    parsed.validate().unwrap();
+    let runner = parsed.runner.unwrap();
+    assert_eq!(runner.harness_limits.as_ref().unwrap()["alpha"], facts);
+    let typed = runner
+        .typed_harness_limits_serving(&[cortexkit_role_routing::capabilities::RUNNER_HARNESS_FACTS])
+        .unwrap()
+        .unwrap();
+    for field in ["pairs", "explicit_providers", "exclude"] {
+        assert_eq!(typed["alpha"].unknown[field], facts[field]);
     }
-}
-
-#[test]
-fn pair_requires_wire_api_harness_member_cannot_override_runner_pair() {
-    let mut runner = RunnerDeclaration::new(vec![
-        RunnerPair::new("openai.responses", "apikey").with_requires_wire_api(true)
-    ])
-    .with_harnesses(vec!["alpha".into()]);
-    for ignored in [json!(false), json!("ignored"), json!({}), Value::Null] {
-        runner.harness_limits = Some(json!({"alpha": {"pairs": [{
-            "wire_api": "openai.responses", "auth_method": "apikey", "requires_wire_api": ignored
-        }]}}));
-        let limits = runner.limits_for_harness(Some("alpha")).unwrap();
-        let harness_pair = &limits.pairs.as_ref().unwrap()[0];
-        assert_eq!(harness_pair.requires_wire_api, None);
-        assert_eq!(harness_pair.unknown["requires_wire_api"], ignored);
-        assert!(runner.requires_wire_api_for_pair(harness_pair));
-        assert!(!runner.admits_pair_row(harness_pair, false));
-        let encoded = serde_json::to_value(&limits).unwrap();
-        assert_eq!(encoded["pairs"][0]["requires_wire_api"], ignored);
-    }
-    let mut harness_pair = runner.pairs[0].clone().with_requires_wire_api(false);
-    harness_pair.unknown.clear();
-    assert!(runner.requires_wire_api_for_pair(&harness_pair));
-    let limits =
-        cortexkit_role_routing::declarations::HarnessLimits::new().with_pairs(vec![harness_pair]);
-    assert!(serde_json::to_value(limits).unwrap()["pairs"][0]
-        .get("requires_wire_api")
-        .is_none());
-}
-
-#[test]
-fn pair_requires_wire_api_parses_and_serializes_true_false_absent_and_null() {
-    for value in [
-        Some(json!(true)),
-        Some(json!(false)),
-        None,
-        Some(Value::Null),
-    ] {
-        for runner_default in [Some(true), Some(false), None] {
-            let mut declared_pair = pair();
-            if let Some(value) = &value {
-                declared_pair["requires_wire_api"] = value.clone();
-            }
-            let mut declaration = json!({"pairs": [declared_pair]});
-            if let Some(default) = runner_default {
-                declaration["requires_wire_api"] = json!(default);
-            }
-            let runner = parse_consumer_declarations(&slot(declaration))
-                .unwrap()
-                .runner
-                .unwrap();
-            let override_value = value.as_ref().and_then(Value::as_bool);
-            assert_eq!(runner.pairs[0].requires_wire_api, override_value);
-            assert_eq!(
-                runner.requires_wire_api_for_pair(&runner.pairs[0]),
-                override_value.or(runner_default).unwrap_or(false)
-            );
-            let encoded = serde_json::to_value(&runner).unwrap();
-            assert_eq!(
-                encoded["pairs"][0].get("requires_wire_api"),
-                override_value.map(|value| json!(value)).as_ref()
-            );
-            ConsumerDeclarations::new()
-                .with_runner(runner)
-                .validate()
-                .unwrap();
-        }
-    }
-}
-
-#[test]
-fn requires_wire_api_parses_true_false_absent_and_null() {
-    for value in [
-        Some(json!(true)),
-        Some(json!(false)),
-        None,
-        Some(Value::Null),
-    ] {
-        let mut runner = json!({"pairs": [pair()]});
-        if let Some(value) = &value {
-            runner["requires_wire_api"] = value.clone();
-        }
-        let parsed = parse_consumer_declarations(&slot(runner)).unwrap();
-        let runner = parsed.runner.unwrap();
-        assert_eq!(runner.requires_wire_api(), value == Some(json!(true)));
-        let encoded = serde_json::to_value(&runner).unwrap();
-        if runner.requires_wire_api() {
-            assert_eq!(encoded["requires_wire_api"], true);
-        } else {
-            assert!(encoded.get("requires_wire_api").is_none());
-        }
-    }
-}
-
-#[test]
-fn requires_wire_api_malformed_refuses_the_declaration_by_path() {
-    for value in [json!("true"), json!(1), json!([]), json!({})] {
-        invalid(
-            slot(json!({"pairs": [pair()], "requires_wire_api": value})),
-            "runner.requires_wire_api",
-        );
-    }
-}
-
-#[test]
-fn requires_wire_api_filters_only_rows_without_served_api() {
-    let runner = RunnerDeclaration::new(vec![RunnerPair::new("chat", "key")]);
-    assert!(!runner.requires_wire_api());
-    assert!(runner.admits_row(false));
-    assert!(runner.admits_row(true));
-
-    let runner = runner.with_requires_wire_api(true);
-    assert!(
-        !runner.admits_row(false),
-        "a missing served wire.api must exclude the row"
-    );
-    assert!(runner.admits_row(true));
-
-    let runner = runner.with_requires_wire_api(false);
-    assert!(runner.admits_row(false));
-    assert!(runner.admits_row(true));
-}
-
-#[test]
-fn runner_pair_shapes_are_rejected_by_path() {
-    for (runner, field) in [
-        (json!([]), "runner"),
-        (json!({}), "runner.pairs"),
-        (json!({"pairs": null}), "runner.pairs"),
-        (json!({"pairs": []}), "runner.pairs"),
-        (json!({"pairs": [null]}), "runner.pairs[0]"),
-        (json!({"pairs": [{}]}), "runner.pairs[0].wire_api"),
-        (
-            json!({"pairs": [{"wire_api": "chat"}]}),
-            "runner.pairs[0].auth_method",
-        ),
-        (
-            json!({"pairs": [pair()], "follows_account_choice": "true"}),
-            "runner.follows_account_choice",
-        ),
-    ] {
-        invalid(slot(runner), field);
-    }
-}
-
-#[test]
-fn duplicate_runner_pairs_are_rejected_by_path() {
-    let value = slot(json!({"pairs": [pair(), pair()]}));
-    invalid(value.clone(), "runner.pairs[1]");
-    let decoded: ConsumerDeclarations = serde_json::from_value(value).unwrap();
-    assert_eq!(
-        decoded.validate(),
-        Err(DeclarationError::InvalidField {
-            field: "runner.pairs[1]".into()
-        })
-    );
-    assert!(parse_consumer_declarations(&slot(json!({"pairs": [
-        {"wire_api": "chat", "auth_method": "key"},
-        {"wire_api": "chat", "auth_method": "oauth"},
-        {"wire_api": "responses", "auth_method": "key"}
-    ]})))
-    .is_ok());
-}
-
-#[test]
-fn runner_pair_tokens_are_validated_by_path() {
-    for token in [
-        json!(""),
-        json!("1chat"),
-        json!("Chat"),
-        json!("chat/v1"),
-        json!("é"),
-        json!("a".repeat(65)),
-        json!(1),
-    ] {
-        for field in ["wire_api", "auth_method"] {
-            let mut value = pair();
-            value[field] = token.clone();
-            invalid(
-                slot(json!({"pairs": [value]})),
-                &format!("runner.pairs[0].{field}"),
-            );
-        }
-    }
-    assert!(parse_consumer_declarations(&slot(json!({"pairs": [{
-        "wire_api": "a".repeat(64), "auth_method": "z0._-"
-    }]})))
-    .is_ok());
+    let resolved = runner.limits_for_harness(Some("alpha")).unwrap();
+    assert!(resolved.unknown.is_empty());
+    assert_eq!(resolved.starts_sessions, Some(false));
 }
 
 #[test]
@@ -363,18 +126,7 @@ fn unknown_members_are_rejected_at_every_declaration_level() {
             json!({"consumers": [{"name": "example", "extra": false}]}),
             "consumers[0].extra",
         ),
-        (
-            slot(json!({"pairs": [pair()], "extra": false})),
-            "runner.extra",
-        ),
-        (
-            slot(json!({"pairs": [{"wire_api": "chat", "auth_method": "key", "extra": false}]})),
-            "runner.pairs[0].extra",
-        ),
-        (
-            slot(json!({"pairs": [pair()], "standing_limits": {"extra": false}})),
-            "runner.standing_limits.extra",
-        ),
+        (slot(json!({"extra": false})), "runner.extra"),
     ] {
         let expected = DeclarationError::UnknownMember {
             field: field.into(),
@@ -388,7 +140,7 @@ fn unknown_members_are_rejected_at_every_declaration_level() {
 #[test]
 fn duplicate_runner_capabilities_are_rejected_by_path() {
     invalid(
-        slot(json!({"pairs": [pair()], "tool_capabilities": ["code.read/v1", "code.read/v1"]})),
+        slot(json!({"tool_capabilities": ["code.read/v1", "code.read/v1"]})),
         "runner.tool_capabilities[1]",
     );
 }
@@ -396,7 +148,7 @@ fn duplicate_runner_capabilities_are_rejected_by_path() {
 #[test]
 fn runner_capabilities_require_valid_names_and_array_shape() {
     invalid(
-        slot(json!({"pairs": [pair()], "tool_capabilities": "code.read/v1"})),
+        slot(json!({"tool_capabilities": "code.read/v1"})),
         "runner.tool_capabilities",
     );
     for capability in [
@@ -408,97 +160,29 @@ fn runner_capabilities_require_valid_names_and_array_shape() {
         json!(1),
     ] {
         invalid(
-            slot(json!({"pairs": [pair()], "tool_capabilities": [capability]})),
+            slot(json!({"tool_capabilities": [capability]})),
             "runner.tool_capabilities[0]",
         );
     }
+    assert!(parse_consumer_declarations(&slot(json!({"tool_capabilities": []}))).is_ok());
     assert!(parse_consumer_declarations(&slot(
-        json!({"pairs": [pair()], "tool_capabilities": []})
-    ))
-    .is_ok());
-    assert!(parse_consumer_declarations(&slot(
-        json!({"pairs": [pair()], "tool_capabilities": ["example:new.capability/v2"]})
+        json!({"tool_capabilities": ["example:new.capability/v2"]})
     ))
     .is_ok());
 }
 
 #[test]
-fn standing_limits_preserve_empty_and_explicit_provider_objects() {
-    for wire in [
-        r#"{"runner":{"pairs":[{"wire_api":"chat","auth_method":"key"}],"standing_limits":{}}}"#,
-        r#"{"runner":{"pairs":[{"wire_api":"chat","auth_method":"key"}],"standing_limits":{"explicit_providers":["provider.one","provider-two"]}}}"#,
-    ] {
-        round_trip(wire);
-    }
-    let parsed =
-        parse_consumer_declarations(&slot(json!({"pairs": [pair()], "standing_limits": {}})))
-            .unwrap();
-    assert!(parsed
-        .runner
-        .unwrap()
-        .standing_limits
-        .unwrap()
-        .explicit_providers
-        .is_none());
-}
-
-#[test]
-fn standing_limit_provider_refusals_name_the_field() {
-    invalid(
-        slot(json!({"pairs": [pair()], "standing_limits": []})),
-        "runner.standing_limits",
-    );
-    for (providers, field) in [
-        (json!([]), "runner.standing_limits.explicit_providers"),
-        (
-            json!("provider"),
-            "runner.standing_limits.explicit_providers",
-        ),
-        (
-            json!(["provider", "provider"]),
-            "runner.standing_limits.explicit_providers[1]",
-        ),
-        (
-            json!(["Bad"]),
-            "runner.standing_limits.explicit_providers[0]",
-        ),
-        (json!([""]), "runner.standing_limits.explicit_providers[0]"),
-        (
-            json!(["a".repeat(65)]),
-            "runner.standing_limits.explicit_providers[0]",
-        ),
-        (json!([1]), "runner.standing_limits.explicit_providers[0]"),
-    ] {
-        invalid(
-            slot(json!({"pairs": [pair()], "standing_limits": {"explicit_providers": providers}})),
-            field,
-        );
-    }
-}
-
-#[test]
-fn runner_lists_allow_64_entries_but_not_65() {
-    let pairs: Vec<_> = (0..65)
-        .map(|i| json!({"wire_api": format!("api{i}"), "auth_method": "key"}))
-        .collect();
+fn runner_tool_capabilities_allow_64_entries_but_not_65() {
     let capabilities: Vec<_> = (0..65)
         .map(|i| format!("example:tool{i}.read/v1"))
         .collect();
-    let providers: Vec<_> = (0..65).map(|i| format!("provider{i}")).collect();
     assert!(parse_consumer_declarations(&slot(json!({
-        "pairs": &pairs[..64],
-        "tool_capabilities": &capabilities[..64],
-        "standing_limits": {"explicit_providers": &providers[..64]}
+        "tool_capabilities": &capabilities[..64]
     })))
     .is_ok());
-    invalid(slot(json!({"pairs": pairs})), "runner.pairs");
     invalid(
-        slot(json!({"pairs": [pair()], "tool_capabilities": capabilities})),
+        slot(json!({"tool_capabilities": capabilities})),
         "runner.tool_capabilities",
-    );
-    invalid(
-        slot(json!({"pairs": [pair()], "standing_limits": {"explicit_providers": providers}})),
-        "runner.standing_limits.explicit_providers",
     );
 }
 
@@ -508,22 +192,9 @@ fn optional_runner_members_read_null_as_absent() {
     assert!(parsed.runner.is_none());
     assert_eq!(serde_json::to_value(parsed).unwrap(), json!({}));
     let parsed = parse_consumer_declarations(&slot(json!({
-        "pairs": [pair()],
         "follows_account_choice": null,
-        "tool_capabilities": null,
-        "standing_limits": null
+        "tool_capabilities": null
     })))
     .unwrap();
-    assert_eq!(
-        serde_json::to_value(parsed).unwrap(),
-        slot(json!({"pairs": [pair()]}))
-    );
-    let parsed = parse_consumer_declarations(&slot(json!({
-        "pairs": [pair()], "standing_limits": {"explicit_providers": null}
-    })))
-    .unwrap();
-    assert_eq!(
-        serde_json::to_value(parsed).unwrap(),
-        slot(json!({"pairs": [pair()], "standing_limits": {}}))
-    );
+    assert_eq!(serde_json::to_value(parsed).unwrap(), slot(json!({})));
 }

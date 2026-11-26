@@ -3,7 +3,6 @@
   "capabilities": ["select_harness_capabilities"],
   "declaration": {
     "runner": {
-      "pairs": [{"wire_api": "messages", "auth_method": "api_key"}],
       "harnesses": ["alpha", "beta"],
       "default_harness": "alpha",
       "harness_limits": {

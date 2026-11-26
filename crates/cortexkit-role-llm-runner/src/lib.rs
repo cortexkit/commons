@@ -63,6 +63,7 @@ pub mod send_status;
 pub mod sender_succession;
 pub mod serializer_profile;
 pub mod served_bytes;
+pub mod serves;
 pub mod service_tier;
 pub mod session_change;
 pub mod session_ref;
@@ -136,6 +137,10 @@ pub mod ops {
     /// Discovery before use: the role's majors, ops and capabilities.
     /// Required.
     pub const ROLE_DESCRIBE: &str = "role.describe";
+    /// Ask `role.describe` for the current list of placeable providers and models.
+    pub fn role_describe_serves_params() -> serde_json::Value {
+        serde_json::json!({ "serves": true })
+    }
     /// The session's current baseline, answered only to the session's owner.
     /// Required.
     pub const SESSION_BASELINE: &str = "session.baseline";
@@ -207,6 +212,8 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 /// the session-level capabilities a session's admission reply or baseline
 /// declares.
 pub mod capabilities {
+    /// The runner supplies its current provider and model list on request.
+    pub const SERVES: &str = "serves";
     /// Active runs and stored cursors survive a runner restart with their host.
     /// Requires `interrupt_reason` and `live_events` (CONTRACT §14.4).
     pub const RESTART_SURVIVAL: &str = "restart_survival";

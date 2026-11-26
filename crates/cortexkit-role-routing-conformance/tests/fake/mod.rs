@@ -54,7 +54,7 @@ use cortexkit_role_routing_conformance::{
             parse_select_request_serving, PinFallback, PinOutcome, Requirements, RouteRef,
             RunnerRef, SelectAnswer, ToolsRequirement, REQUIREMENT_FIELDS,
         },
-        spellings, wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
+        wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
     },
     Catalog, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig, ConsumerMode, HoldLimits,
     Reply, RouteFailure, RouteStamp, RoutingRoute, RoutingSubject,
@@ -70,8 +70,7 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
-    pub runner_route_facts_unsupported: bool,
-    pub route_wire_api_unsupported: bool,
+    pub runner_serves_unsupported: bool,
     pub ignore_questions: bool,
     pub ignore_max_cost_usd: bool,
     pub engine_fault: &'static str,
@@ -310,8 +309,7 @@ struct State {
     selection_facts: cortexkit_role_routing_conformance::SelectionFacts,
     runner_declarations:
         BTreeMap<String, cortexkit_role_routing_conformance::wire::RunnerDeclaration>,
-    runner_route_facts: Vec<cortexkit_role_routing_conformance::RunnerRouteFacts>,
-    route_wire_apis: HashMap<String, String>,
+    runner_serves: BTreeMap<String, cortexkit_role_llm_runner::serves::Serves>,
     model_input_facts: HashMap<String, cortexkit_role_routing_conformance::ModelInputFacts>,
     engine: select_engine::EngineState,
     extension_answers: HashMap<String, Value>,
@@ -813,33 +811,51 @@ impl RoutingSubject for FakeSubject {
         Ok(())
     }
 
-    async fn configure_runner_route_facts(
-        &self,
-        facts: &[cortexkit_role_routing_conformance::RunnerRouteFacts],
-    ) -> Result<bool, String> {
-        if self.defects.runner_route_facts_unsupported {
-            return Ok(false);
-        }
-        self.state.lock().unwrap().runner_route_facts = facts.to_vec();
-        Ok(true)
-    }
-
-    async fn configure_route_wire_api(
-        &self,
-        route_key: &str,
-        endpoint: Option<&str>,
-    ) -> Result<bool, String> {
-        if self.defects.route_wire_api_unsupported {
+    async fn configure_runner_serves(&self, module: &str, raw: &Value) -> Result<bool, String> {
+        if self.defects.runner_serves_unsupported {
             return Ok(false);
         }
         let mut state = self.state.lock().unwrap();
-        if let Some(endpoint) = endpoint {
-            state
-                .route_wire_apis
-                .insert(route_key.into(), endpoint.into());
-        } else {
-            state.route_wire_apis.remove(route_key);
+        let harnesses = state
+            .runner_declarations
+            .get(module)
+            .and_then(|r| r.harnesses())
+            .or_else(|| {
+                state
+                    .catalog
+                    .as_ref()?
+                    .runners
+                    .iter()
+                    .find(|r| r.module == module)?
+                    .harnesses
+                    .as_deref()
+            });
+        let mut snapshot = cortexkit_role_llm_runner::serves::decode_serves(raw, harnesses)
+            .map_err(|error| error.to_string())?;
+        let last = state
+            .runner_serves
+            .entry(module.into())
+            .or_insert_with(|| cortexkit_role_llm_runner::serves::Serves::new(""));
+        if snapshot.generation == last.generation {
+            return Ok(true);
         }
+        if self.defects.extension == Some("serves_forget_missing") {
+            *last = snapshot;
+            return Ok(true);
+        }
+        if let Some(lists) = snapshot.harnesses.take() {
+            let previous = last.harnesses.get_or_insert_with(BTreeMap::new);
+            for (harness, list) in lists {
+                if !list.is_empty() || self.defects.extension != Some("runner_serves_empty_harness")
+                {
+                    previous.insert(harness, list);
+                }
+            }
+        }
+        if snapshot.entries.is_some() {
+            last.entries = snapshot.entries;
+        }
+        last.generation = snapshot.generation;
         Ok(true)
     }
 
@@ -1127,6 +1143,11 @@ impl FakeRoute {
             }
         }
         catalog.models.extend(routes);
+        for runner in &mut catalog.runners {
+            if state.runner_serves.contains_key(&runner.module) {
+                runner.route_keys = catalog.models.iter().map(CatalogModel::route_key).collect();
+            }
+        }
         catalog
     }
 
@@ -1352,104 +1373,62 @@ impl FakeRoute {
         model: &CatalogModel,
         harness: Option<&str>,
     ) -> bool {
-        let Some(declaration) = state.runner_declarations.get(module) else {
-            return true;
-        };
-        if self.fault("runner_gateway_credential")
-            && declaration
-                .pairs
-                .iter()
-                .any(|pair| pair.auth_method == "gateway")
-        {
-            return false;
-        }
-        let serves_wire_api = state.route_wire_apis.contains_key(&model.route_key())
-            && !(self.fault("requires_wire_api_stale") && model.model == "model-b");
-        let mut declaration = declaration.clone();
-        if self.fault("harness_limits_pairs_narrow")
-            || self.fault("harness_limits_providers_narrow")
-        {
-            declaration.harness_limits = None;
-        }
-        let mut limits = match declaration.limits_for_harness(harness) {
-            Ok(limits) => limits,
-            Err(error) => {
+        if let Some(declaration) = state.runner_declarations.get(module) {
+            if let Err(error) = declaration.limits_for_harness(harness) {
                 eprintln!("runner {module}: {error}; using runner-level values");
                 if self.fault("harness_limits_invalid_falls_back") {
                     return false;
                 }
-                declaration.harness_limits = None;
-                declaration
-                    .limits_for_harness(None)
-                    .expect("no harness limits")
             }
-        };
-        // CONTRACT §1.2: "Routing intersects the runner module's pairs with the
-        // vault's available provider credentials and the catalog's routes."
-        // Those producers use only spellings::WIRE_APIS / AUTH_METHODS, so an
-        // unknown token matches nothing, even when this fake has no route facts.
-        if let Some(pairs) = &mut limits.pairs {
-            pairs.retain(|pair| {
-                spellings::WIRE_APIS.contains(&pair.wire_api.as_str())
-                    && spellings::AUTH_METHODS.contains(&pair.auth_method.as_str())
-            });
         }
-        let route_facts = state
-            .runner_route_facts
-            .iter()
-            .find(|facts| facts.route_key == model.route_key());
-        let served_provider = state
-            .gateway_sources
-            .get(&model.provider)
-            .map(String::as_str);
-        let gateway = served_provider.is_some();
-        // Gateway route keys retain the credential's provider; only the
-        // allow-list comparison uses the provider of the borrowed catalog row.
-        let provider = if gateway
-            && !(self.fault("runner_gateway_explicit_providers")
-                || (declaration.harness_limits.is_some()
-                    && harness.is_some()
-                    && self.fault("gateway_explicit_providers_harness")))
+        if self.fault("runner_gateway_credential")
+            && state.gateway_sources.contains_key(&model.provider)
         {
-            if self.fault("gateway_explicit_providers_spelling") {
-                model.provider.split('-').next().unwrap()
-            } else {
-                served_provider.unwrap()
-            }
-        } else {
-            &model.provider
+            return false;
+        }
+        let Some(snapshot) = state.runner_serves.get(module) else {
+            return true;
         };
-        limits.pairs.as_ref().is_some_and(|pairs| !pairs.is_empty())
-            && limits.explicit_providers.as_ref().is_none_or(|providers| {
-                providers.iter().any(|allowed| allowed == provider)
-                    || (gateway
-                        && self.fault("gateway_explicit_providers_alias")
-                        && providers.contains(&model.provider))
-            })
-            && route_facts.map_or_else(
-                || {
-                    self.fault("runner_requires_wire_api")
-                        || declaration.admits_row(serves_wire_api)
-                },
-                |facts| {
-                    limits.pairs.as_ref().is_some_and(|pairs| {
-                        pairs.iter().any(|pair| {
-                            pair.wire_api == facts.wire_api
-                                && pair.auth_method == facts.auth_method
-                                && (self.fault("runner_requires_wire_api")
-                                    || if (self.fault("requires_wire_api_pair_false_ignored")
-                                        && pair.requires_wire_api == Some(false))
-                                        || (self.fault("requires_wire_api_pair_true_ignored")
-                                            && pair.requires_wire_api == Some(true))
-                                    {
-                                        declaration.admits_row(serves_wire_api)
-                                    } else {
-                                        declaration.admits_pair_row(pair, serves_wire_api)
-                                    })
-                        })
+        let provider = &model.provider;
+        let catalog_models = state
+            .catalog
+            .as_ref()
+            .into_iter()
+            .flat_map(|catalog| &catalog.models)
+            .filter(|row| &row.provider == state.gateway_sources.get(provider).unwrap_or(provider))
+            .map(|row| row.model.clone())
+            .collect();
+        let matching_list = |list: &[cortexkit_role_llm_runner::serves::ServesEntry]| {
+            use cortexkit_role_llm_runner::serves;
+            let membership = if self.fault("runner_serves_except") {
+                let mut list = list.to_vec();
+                list.iter_mut().for_each(|entry| entry.except = None);
+                serves::placement(&list, provider, &model.model, &catalog_models)
+            } else {
+                serves::placement(list, provider, &model.model, &catalog_models)
+            };
+            membership.is_some_and(|login_none| {
+                (login_none && !self.fault("runner_serves_login_none"))
+                    || state.catalog.as_ref().is_some_and(|catalog| {
+                        catalog
+                            .accounts
+                            .iter()
+                            .any(|account| &account.provider == provider)
                     })
-                },
-            )
+            })
+        };
+        let union = || {
+            snapshot
+                .harnesses
+                .iter()
+                .flat_map(|lists| lists.values())
+                .any(|list| matching_list(list))
+        };
+        match snapshot.list_for(harness) {
+            Some(list) => matching_list(list),
+            None if harness.is_none() => union(),
+            None => self.fault("runner_serves_absent_harness"),
+        }
     }
 
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {

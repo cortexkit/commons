@@ -96,7 +96,8 @@ pub struct CatalogModule {
     pub role_declarations: BTreeMap<String, Value>,
 }
 
-/// Route transport facts used to intersect runner declarations with the catalog.
+/// Legacy transport facts for adapters that implemented pair-based fixtures.
+/// Current placement checks use `configure_runner_serves` instead.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RunnerRouteFacts {
@@ -342,10 +343,7 @@ pub trait RoutingSubject: Send + Sync {
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
 
-    /// Configure the wire API and credential method for runner route matching.
-    /// Unsupported adapters skip pair-specific checks, not provider-limit checks.
-    /// Provider-only fixtures retain configured runnable keys with any mapping
-    /// compatible with their runner-level pairs; only provider limits vary.
+    /// Retained for adapter source compatibility. The suite no longer calls it.
     async fn configure_runner_route_facts(
         &self,
         _facts: &[RunnerRouteFacts],
@@ -353,13 +351,22 @@ pub trait RoutingSubject: Send + Sync {
         Ok(false)
     }
 
-    /// Set or remove a catalog row's served `wire.api` endpoint fact, regardless
-    /// of its provenance. Return false if the adapter cannot configure that fact.
+    /// Retained for adapter source compatibility. The suite no longer calls it.
     async fn configure_route_wire_api(
         &self,
         _route_key: &str,
         _endpoint: Option<&str>,
     ) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    /// Make the runner declare `serves` and return the supplied JSON member
+    /// only on an opted-in `role.describe`. Override the list synthesized from
+    /// `CatalogRunner::route_keys`; empty fixture keys seed no routes before
+    /// the first explicit snapshot. Before returning `true`, make the router
+    /// observe the new answer using its ordinary discovery path. Return `false`
+    /// if the adapter cannot supply or refresh the answer.
+    async fn configure_runner_serves(&self, _runner: &str, _list: &Value) -> Result<bool, String> {
         Ok(false)
     }
 

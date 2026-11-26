@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Use compaction-view 0.5 without changing the WebAssembly interface.
+
 ## 0.2.0
 
 - Take compaction-view 0.4. `clean_reply` follows `PLAN_VERSION` 4: it no

@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-role-compaction"
-version = "0.4.13"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -8,7 +8,7 @@ description = "Wire contract for compaction-provider/v2 and compaction-runner/v1
 readme = "README.md"
 
 [dependencies]
-cortexkit-role-llm-runner = { version = "0.9.7", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.10", path = "../cortexkit-role-llm-runner" }
 serde = { version = "1", features = ["derive"] }
 # raw_value: tool input is written verbatim from its text. float_roundtrip: a
 # value's text parses back to the same value, so digests computed from the
@@ -19,4 +19,4 @@ serde_path_to_error = "0.1"
 sha2 = "0.10"
 
 [dev-dependencies]
-cortexkit-role-llm-runner = { version = "0.9.7", path = "../cortexkit-role-llm-runner", features = ["test-vectors"] }
+cortexkit-role-llm-runner = { version = "0.10", path = "../cortexkit-role-llm-runner", features = ["test-vectors"] }

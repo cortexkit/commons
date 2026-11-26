@@ -228,61 +228,40 @@ carry their required `iq`; an operator may override it in configuration.
 
 `ConsumerDeclarations::new()` and its `with_consumers` / `with_runner` builders
 construct catalog slots without exhaustive struct literals. Either member may
-be omitted. A runner module declares the open-set `(wire_api, auth_method)`
-pairs it can drive, whether it calls `route.account_for` and uses its answer,
-and its supported tool capabilities. Optional `standing_limits.explicit_providers`
-restricts it to credentials for those providers; absence (including
-`standing_limits: {}`) means no provider limit. Routing intersects these
-declarations with vault credentials and catalog routes; declarations grant no
-credential access. See contract §1.2 for validation and matching rules.
+be omitted. A runner module declares its session programs, whether it calls
+`route.account_for` and uses its answer, and its supported tool capabilities.
+The manifest does not list the models it runs. Routing reads them from the
+runner's opt-in `role.describe {"serves": true}` answer and checks login facts
+and operator settings separately. A declaration grants no credential access.
+See contract §1.2 for validation and matching rules.
 
-`RunnerDeclaration::with_requires_wire_api(true)` sets the default requirement
-to open rows only through their served `wire.api`.
-`RunnerPair::with_requires_wire_api(bool)` overrides that default for one pair;
-omission or null inherits it. Routing applies the effective requirement to
-select, panels, head choices and the `runner_requires_wire_api` explanation.
-`requires_wire_api()` reads only the runner default;
-`requires_wire_api_for_pair(&pair)` resolves the matching runner pair's override,
-then the default, then false. `admits_pair_row(&pair, bool)` checks endpoint
-availability with that effective value, without reading the catalog. These
-helpers resolve the runner pair by wire API and auth method, so a requirement
-written in a harness-limit pair has no effect. Pair membership and other routing
-constraints still need separate checks.
-
-`admits_row(bool)` retains its 0.7.13 runner-default behavior for callers without
-pair overrides, but is deprecated in documentation for pair matching: use
-`admits_pair_row` instead. Upgrade the router to 0.7.13 or later before declaring
-the runner-level member, and to 0.7.14 live before declaring it on any pair:
-older strict parsers drop the whole runner declaration. Non-boolean, non-null
-values refuse the declaration with the runner or pair field path.
+Routing 0.8.0 refuses declarations that still carry `runner.pairs`,
+`runner.requires_wire_api` or `runner.standing_limits`. Upgrade routing and the
+runners together.
 
 Runners optionally declare `harnesses` (1–16 unique program tokens), a
 `default_harness` listed there, and `starts_sessions` (true by default and
 omitted when true). Use `RunnerDeclaration::with_harnesses`,
 `with_default_harness` and `with_starts_sessions`, with corresponding getters.
-An empty program list is refused, not read as "no program". Programs are
-independent of wire/auth pairs: a runner that launches an agent program may
-host several programs through one pair. A gateway runner sets
+An empty program list is refused, not read as "no program". A gateway runner sets
 `starts_sessions: false` and never answers select, but account allocation for
 its own turns, observations, reports and describe are unchanged.
 
 `with_harness_limits` attaches a map of `HarnessLimits` constructed with
-`with_pairs` and/or `with_explicit_providers`. Restrictions only narrow the
-runner-level values; omitted entries and fields inherit them. The declaration
-retains this member raw: `typed_harness_limits` validates it independently,
-and `limits_for_harness` resolves inheritance. An error means warn with the
+`with_starts_sessions` and/or `with_capabilities`. The declaration retains the
+member raw: `typed_harness_limits` validates it independently, and
+`limits_for_harness` resolves the session facts. An error means warn with the
 runner name and use runner-level values for every harness, not drop the runner.
-Upgrade routing to 0.7.11 or later before declaring the member: older strict
-declaration parsers reject it. `HeadChoicesRequest::with_harness` requests
-harness-specific choices; without it head choices keep the runner-level union.
+`HeadChoicesRequest::with_harness` requests harness-specific choices; without
+it head choices keep the runner-level union.
 
 With the `select_harness` describe group, a caller may request `harness` using
 `SelectRequest::with_harness`. Only a runner listing that program is a
 candidate, and `runner.harness` echoes it. No hosting runner is `no_route`
 with reason `harness_unavailable` and the requested program in the message.
-Without a requested program, candidates are not filtered by harness and the
-answer carries the declared default, else the sole listed program, else no
-harness. No route or pair is ever relabeled as a program.
+Without a requested program, the declared default or the sole listed program
+is resolved before placement. When no program can be resolved, a route is
+placeable if any harness on the runner serves it.
 
 **Readers first:** a 0.3.x routing provider rejects a slot containing `runner`.
 Runner modules must not declare it until the routing provider adopts 0.4.0.

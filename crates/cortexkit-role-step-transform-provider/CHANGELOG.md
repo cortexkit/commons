@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- Update the llm-runner dependency to 0.10. No hook or wire shape changes.
+
 ## Unreleased
 
 ## 0.5.1

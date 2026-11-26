@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0
+
+- Add the opt-in `role.describe` `serves` member, including typed snapshots,
+  field-path validation and catalog-relative model membership. Ordinary
+  describe answers still omit the member.
+
 ## 0.9.11
 
 - Text only. `delivered_as` is required on entries from a send whose

@@ -187,6 +187,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub serves_describe: Option<&'static str>,
     /// Break one promotion decision, admission, durable replay or queue move.
     pub promote: Option<&'static str>,
     /// Break the terminal pre-delivery failure or parked-queue contract.
@@ -736,6 +737,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    serves_reads: AtomicUsize,
     pre_delivery_next: Mutex<BTreeMap<String, String>>,
     tool_input_cap: Option<usize>,
     tool_input_refusals: Arc<AtomicUsize>,
@@ -3441,7 +3443,7 @@ impl Module {
             ops::SESSION_PLAN_VIEW if self.world.serves(groups::PLAN_VIEW) => {
                 Ok(plan_view::read(self, session, &params))
             }
-            ops::ROLE_DESCRIBE => Ok(self.describe()),
+            ops::ROLE_DESCRIBE => Ok(self.describe(&params)),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
             ops::SESSION_USER_COMMAND | ops::SESSION_USER_COMMAND_STATUS => {
                 self.user_command(stamp, session, method, params)
@@ -3667,7 +3669,7 @@ impl Module {
         self.drive(session, run_id)
     }
 
-    fn describe(&self) -> Reply {
+    fn describe(&self, params: &Value) -> Reply {
         let mut capabilities = self.world.groups.clone();
         if self.world.defects.claim_unserved_group {
             capabilities.push(groups::INTERRUPT.to_owned());
@@ -3730,6 +3732,26 @@ impl Module {
             .unwrap(),
         );
         let mut describe = serde_json::to_value(describe).unwrap();
+        let fault = self.world.defects.serves_describe;
+        if self.world.serves(groups::SERVES)
+            && (fault == Some("unrequested") || *params == ops::role_describe_serves_params())
+        {
+            let provider = if fault == Some("unstable")
+                && self.world.serves_reads.fetch_add(1, Ordering::Relaxed) % 2 == 1
+            {
+                "alternate"
+            } else {
+                "example"
+            };
+            let login = if fault == Some("invalid") {
+                "oauth"
+            } else {
+                "none"
+            };
+            describe["serves"] = json!({"generation": "one", "harnesses": {
+                "host": [{"provider": provider, "models": ["example/model"], "login": login}]
+            }});
+        }
         if self.world.defects.system_text_host_facts_malformed {
             describe["harnesses"]["host"]["host_facts"] = json!(["shell", "files"]);
         }
@@ -5682,7 +5704,7 @@ impl Module {
     }
 
     fn head_supported_modes(&self) -> Vec<String> {
-        let Reply::Response(mut value) = self.describe() else {
+        let Reply::Response(mut value) = self.describe(&json!({})) else {
             unreachable!()
         };
         // Mode selection does not use harness facts. A malformed outward
@@ -6907,6 +6929,7 @@ impl FakeSubject {
                     released: Mutex::new(BTreeSet::new()),
                     transcript_calls: AtomicUsize::new(0),
                     run_result_calls: AtomicUsize::new(0),
+                    serves_reads: AtomicUsize::new(0),
                     adopt_calls: AtomicUsize::new(0),
                     turn_system: self.turn_system,
                     turn_system_cleared: Mutex::new(false),
@@ -7034,6 +7057,9 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    fn serves_harnesses(&self) -> Option<Vec<String>> {
+        (self.defects.serves_describe != Some("unsupported")).then(|| vec!["host".into()])
+    }
     async fn prepare_not_delivered_send(
         &self,
         session: &str,

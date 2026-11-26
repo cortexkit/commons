@@ -123,43 +123,19 @@ preserving existing adapters.
     `nonce_verified` status. Feed these through the catalog, never a call.
     Runner slots also supply raw `harness_limits`; invalid restrictions must
     leave the runner selectable with runner-level values.
-    Provider-only fixtures preserve `configure_catalog`'s runnable route keys:
-    supply a compatible transport/credential mapping from the runner-level
-    pairs and vary only the provider allow-list. They do not depend on a
-    particular pair mapping; pair-specific fixtures use the facts hook below.
-  - Optional `configure_runner_route_facts(facts)`: route keys with their wire
-    API and credential method, constructed with `RunnerRouteFacts::new`.
-    Return `Ok(false)` when unsupported; pair-narrowing checks are then
-    reported as not applicable, never passed. Provider-only narrowing and
-    invalid-member fallback checks still run for every adapter. Head-choice
-    assertions run when the provider declares `head_choices`.
-    Narrowing first requires a runner-level offer of the model the harness
-    excludes. Without that baseline offer the case is inconclusive and
-    reported as not applicable, not passed. With it, harness offers must
-    exclude that model and be a subset of the effective allowed set; the kit
-    does not require the router to offer every otherwise runnable model.
-  - Optional `configure_route_wire_api(route_key, endpoint)`: set the catalog
-    row's served `wire.api` fact to `Some(endpoint)`, or remove it with `None`,
-    independently of `wire.family` and the fact's provenance. The default
-    returns `Ok(false)`. `runner_requires_wire_api` is not applicable and names
-    the missing hook if either this hook or `configure_runner_route_facts` is
-    unsupported. Otherwise it checks select and, when served, head choices
-    exclude the row without an endpoint, then serves that endpoint and checks
-    the row becomes selectable. It also removes both endpoints and declares
-    two distinct pairs to check overrides in both directions: a pair can waive
-    a true runner default or require an endpoint despite a false default.
-    Select honors the override and head choices exclude the blocked pair.
-    Head choices may remain an admission subset. Declare runner-level
-    `requires_wire_api` only after the router runs routing 0.7.13 or later,
-    and pair-level values only once routing runs 0.7.14 live; older strict
-    parsers drop the whole runner declaration;
-  - `runner_gateway_credential` uses both optional hooks above: it configures an
-    `anthropic.messages/gateway` pair and an `anthropic-gw-example` account whose
-    method is `gateway`, removes catalog `wire.api`, then checks selection and
-    admission of that credential/account. Missing hooks make the check not
-    applicable. The fixture carries credential identity and method, not secrets
-    or endpoint contents; it does not test the vault's `llm-gateway` derivation,
-    the runner's HTTP loopback restriction, or upstream authentication;
+  - Optional `configure_runner_serves(runner, list)`: replace a fixture runner's
+    `serves` response. The runner advertises the capability, omits the member on
+    ordinary describe calls, and answers with the supplied JSON member on an
+    opted-in call. Before returning `Ok(true)`, make the router observe the new
+    response through its normal discovery path. `Ok(false)` means the check is
+    not applicable and names the missing hook. Empty fixture `route_keys` seed
+    no routes before the first explicit snapshot. The checks vary missing and
+    empty harnesses, exceptions, and login requirements across snapshots.
+  - `runner_gateway_credential` uses the same hook. A runner serves the gateway
+    provider id, whose catalog rows are borrowed through its vault credential's
+    `serves`. The check exercises selection, account admission and unresolved
+    gateway ids. The fixture carries identity and method, not secrets or endpoint
+    contents; it does not test vault credential derivation or authentication.
   - `pin_for_project(project, consumer, pin)`: an operator pin that applies
     to the consumer's selects within the project;
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.

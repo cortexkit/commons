@@ -96,173 +96,88 @@ That group's additive defaults, attested namespace and selector rules are in §1
   `iq` remains required; a declaration cannot set `iq` and does not relax
   request validation. An operator may still override `iq` in configuration.
 
-### 1.2 Runner matching declarations
+### 1.2 Runner declarations and placement
 
-- [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method, requires_wire_api?: bool}],
-  follows_account_choice?: bool, requires_wire_api?: bool, tool_capabilities?: [string],
-  standing_limits?: {explicit_providers?: [string]}, harnesses?: [token],
-  harness_limits?: {<harness>: {pairs?: [{wire_api, auth_method}], explicit_providers?: [token]}},
-  default_harness?: token, starts_sessions?: bool}` (`RunnerDeclaration`).
-  Unknown members in the slot, `runner`, any pair, or `standing_limits`
-  invalidate the whole declaration. A refusal names the offending field
-  path, such as `runner.pairs[0].wire_api`; no part is applied.
-  The known `harness_limits` member is the exception: it is retained raw and
-  validated independently, so a malformed value does not discard the runner.
-- [pinned] `pairs` is required, non-empty, and has at most 64 entries.
-  Each `(wire_api, auth_method)` pair is unique. Both values are tokens
-  matching `^[a-z][a-z0-9._-]{0,63}$`. These are open sets: validation
-  checks their shape, never a fixed list of wire APIs or authentication
-  methods.
-- [pinned] Routing intersects the runner module's pairs with the vault's
-  available provider credentials and the catalog's routes. A declaration
-  promises which combinations the runner module can drive; it creates no
-  credential or route and grants no authority to use one.
-- [pinned] Each `wire_api` and `auth_method` value has one shared spelling.
-  Decoding still checks only the token shape, so accepting a new value
-  never needs a validation change. The tables below are a requirement on
-  the systems that produce these values, not something a decoder enforces:
-  a runner declares, the model catalog serves and the vault reports only
-  spellings listed there. A new spelling is added to its table first, in a
-  text release, before anything uses it. The tables are also exported as
-  `spellings::WIRE_APIS` and `spellings::AUTH_METHODS`.
-- [pinned] `wire_api` names the bytes on the wire: the endpoint shape and
-  the request and reply format. When a backend's wire format differs because
-  of the credential that reaches it, it has its own `wire_api`, and the pair
-  says which credential that is.
+A runner says two things about itself. Its manifest slot (below) carries what
+doesn't depend on the catalog: its session programs and their capabilities.
+Its `role.describe` answer carries `serves`, the providers and models it can
+run now (llm-runner contract §2.1), which it works out itself. Routing places
+a model on a runner from those two, the vault's logins and the catalog's
+facts. A runner sends no request format and no login kind.
 
-  | `wire_api` | Wire format |
-  |---|---|
-  | `anthropic.messages` | Anthropic Messages API |
-  | `openai.responses` | OpenAI Responses API, the public shape, also served by other providers |
-  | `openai.chat_completions` | OpenAI-compatible Chat Completions, from any provider |
-  | `openai.chatgpt_responses` | The ChatGPT backend's Responses variant, reached with a ChatGPT subscription |
-  | `google.generate_content` | Gemini `generateContent` |
-  | `google.code_assist` | The Code Assist envelope around `generateContent`, reached with a Google Antigravity sign-in |
-  | `aws.bedrock_converse` | Amazon Bedrock Converse |
-
-- [pinned] The model catalog serves a route's `wire_api` as a per-route fact
-  named `wire.family`, a string whose value is one of the table's tokens, in
-  the route's catalog reply. A token there means the
-  route's request format is verified as that wire format; it says nothing
-  about which runner can drive it. A route the catalog serves without
-  `wire.family` has no verified wire format and matches no runner pair: a
-  routing provider never infers one.
-- [pinned] `auth_method` names how a request is authorised. The spellings
-  are the vault's own names for its credential kinds:
-
-  | `auth_method` | Credential |
-  |---|---|
-  | `apikey` | An API key |
-  | `oauth` | A provider's OAuth sign-in, such as a Claude subscription |
-  | `chatgpt` | A ChatGPT subscription sign-in |
-  | `antigravity` | A Google Antigravity sign-in |
-  | `gateway` | One vault credential supplies both the endpoint and its credential; the runner calls that endpoint, and the gateway holds the upstream provider key |
-
-- [pinned] A `gateway` pair normally has an effective `requires_wire_api` of
-  `false`: the runner uses the credential's own endpoint, not a catalog
-  `wire.api`. The runner sends only the gateway credential, not a second secret
-  for the upstream provider. Informatively, the vault and runner allow HTTPS,
-  or plain HTTP only to a loopback gateway; routing does not validate endpoints.
-- [pinned] For a credential whose `auth_method` is `gateway`, every
-  `explicit_providers` check, runner-wide or per harness, compares the provider
-  of the catalog row the gateway route borrows, which is the provider the vault
-  credential's `serves` names, never the gateway credential's own provider id.
-  Catalog rows keep their catalog provider ids. A gateway route is
-  `<gateway provider id>/<model>`, borrowing the served provider's catalog row,
-  never the borrowed provider's own route key. A provider without catalog rows
-  borrows the rows of the one catalog provider its active gateway credentials'
-  `serves` collectively names. If they name no provider or more than one, the
-  provider stays unresolved: it gets no routes and nothing is selected from it.
-  The vault sets `serves` at credential creation and never changes it. Other
-  credential methods also carry `serves`; only `gateway` enables this borrowing.
-  A gateway credential `anthropic-gw-acme` with `serves: ["anthropic"]` forms
-  `anthropic-gw-acme/<model>` from `anthropic/<model>` and passes a limit of
-  `["anthropic"]`; a gateway borrowing `openai/...` rows fails it. Listing
-  `anthropic-gw-acme` in
-  `explicit_providers` admits nothing extra: only the served provider counts.
-  For every other auth method, the check compares the credential's own provider.
-- [pinned] Readers first for gateway meaning: deploy routing 0.7.15 before a
-  runner declares a `gateway` pair, with routing able to match the vault's
-  `llm-gateway` credential as `gateway`. Older parsers accept the token and keep
-  the whole declaration: `RunnerPair.auth_method` is a string and
-  `validate_runner` checks only its token shape (`src/declarations.rs`,
-  `RunnerPair` and `validate_runner`). Matching is by exact equality, so an
-  older router can match a credential already reported as `gateway`, but cannot
-  match a credential reported under a different method or without one. Parsing
-  the token does not give a router the gateway credential's meaning or derive
-  its method; the rollout rule is semantic, not a decoder compatibility rule.
-
-- [pinned] The provider is never part of an `auth_method`: routing matches
-  a credential's provider separately, so a Claude subscription and another
-  provider's OAuth sign-in are both `oauth`, told apart by provider. A
-  credential the vault reports without an `auth_method` is never routed. A
-  spelling missing from the table still decodes, but nothing may use it
-  until it is added to the table; a provider that meets one matches it only
-  by exact equality, never as a near spelling of a listed one.
+- [pinned] `runner` has the shape `{follows_account_choice?: bool,
+  tool_capabilities?: [string], harnesses?: [token], default_harness?: token,
+  starts_sessions?: bool, harness_limits?: {<harness>: {starts_sessions?: bool,
+  capabilities?: [token]}}}` (`RunnerDeclaration`). Unknown members in the
+  slot or in `runner`, including the members 0.8.0 deleted (`pairs`,
+  `requires_wire_api`, `standing_limits`), invalidate the whole declaration.
+  A refusal names the offending field path, such as `runner.pairs`; no part
+  is applied. The known `harness_limits` member is the exception: it is
+  retained raw and validated independently, so a malformed value does not
+  discard the runner.
+- [pinned] Tokens match `^[a-z][a-z0-9._-]{0,63}$`.
+- [pinned] **Placement.** A route `<provider>/<model>` is placeable on a
+  harness (or, for a runner declaring no `harnesses`, on the runner) when all
+  of these hold:
+  1. the runner declares the `serves` capability, and its current `serves`
+     list for that harness has an entry for the provider that includes the
+     model (`"all"` minus `except`, or the listed ids), as
+     `ServesEntry::includes` in the llm-runner crate computes it;
+  2. the entry says `"login": "none"`, or the vault lists a usable login for
+     the provider that the model's login facts admit. The model catalog documents
+     a row by listing its logins (`login_methods`). A documented row admits only
+     the login kinds it lists. A sign-in kind (any `auth_method` other than
+     `apikey`) listed on some documented row of a provider is a documented sign-in
+     for that provider, and every undocumented row of that provider refuses it.
+     An undocumented row admits every other kind. The check runs on every route,
+     so `"all"` never places a model the provider's login can't run.
+  3. the operator's settings allow it, as before (pins, `only_for`,
+     `not_for`, project runner lists).
+  Routing reads no request format, login kind or endpoint address from a
+  runner for placement. A model placed under `"login": "none"` gets no
+  account selection and no quota or concurrency counting.
+- [pinned] **Reading the lists.** Routing asks each runner declaring the
+  capability with `role.describe {"serves": true}` when the runner connects,
+  when the daemon's module catalog changes, when the model catalog announces
+  a change, and at least every 150 seconds. An unchanged `generation` costs
+  no work. A runner that has never answered has no placeable routes. A
+  harness missing from the answer keeps its last good list, or none; an
+  explicit empty list places nothing there. A failed or refused
+  `role.describe`, or the runner briefly missing from the module catalog (a
+  restart), keeps the runner's last good lists for 5 minutes from its last
+  successful read. After that the runner reads as never answered, with
+  nothing placed, until a read succeeds. A list `check_serves` refuses is not
+  applied in part: the last good list stays, under the same 5 minutes.
+- [pinned] A declaration and a list promise what the runner can drive; they
+  create no credential or route and grant no authority to use one.
 - [pinned] `follows_account_choice` defaults to `false`. When `true`, the
   runner module calls `route.account_for` and uses its answer. Absence or
   `false` makes no such promise; a routing provider must not infer it.
-- [pinned] A runner pair's effective `requires_wire_api` is its own value,
-  else the runner-level value, else `false`. When the effective value is
-  `true`, the runner opens a catalog row for that pair only through its served
-  `wire.api`, so routing excludes rows without that fact at runner-pair matching
-  for `route.select`, panel selection and `route.head_choices`, and uses the
-  same effective value for the `runner_requires_wire_api` explanation. A served
-  fact is present with a value, regardless of its source (`from`); `wire.family` and
-  `wire.npm` do not substitute for `wire.api`. An effective `false` preserves
-  matching without this requirement. A non-boolean, non-null value refuses the
-  whole declaration as `runner.requires_wire_api` or
-  `runner.pairs[index].requires_wire_api`, like other boolean members; the raw
-  `harness_limits` fallback is a separate exception.
-- [pinned] Readers first: routers before 0.7.13 refuse unknown
-  runner-declaration members and drop the runner, so a runner declares
-  `requires_wire_api` only after its router runs 0.7.13 or later.
-- [pinned] Readers first for pair overrides: a 0.7.13 or older reader refuses
-  a pair carrying `requires_wire_api` as an unknown member and drops the whole
-  runner declaration. No runner declares the member on a pair until routing
-  runs 0.7.14 live.
 - [pinned] `harnesses`, when present, lists the exact programs the runner
-  hosts sessions in: 1–16 unique tokens using the pair token grammar above.
-  Empty is refused as `runner.harnesses`, not read as "no program". Invalid
-  or duplicate entries name `runner.harnesses[index]`. Programs are independent
-  of pairs: one runner can host several programs behind the same pair. A
-  runner that launches an agent program must actually host the requested
-  program, never merely relabel a session.
+  hosts sessions in: 1–16 unique tokens. Empty is refused as
+  `runner.harnesses`, not read as "no program". Invalid or duplicate entries
+  name `runner.harnesses[index]`. A runner that launches an agent program
+  must actually host the requested program, never merely relabel a session.
 - [pinned] `default_harness`, when present, is a token listed in `harnesses`;
   without that list or membership it is refused as `runner.default_harness`.
-- [pinned] `harness_limits` optionally narrows the runner's offers for each
-  named harness. `HarnessLimits` has optional `pairs` and `explicit_providers`;
-  `RunnerDeclaration::with_harness_limits` writes the typed map, while
-  `typed_harness_limits` reads and validates the raw member. A missing map,
-  missing harness entry, or absent/null field inherits the runner-level value.
-  Runner-level `pairs` remains the union of what the runner can run. Harness
-  pairs must be a non-empty, unique subset, comparing only `wire_api` and
-  `auth_method`. Harness-limit pairs keep the `{wire_api, auth_method}` shape:
-  they only narrow the pair set and never change a pair's requirement, which
-  comes only from `runner.pairs` and the runner-level value. A
-  `requires_wire_api` member in a harness-limit pair is ignored like other
-  unknown members and has no effect. Harness `explicit_providers` is a non-empty, unique provider
-  allow-list with the standing-limit token grammar and 64-entry bound. For
-  gateway credentials, it compares the served catalog provider as pinned in
-  the gateway rules above. When
-  a runner-level allow-list exists, every harness provider must be in it;
-  when absent, a harness may introduce an allow-list. Neither field may broaden
-  what the runner offers. The union remains safe for readers that ignore the
-  restrictions: they over-offer for a harness, never beyond the runner's ability.
+- [pinned] `harness_limits` optionally states facts per named harness:
+  `starts_sessions` and `capabilities` (§16.2). A missing map, missing
+  harness entry, or absent/null field inherits the runner-level value.
+  `RunnerDeclaration::with_harness_limits` writes the typed map, and
+  `typed_harness_limits` reads and validates the raw member.
 - [pinned] The harness-limits accessor returns `HarnessLimitsError`, naming a
-  missing `harnesses` list, a key outside that list, empty pairs, a pair outside
-  the runner-level set, a provider outside the standing allow-list, or malformed
-  fields. Unknown fields inside a harness entry or its pairs are retained and
-  ignored. A refused value means **use the runner-level values for every
-  harness**, even entries that would be valid alone. Selection and head-choice
-  construction log a warning naming the runner and the error; they do not
-  remove the runner or apply part of the map. `limits_for_harness` resolves
-  inheritance and returns the same error for callers to log and fall back.
-- [pinned] Without `decision_harness` (§16.3), for `route.select`, resolve the session harness from the request,
-  declared default, or sole declared harness before matching models, then use
-  that harness's effective pairs and provider allow-list. If no harness is
-  resolved, use runner-level values. This applies to pins and reused choices
-  as well as ordinary model selection; a pin cannot bypass the limits.
+  missing `harnesses` list, a key outside that list or malformed fields.
+  Unknown fields inside a harness entry are retained and ignored. A refused
+  value means **use the runner-level values for every harness**, even
+  entries that would be valid alone. Selection and head-choice construction
+  log a warning naming the runner and the error; they do not remove the
+  runner or apply part of the map.
+- [pinned] Without `decision_harness` (§16.3), for `route.select`, resolve the
+  session harness from the request, declared default, or sole declared
+  harness before matching models, then place against that harness's `serves`
+  list. With no resolved harness, a model is placeable when some harness of
+  the runner places it. This applies to pins and reused choices as well as
+  ordinary model selection; a pin cannot bypass placement.
 - [pinned] `starts_sessions` defaults to `true`. When `false`, the runner is
   never answered by `route.select`, with or without a requested harness,
   including pinned requests and requests whose `runners` list only it. A
@@ -280,36 +195,75 @@ That group's additive defaults, attested namespace and selector rules are in §1
   lowercase ASCII letters and digits; names are non-empty `.`-separated
   words of lowercase ASCII letters, digits and `_`; `N` is a positive
   decimal integer without a leading zero.
-- [pinned] `standing_limits.explicit_providers`, when present, restricts the
-  runner module to credentials for providers named in that list. Credentials
-  for every other provider are ineligible for that runner module. The list
-  is non-empty, has at most 64 unique entries, and each entry matches the
-  same token grammar as `wire_api`. An empty list is refused rather than
-  ambiguously meaning either no providers or no limit. This lets a gateway
-  use a platform credential only when its registration names the provider.
-  Absent `explicit_providers` means no provider limit. A present
-  `standing_limits: {}` also means no limit and retains its empty object
-  when serialized. For gateway credentials, this list compares the served
-  catalog provider as pinned in the gateway rules above.
-- [pinned] Optional runner members follow §2's null-as-absence rule.
-  Absent `runner`, false `follows_account_choice` and `requires_wire_api`, and empty
-  `tool_capabilities` are omitted when serialized. Absent `harness_limits`, `harnesses` and
-  `default_harness`, and true `starts_sessions`, are omitted too. Slots without
-  the new program members retain their exact 0.4.0 bytes, including an
-  explicit `consumers: []`.
-- [pinned] Rollout is readers first: a 0.3.x routing provider refuses a slot
-  carrying `runner` as an unknown member, discarding even valid consumers
-  in that slot. Runner modules **must not declare `runner` until the routing
-  provider runs routing contract 0.4.0** (or a later version supporting it).
-- [pinned] Program declarations also roll out readers first: a 0.4.0
-  provider refuses a declaration carrying `harnesses`, `default_harness` or
-  `starts_sessions`. A runner declares these members only after its routing
-  provider serves 0.4.1 or later. A caller sends `harness` only when
-  `role.describe` declares `select_harness`.
-- [pinned] Harness limits also roll out **readers first**: routing must run
-  contract 0.7.11 or later before a runner declares `harness_limits`.
-  `parse_consumer_declarations` in 0.7.10 and earlier refuses this unknown
-  member, discarding the whole runner declaration rather than ignoring it.
+- [pinned] **Company gateways.** A gateway credential (`auth_method`
+  `gateway`, §1.3) supplies both an endpoint and its credential; the runner
+  calls that endpoint, and the gateway holds the upstream provider key. A
+  runner names the gateway's own provider id in `serves`. Its routes are
+  `<gateway provider id>/<model>`, borrowing the rows of the catalog
+  provider the vault credential's `serves` names, never the borrowed
+  provider's own route key. A provider without catalog rows borrows the rows
+  of the one catalog provider its active gateway credentials' `serves`
+  collectively names. If they name no provider or more than one, the
+  provider stays unresolved: it gets no routes and nothing is selected from
+  it. The vault sets a credential's `serves` at creation and never changes
+  it. Other credential methods also carry `serves`; only `gateway` enables
+  this borrowing.
+- [pinned] Optional runner members follow §2's null-as-absence rule. Absent
+  `runner`, false `follows_account_choice`, and empty `tool_capabilities` are
+  omitted when serialized. Absent `harness_limits`, `harnesses` and
+  `default_harness`, and true `starts_sessions`, are omitted too.
+- [pinned] **0.8.0 is a clean cut.** A 0.7.x router refuses a declaration
+  without `pairs`, and a 0.8.0 router refuses one carrying `pairs`,
+  `requires_wire_api` or `standing_limits`. Routing and every runner switch in
+  one restart window; no runner sends both shapes.
+
+### 1.3 Shared spellings: `wire_api` and `auth_method`
+
+Placement no longer reads these, but `route.account_for`, a runner's
+`routed_accounts` and `service_tiers`, and the catalog still use them.
+
+- [pinned] Each `wire_api` and `auth_method` value has one shared spelling.
+  Decoding checks only the token shape, so accepting a new value never needs
+  a validation change. The tables below are a requirement on the systems
+  that produce these values, not something a decoder enforces: the model
+  catalog serves and the vault reports only spellings listed there. A new
+  spelling is added to its table first, in a text release, before anything
+  uses it. The tables are also exported as `spellings::WIRE_APIS` and
+  `spellings::AUTH_METHODS`.
+- [pinned] `wire_api` names the bytes on the wire: the endpoint shape and
+  the request and reply format.
+
+  | `wire_api` | Wire format |
+  |---|---|
+  | `anthropic.messages` | Anthropic Messages API |
+  | `openai.responses` | OpenAI Responses API, the public shape, also served by other providers |
+  | `openai.chat_completions` | OpenAI-compatible Chat Completions, from any provider |
+  | `openai.chatgpt_responses` | The ChatGPT backend's Responses variant, reached with a ChatGPT subscription |
+  | `google.generate_content` | Gemini `generateContent` |
+  | `google.code_assist` | The Code Assist envelope around `generateContent`, reached with a Google Antigravity sign-in |
+  | `aws.bedrock_converse` | Amazon Bedrock Converse |
+
+- [pinned] The model catalog serves a route's `wire_api` as a per-route fact
+  named `wire.family`. It tells a runner the route's request format; routing
+  doesn't use it for placement.
+- [pinned] `auth_method` names how a request is authorised. The spellings
+  are the vault's own names for its credential kinds:
+
+  | `auth_method` | Credential |
+  |---|---|
+  | `apikey` | An API key |
+  | `oauth` | A provider's OAuth sign-in, such as a Claude subscription |
+  | `chatgpt` | A ChatGPT subscription sign-in |
+  | `antigravity` | A Google Antigravity sign-in |
+  | `gateway` | One vault credential supplies both the endpoint and its credential (§1.2, company gateways) |
+
+- [pinned] The provider is never part of an `auth_method`: a Claude
+  subscription and another provider's OAuth sign-in are both `oauth`, told
+  apart by provider. A credential the vault reports without an `auth_method`
+  is never routed. A spelling missing from the table still decodes, but
+  nothing may use it until it is added to the table; a provider that meets
+  one matches it only by exact equality, never as a near spelling of a
+  listed one.
 
 ## 2. Wire
 
@@ -404,8 +358,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `consumer_declarations`: consumer `iq`, `ladder`, `placement`, `selectors`
     and `kind`, including the attested module-root rule (§16.1).
   - `consumer_priority`: independently gated scheduling priority (§16.1.1).
-  - `runner_harness_facts`: per-harness `starts_sessions`, `capabilities`
-    and `exclude` (§16.2).
+  - `runner_harness_facts`: per-harness `starts_sessions` and `capabilities`
+    (§16.2).
   - `decision_harness`: decisions bind `{module, harness}` in the existing
     `runner` object (§16.3); no member changes type.
   - `select_kind`: workload `kind` on selects (§16.4).
@@ -438,7 +392,7 @@ That group's additive defaults, attested namespace and selector rules are in §1
     hold choice will be read, and is never answered with the choice
      silently ignored.
   - `select_harness`: `route.select` reads `harness` (§5.1), matching the
-    runner's declared session programs, not its wire/auth pairs. A provider
+    runner's declared session programs, not its providers. A provider
     without it refuses the member (§2); a caller sends it only with the group.
   - `select_prefer`: `route.select` reads `prefer` (§5.1), an ordered list of
     route keys the caller would like. A provider without it refuses the member
@@ -2175,9 +2129,9 @@ Replacement params and answer:
 - [pinned] Optional `harness` uses the same token validation and hosted-program
   check as `route.select`. A named harness not hosted by the requested
   session-starting runner is `no_route` with reason `harness_unavailable`, and
-  the refusal message names the harness. A known harness uses its effective
-  `harness_limits` pairs and provider allow-list. Absent/null `harness` means
-  the runner-level union, not its default harness. Use routing 0.7.11 or later
+  the refusal message names the harness. A known harness uses its own
+  `serves` list (§1.2). Absent/null `harness` means every model some harness
+  of the runner places, not its default harness. Use routing 0.7.11 or later
   when relying on harness-specific choices; earlier parsers ignore the member
   and continue to return runner-level choices.
 - [pinned] Models are bytewise sorted by `(provider, model)`, each pair unique.
@@ -2553,9 +2507,10 @@ breaking release, after callers have migrated to `route.select`.
 ### 16.2 `runner_harness_facts` and shared exclusion specs
 
 - [pinned] Existing `runner.harness_limits.<harness>` entries additionally admit
-  `starts_sessions?: bool`, `capabilities?: [token]`, `exclude?: [spec]`.
-  Missing `starts_sessions` inherits the runner-level value; missing capabilities
-  asserts no new task capability; missing exclusions adds no exclusion.
+  `starts_sessions?: bool` and `capabilities?: [token]`. Missing
+  `starts_sessions` inherits the runner-level value; missing capabilities
+  asserts no new task capability. 0.8.0 deleted `exclude`: a harness that
+  can't run a model leaves it out of its `serves` list (§1.2).
   `capabilities` is open: defined names are `one_off` (can host a tool-free
   one-off session), `fork_answer` (can answer a fork), `output_cap` (can enforce
   the requested output cap), `submit_tool` (can submit a worker's result through
@@ -2563,8 +2518,7 @@ breaking release, after callers have migrated to `route.select`.
   a worker's plans).
   Unknown tokens are retained and confer no known capability.
 - [pinned] A harness with `starts_sessions: false` never hosts a new session.
-  Exclusions reject catalog routes even though the catalog lists them. Per-harness
-  facts only narrow runner-wide offers, never widen them. Existing independent
+  Per-harness facts only narrow runner-wide offers, never widen them. Existing independent
   malformed-map warning and fallback rules still apply.
   `typed_harness_limits_serving` gates new facts for a reader; without the group,
   such a map is not applied. The ungated typed accessor validates producer data.
@@ -2580,8 +2534,7 @@ breaking release, after callers have migrated to `route.select`.
   provider-level matches regardless of order; within each level, the later
   matching entry wins. A positive entry uses the list's base value; `-` flips
   it. A list with no matching entry leaves the caller's value unchanged.
-  For harness `exclude`, the base is `true` (excluded), with no match admitting
-  the route. `route_spec::is_route_spec`, `matches` and `resolve` share these
+  `route_spec::is_route_spec`, `matches` and `resolve` share these
   rules; `resolve` returns `None` when there is no match.
 - [pinned] There are no globs, version ranges or special `:variant` semantics
   in exclusion specs: a colon is part of the literal model id. A harness

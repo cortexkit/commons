@@ -863,6 +863,12 @@ pub const CASES: &[CaseSpec] = &[
         &[],
         "every group role.describe declares lists all its ops, and the groups it declares are exactly the groups the subject declares, so no group is claimed on the wire while its cases are skipped",
     ),
+    case("role_describe_serves_opt_in", &[Capability::Serves],
+        "ordinary role.describe answers omit serves, including when the parameter is false"),
+    case("role_describe_serves_list", &[Capability::Serves],
+        "role.describe with serves requested returns a valid list for the declared harnesses"),
+    case("role_describe_serves_generation", &[Capability::Serves],
+        "two consecutive requested lists with equal generation are identical"),
     case(
         "extra_op_still_admitted",
         &[],

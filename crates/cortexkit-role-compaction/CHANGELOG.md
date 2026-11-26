@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- Use llm-runner 0.10. The public `rides` and `SpeaksFor` re-exports now use
+  the llm-runner 0.10 types.
+
 ## 0.4.13
 
 - `Entry.host_frames` lists every verified host frame of an entry, one item per

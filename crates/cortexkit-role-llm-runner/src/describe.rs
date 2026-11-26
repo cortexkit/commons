@@ -9,6 +9,9 @@
 //! module build, so a consumer may cache it for as long as it talks to the
 //! same module incarnation.
 
+pub use crate::serves::{
+    check_serves, decode_serves, Serves, ServesEntry, ServesError, ServesLogin, ServesModels,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -230,6 +233,9 @@ pub struct RoleDescribe {
     /// Backup labels required when the `session_class` group is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_class: Option<SessionClass>,
+    /// Current provider and model lists, present only when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serves: Option<Serves>,
 }
 
 /// Model-facing properties explicitly offered by one session harness.
@@ -537,6 +543,12 @@ impl RoleDescribe {
     /// List routed sign-in methods (the capability must also be listed).
     pub fn with_routed_accounts(mut self, methods: Vec<String>) -> Self {
         self.routed_accounts = Some(methods);
+        self
+    }
+
+    #[must_use]
+    pub fn with_serves(mut self, serves: Serves) -> Self {
+        self.serves = Some(serves);
         self
     }
 

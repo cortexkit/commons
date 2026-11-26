@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- Use compaction 0.5. The public view APIs now take and return compaction 0.5
+  types. Existing plan versions and wire output are unchanged.
+
 ## 0.4.1
 
 - Adopt compaction contract 0.4.5 and add a render-plan vector proving that

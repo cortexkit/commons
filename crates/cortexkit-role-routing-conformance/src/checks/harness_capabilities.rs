@@ -15,14 +15,6 @@ fn runner_declaration(
         role_declarations: [(
             crate::wire::ROLE_DECLARATIONS_KEY.into(),
             json!({"runner": {
-                // Cover every shared pair spelling so the fixture does not depend
-                // on which supported route facts a provider uses.
-                "pairs": [
-                    {"wire_api": "openai.responses", "auth_method": "apikey"},
-                    {"wire_api": "openai.responses", "auth_method": "oauth"},
-                    {"wire_api": "anthropic.messages", "auth_method": "apikey"},
-                    {"wire_api": "anthropic.messages", "auth_method": "oauth"}
-                ],
                 "harnesses": [harness],
                 "default_harness": harness,
                 "harness_limits": {harness: limits}

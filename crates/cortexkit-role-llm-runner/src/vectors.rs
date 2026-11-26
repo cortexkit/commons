@@ -470,6 +470,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/reply-too-large.json"),
     ),
     (
+        "role-describe-serves.json",
+        include_str!("../test-vectors/llm-runner-v1/role-describe-serves.json"),
+    ),
+    (
         "role-describe.json",
         include_str!("../test-vectors/llm-runner-v1/role-describe.json"),
     ),

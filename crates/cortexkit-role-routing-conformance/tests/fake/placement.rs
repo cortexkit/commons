@@ -198,18 +198,6 @@ impl FakeRoute {
                     declaration.is_none_or(|decl| {
                         let limits = decl.limits_for_harness(Some(harness)).unwrap_or_default();
                         limits.starts_sessions.unwrap_or(decl.starts_sessions)
-                            && (self.fault("placement_harness_exclusion")
-                                || !limits
-                                .exclude
-                                .as_ref()
-                                .and_then(|specs| {
-                                    cortexkit_role_routing_conformance::wire::route_spec::resolve(
-                                        specs.iter().map(String::as_str),
-                                        key,
-                                        true,
-                                    )
-                                })
-                                .unwrap_or(false))
                     })
                 });
                 if let Some(harness) = chosen {
