@@ -226,7 +226,8 @@ impl Manifest {
         templates: Vec<Template>,
     ) -> Result<Self, DecodeError> {
         let repository = repository.into();
-        validate_metadata(&repository, &logs, &templates)?;
+        require(valid_repository(&repository))?;
+        validate_metadata(&logs, &templates)?;
         let templates_digest = templates_digest(&templates)?;
         Ok(Self {
             schema: SCHEMA,
@@ -264,7 +265,7 @@ impl Manifest {
         Ok(bytes)
     }
 
-    /// Validate framing, shape, template ids and the templates digest, in that order.
+    /// Validate framing, shape, the repository URL, template ids and the templates digest, in that order.
     pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -290,7 +291,10 @@ impl Manifest {
             .into_iter()
             .map(|Object(template)| template.validate())
             .collect::<Result<Vec<_>, _>>()?;
-        validate_metadata(&raw.repository, &logs, &templates)?;
+        validate_metadata(&logs, &templates)?;
+        if !valid_repository(&raw.repository) {
+            return Err(DecodeError::Repository);
+        }
         for template in &templates {
             if template.id != template_id(&template.target, &template.text) {
                 return Err(DecodeError::TemplateId);
@@ -310,14 +314,9 @@ impl Manifest {
     }
 }
 
-fn validate_metadata(
-    repository: &str,
-    logs: &[LogSource],
-    templates: &[Template],
-) -> Result<(), DecodeError> {
+fn validate_metadata(logs: &[LogSource], templates: &[Template]) -> Result<(), DecodeError> {
     require(
-        valid_repository(repository)
-            && (1..=8).contains(&logs.len())
+        (1..=8).contains(&logs.len())
             && templates.windows(2).all(|pair| pair[0].id() < pair[1].id()),
     )
 }

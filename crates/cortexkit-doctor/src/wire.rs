@@ -14,6 +14,8 @@ pub enum DecodeError {
     NotJson,
     ExtraOutput,
     Shape,
+    /// A manifest repository string is not an accepted GitHub repository URL.
+    Repository,
     PlanDigest,
     TemplateId,
     TemplatesDigest,
@@ -26,6 +28,7 @@ impl DecodeError {
             Self::NotJson => "not_json",
             Self::ExtraOutput => "extra_output",
             Self::Shape => "shape",
+            Self::Repository => "repository",
             Self::PlanDigest => "plan_digest",
             Self::TemplateId => "template_id",
             Self::TemplatesDigest => "templates_digest",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Use `cortexkit-doctor` 0.2.0 for the public manifest types. Generated
+  manifest bytes are unchanged.
+
 ## 0.1.0
 
 - Generate and check canonical doctor log manifests from Cargo lib and bin

@@ -126,7 +126,7 @@ fn check_read_only(adapter: &mut impl Adapter) -> Result<(), &'static str> {
     // Malformed stdout does not erase a measurement, but a check that never
     // launched cannot demonstrate that the program leaves both homes alone.
     match check {
-        Err(error @ (runner::RunError::LaunchFailed | runner::RunError::HomeRelative)) => {
+        Err(error @ (runner::RunError::LaunchFailed(_) | runner::RunError::HomeRelative)) => {
             Err(run_failure(error))
         }
         _ => Ok(()),

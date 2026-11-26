@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, io::ErrorKind};
 
 use crate::DecodeError;
 
@@ -13,7 +13,8 @@ pub enum Crash {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RunError {
-    LaunchFailed,
+    /// I/O error from spawning or waiting for the program.
+    LaunchFailed(ErrorKind),
     HomeRelative,
     Crashed(Crash),
     TimedOut,
@@ -22,10 +23,10 @@ pub enum RunError {
 }
 
 impl RunError {
-    /// Stable name of the failure, without the exit code, signal or decode stage.
+    /// Stable name of the failure, without the I/O kind, crash details or decode stage.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LaunchFailed => "launch_failed",
+            Self::LaunchFailed(_) => "launch_failed",
             Self::HomeRelative => "home_relative",
             Self::Crashed(_) => "crashed",
             Self::TimedOut => "timed_out",

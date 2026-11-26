@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -105,7 +107,7 @@ fn runner_helper_exit_and_output_precedence() {
     );
     for (mode, expected) in [
         ("abort", RunError::Crashed(Crash::Signal(6))),
-        ("exit3", RunError::Crashed(Crash::ExitCode(3))),
+        ("exit3-text", RunError::Crashed(Crash::ExitCode(3))),
         (
             "extra-output",
             RunError::InvalidOutput(DecodeError::ExtraOutput),
@@ -134,10 +136,55 @@ fn runner_helper_exit_and_output_precedence() {
         runner::manifest(fixture.program("abort"), &options),
         Err(RunError::Crashed(Crash::Signal(6)))
     );
+}
+
+#[test]
+fn runner_helper_check_no_doctor_requires_empty_usage_error() {
+    let fixture = Fixture::new();
+    let options = fixture.options();
+    let finding = finding(&fixture.program("probe"), &options);
+    for (mode, code, check_error) in [
+        ("exit2", 2, RunError::NoDoctor),
+        ("exit101", 101, RunError::Crashed(Crash::ExitCode(101))),
+    ] {
+        let program = fixture.program(mode);
+        assert_eq!(
+            runner::check(&program, &options),
+            Err(check_error),
+            "{mode}"
+        );
+        assert_eq!(
+            runner::manifest(&program, &options),
+            Err(RunError::NoDoctor)
+        );
+        assert_eq!(
+            fix(&program, &finding, &options),
+            Err(RunError::Crashed(Crash::ExitCode(code)))
+        );
+    }
     assert_eq!(
-        runner::check(fixture.data.join("missing-program"), &options),
-        Err(RunError::LaunchFailed)
+        runner::check(fixture.program("exit2-text"), &options),
+        Err(RunError::Crashed(Crash::ExitCode(2)))
     );
+}
+
+#[test]
+fn runner_helper_launch_error_preserves_io_kind() {
+    let fixture = Fixture::new();
+    let options = fixture.options();
+    let missing = fixture.data.join("missing-program");
+    let non_executable = fixture.data.join("non-executable");
+    fs::write(&non_executable, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o600)).unwrap();
+
+    for (path, kind) in [
+        (missing, ErrorKind::NotFound),
+        (non_executable, ErrorKind::PermissionDenied),
+    ] {
+        let error = runner::check(path, &options).unwrap_err();
+        assert_eq!(error, RunError::LaunchFailed(kind));
+        assert_eq!(error.as_str(), "launch_failed");
+    }
 }
 
 #[test]

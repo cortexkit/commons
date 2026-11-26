@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- Pin `cortexkit-doctor` 0.2.0. The wire contract is still `doctor/v1`.
+- Report `no_doctor` when the check command exits 2 with empty stdout and
+  `repository` when the manifest contains an invalid repository URL.
+
 ## 0.1.1
 
 - No output change; pin `cortexkit-doctor` 0.1.1 so dependents no longer get

@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use cortexkit_doctor::{
-    build_report, CheckOutput, Crash, DecodeError, FindingId, FixOutput, Manifest, ModuleId,
-    ReportContext, ReportError, ReportInput, RunError,
+    build_local_report, build_report, CheckOutput, Crash, DecodeError, FindingId, FixOutput,
+    Manifest, ModuleId, ReportContext, ReportError, ReportInput, RunError,
 };
 use serde::Deserialize;
 use serde_json::{json, value::RawValue, Value};
@@ -134,6 +134,36 @@ fn report_vectors_canonical_and_canaries() {
 }
 
 #[test]
+fn report_vectors_local_note_without_manifest() {
+    let raw = vector("inputs.json");
+    let data: Inputs<'_> = serde_json::from_slice(&raw).unwrap();
+    let context = data.context(data.report_key);
+    let module_id = ModuleId::new("local-example").unwrap();
+    let check = CheckOutput::decode(data.check.get().as_bytes()).unwrap();
+    let bytes = build_local_report(&context, &module_id, &check).unwrap();
+
+    let expected = json!({
+        "schema": "ck.doctor-report/v1",
+        "module_id": "local-example",
+        "title": "",
+        "description": "",
+        "check": {"outcome": "ok"},
+        "findings": as_report(&vector("report.json"))["findings"],
+        "fix_results": [],
+        "logs": [],
+        "dropped_values": 0,
+        "omitted_lines": 0,
+        "evicted_lines": 0,
+    });
+    assert_eq!(as_report(&bytes), expected);
+    assert_eq!(bytes, serde_jcs::to_vec(&expected).unwrap());
+    let text = std::str::from_utf8(&bytes).unwrap();
+    for canary in &data.canaries {
+        assert!(!text.contains(canary), "canary survived: {canary}");
+    }
+}
+
+#[test]
 fn report_preserves_roundtrip_precision_of_evidence() {
     let manifest = manifest();
     let check = CheckOutput::decode(
@@ -199,7 +229,10 @@ fn report_vectors_failure_details_and_module_mismatch() {
         (id.clone(), Err(RunError::Crashed(Crash::ExitCode(3)))),
         (id.clone(), Err(RunError::Crashed(Crash::Signal(6)))),
         (id.clone(), Err(RunError::InvalidOutput(DecodeError::Shape))),
-        (id.clone(), Err(RunError::LaunchFailed)),
+        (
+            id.clone(),
+            Err(RunError::LaunchFailed(std::io::ErrorKind::NotFound)),
+        ),
         (id.clone(), Err(RunError::HomeRelative)),
         (id, Err(RunError::NoDoctor)),
     ];

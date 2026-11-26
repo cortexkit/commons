@@ -24,6 +24,9 @@ mod unix {
         let executable = PathBuf::from(args.next().unwrap());
         let mode = executable.file_name().unwrap().to_str().unwrap();
         assert_eq!(args.next().unwrap(), "doctor");
+        if mode == "no-doctor" {
+            return ExitCode::from(2);
+        }
         let mut args: Vec<_> = args.collect();
         let data = PathBuf::from(std::env::var_os("XDG_DATA_HOME").unwrap());
         let config = PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap());
@@ -54,6 +57,10 @@ mod unix {
                     "{}",
                     canonical.replacen("\"dir\":\"data\"", "\"dir\":\"state\"", 1)
                 );
+                return ExitCode::SUCCESS;
+            }
+            ("manifest", "invalid-repository") => {
+                print!("{}", canonical.replacen("github.com", "example.com", 1));
                 return ExitCode::SUCCESS;
             }
             ("manifest", "stale-manifest") => {

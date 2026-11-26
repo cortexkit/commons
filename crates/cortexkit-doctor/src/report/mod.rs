@@ -134,36 +134,10 @@ pub fn build_report(ctx: &ReportContext, input: &ReportInput<'_>) -> Result<Vec<
     }
     let mut projection = Projection::new(ctx);
     let (check, findings) = match input.check {
-        Ok(output) => {
-            let findings = output
-                .findings()
-                .iter()
-                .map(|finding| {
-                    let fix = finding.fix();
-                    let steps = fix
-                        .plan()
-                        .map(|plan| {
-                            plan.steps()
-                                .iter()
-                                .map(|step| redact_secrets(step))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    Ok(ReportFinding {
-                        id: finding.id().as_str(),
-                        severity: finding.severity(),
-                        summary: redact_secrets(finding.summary()),
-                        evidence: projection.evidence(finding.evidence())?,
-                        fix: ReportFix {
-                            class: fix.class(),
-                            needs_stop: fix.needs_stop(),
-                            steps,
-                        },
-                    })
-                })
-                .collect::<Result<_, ReportError>>()?;
-            (Status::new("ok"), findings)
-        }
+        Ok(output) => (
+            Status::new("ok"),
+            project_findings(output, &mut projection)?,
+        ),
         Err(failure) => (Status::failure(failure), Vec::new()),
     };
     let fix_results = input
@@ -197,7 +171,7 @@ pub fn build_report(ctx: &ReportContext, input: &ReportInput<'_>) -> Result<Vec<
         Report {
             schema: "ck.doctor-report/v1",
             module_id: input.module_id.as_str(),
-            repository: input.manifest.repository(),
+            repository: Some(input.manifest.repository()),
             title: redact_secrets(input.title),
             description: redact_secrets(input.description),
             check,
@@ -212,11 +186,73 @@ pub fn build_report(ctx: &ReportContext, input: &ReportInput<'_>) -> Result<Vec<
     )
 }
 
+/// Build a canonical JSON note without a manifest. It has no repository and
+/// must never be filed as a GitHub issue. It uses the same finding sanitization
+/// as [`build_report`].
+/// Decoding the check has its own input byte limit. This builder has no
+/// separate report byte limit and no logs to evict.
+pub fn build_local_report(
+    ctx: &ReportContext,
+    module_id: &ModuleId,
+    check: &CheckOutput,
+) -> Result<Vec<u8>, ReportError> {
+    let mut projection = Projection::new(ctx);
+    let findings = project_findings(check, &mut projection)?;
+    Ok(encode(&Report {
+        schema: "ck.doctor-report/v1",
+        module_id: module_id.as_str(),
+        repository: None,
+        title: Cow::Borrowed(""),
+        description: Cow::Borrowed(""),
+        check: Status::new("ok"),
+        findings,
+        fix_results: Vec::new(),
+        logs: &[],
+        dropped_values: projection.dropped_values,
+        omitted_lines: 0,
+        evicted_lines: 0,
+    }))
+}
+
+fn project_findings<'a>(
+    output: &'a CheckOutput,
+    projection: &mut Projection<'_>,
+) -> Result<Vec<ReportFinding<'a>>, ReportError> {
+    output
+        .findings()
+        .iter()
+        .map(|finding| {
+            let fix = finding.fix();
+            let steps = fix
+                .plan()
+                .map(|plan| {
+                    plan.steps()
+                        .iter()
+                        .map(|step| redact_secrets(step))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(ReportFinding {
+                id: finding.id().as_str(),
+                severity: finding.severity(),
+                summary: redact_secrets(finding.summary()),
+                evidence: projection.evidence(finding.evidence())?,
+                fix: ReportFix {
+                    class: fix.class(),
+                    needs_stop: fix.needs_stop(),
+                    steps,
+                },
+            })
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct Report<'a> {
     schema: &'static str,
     module_id: &'a str,
-    repository: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository: Option<&'a str>,
     title: Cow<'a, str>,
     description: Cow<'a, str>,
     check: Status<'a>,

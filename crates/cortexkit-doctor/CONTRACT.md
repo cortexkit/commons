@@ -22,6 +22,13 @@ emit template ids.
   files. If a store needs the running module's lock to be read, the check
   returns the `info` finding `store.in_use` instead of waiting. A check reports
   on-disk state, not live process state, and must finish within 10 seconds.
+  For a SQLite store, the check reads `user_version` from header bytes 60–63
+  (zero-based) and opens SQLite only with `immutable=1` when neither `-wal` nor
+  `-shm` exists; otherwise it returns `store.in_use` because even a `mode=ro`
+  reader in WAL mode can write its read mark to `-shm` while the module runs.
+  The runner clears the environment and sets only `XDG_DATA_HOME` and
+  `XDG_CONFIG_HOME`, leaving `HOME` unset; checks must not look for stores
+  outside those roots, including a module's old storage location.
 - [pinned] A `Finding` has `id`, `severity`, `summary`, `evidence`, and `fix`.
   `FindingId` accepts `[a-z0-9_.-]{1,96}` subject to the secret check. An id is
   stable within the module across versions and unique in a `CheckOutput`.
@@ -82,12 +89,16 @@ emit template ids.
      in place of an optional member. Integer kinds and members require an
      integer token; `10.0`, `1e3`, and `-0` are invalid. Malformed digests and
      template ids outside `[0-9a-f]{12}` fail here, not at a digest stage.
-  5. `plan_digest`: a well-formed plan digest does not match `plan_digest`.
-  6. `template_id`: a well-formed id does not match `template_id`.
-  7. `templates_digest`: a well-formed digest does not match `templates_digest`.
+  5. `repository` (`DecodeError::Repository`): a manifest repository string
+     is not an accepted GitHub repository URL (see §5). Missing or non-string
+     repository members still fail at `shape`.
+  6. `plan_digest`: a well-formed plan digest does not match `plan_digest`.
+  7. `template_id`: a well-formed id does not match `template_id`.
+  8. `templates_digest`: a well-formed digest does not match `templates_digest`.
 - [pinned] A `FindingId`, evidence or manifest field name, fix-result code,
-  `ModuleId`, or repository owner or repo segment that matches `redact_secrets`
-  is invalid (`shape`). The `sk-` credential pattern starts at a word boundary
+  or `ModuleId` that matches `redact_secrets` is invalid (`shape`). In a
+  decoded manifest, a matching repository owner or repo segment is invalid
+  (`repository`). The `sk-` credential pattern starts at a word boundary
   (see §7). `task-queue_backlog` is a valid finding id; `sk-example` and an id
   containing a 32-hex run are not. `FindingId` and `ModuleId` enforce these
   checks wherever those types are constructed.
@@ -292,22 +303,28 @@ foreground fixes on any one terminal.
 - [pinned] The runner decides the result after reading, not at the provisional
   exit notification. Bytes received during the grace count. Cleanup after the
   decision does not change it. The first applicable result wins:
-  1. Spawn failed: `launch_failed`.
+  1. Spawn failed: `launch_failed`, with the I/O error kind available to the
+     caller.
   2. Stdout exceeded 1 MiB before reading ended: `invalid_output` with reason
      `too_large`. Reading stops and teardown starts immediately; no decoding
      is attempted.
   3. The direct child had not exited by the deadline: `timed_out`.
   4. The child died from a signal: `crashed` with the integer `signal`.
   5. `manifest` exited nonzero with empty stdout: `no_doctor`.
-  6. Any other nonzero exit: `crashed` with the integer `exit_code`.
-  7. Exit 0 with invalid stdout: `invalid_output` with the first
+  6. `check` exited 2 with empty stdout: `no_doctor`.
+  7. Any other nonzero exit: `crashed` with the integer `exit_code`.
+  8. Exit 0 with invalid stdout: `invalid_output` with the first
      `DecodeError` stage as its reason. Otherwise the runner returns the
      parsed document. No failure carries child output text.
 
-`RunError` has variants `LaunchFailed`, `HomeRelative`, `Crashed(Crash)`,
-`TimedOut`, `InvalidOutput(DecodeError)` and `NoDoctor`. `Crash` is either
-`ExitCode(i32)` or `Signal(i32)`. `RunError::as_str()` returns the failure name
-above without details.
+Unlike `manifest`, `check` treats only the usage exit (2) as evidence of a
+missing subcommand, so a panic or other failed check with empty stdout still
+surfaces as `crashed`.
+
+`RunError` has variants `LaunchFailed(std::io::ErrorKind)`, `HomeRelative`,
+`Crashed(Crash)`, `TimedOut`, `InvalidOutput(DecodeError)` and `NoDoctor`.
+`Crash` is either `ExitCode(i32)` or `Signal(i32)`. `RunError::as_str()` returns
+the failure name above without details, and reports omit the launch error kind.
 
 ## 5. Manifest and template generator
 
@@ -535,6 +552,12 @@ module, manifest, text, check result and budget supplied to `ReportInput::new`.
 Use `with_fix_results` and `with_log_tails` to include those inputs. The returned
 bytes have no trailing newline. `RunError` and `Crash` are platform-independent;
 the Unix `runner` module also exports the same types.
+
+When no valid manifest is available, `build_local_report(&ReportContext,
+&ModuleId, &CheckOutput)` returns a local note in the same canonical JSON form
+but omits `repository`. It uses the same finding projection and secret pass.
+The title, description, fix results, and logs are empty, and the builder
+imposes no separate byte limit. This form is never filed as a GitHub issue.
 
 If all eight HMAC windows for a new path or ref are already in use, the builder
 returns `alias_exhausted` without a report. It never reuses another value's alias

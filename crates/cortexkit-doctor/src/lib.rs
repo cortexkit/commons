@@ -71,7 +71,7 @@ pub use output::{
     is_digest, plan_digest, CheckOutput, Finding, FindingId, Fix, FixClass, FixOutput, FixResult,
     ModuleId, Plan, Severity,
 };
-pub use report::{build_report, ReportContext, ReportError, ReportInput};
+pub use report::{build_local_report, build_report, ReportContext, ReportError, ReportInput};
 pub use run_error::{Crash, RunError};
 pub use secrets::redact_secrets;
 pub use wire::{DecodeError, MAX_OUTPUT_BYTES};

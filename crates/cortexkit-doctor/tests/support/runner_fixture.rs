@@ -47,11 +47,17 @@ mod unix {
                 assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) }, 0);
                 process::abort();
             }
+            "exit2" => return ExitCode::from(2),
+            "exit2-text" => {
+                print!("test-only text");
+                return ExitCode::from(2);
+            }
             "exit3" => return ExitCode::from(3),
             "exit3-text" => {
                 print!("test-only text");
                 return ExitCode::from(3);
             }
+            "exit101" => return ExitCode::from(101),
             "extra-output" => {
                 write_check();
                 print!("test-only text");

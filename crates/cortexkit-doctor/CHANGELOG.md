@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Report a missing `doctor` subcommand when `check` exits 2 with empty stdout,
+  and retain the I/O error kind when a launch fails.
+- Distinguish invalid GitHub repository URLs from other manifest shape errors.
+- Build local-only reports from validated check output even without a manifest.
+- Document how checks inspect SQLite stores without writing and which storage
+  roots the runner exposes. Existing `doctor/v1` wire and report bytes are unchanged.
+
 ## 0.1.1
 
 - No output change; drop `serde_jcs` as a normal dependency so dependents don't

@@ -160,7 +160,10 @@ fn exercise_foreground() {
     let bad = fixture.data.join("missing-interpreter");
     fs::write(&bad, "#!/no-such-fixture-interpreter\n").unwrap();
     fs::set_permissions(&bad, fs::Permissions::from_mode(0o700)).unwrap();
-    assert_eq!(fix(&bad, &finding, &options), Err(RunError::LaunchFailed));
+    assert_eq!(
+        fix(&bad, &finding, &options),
+        Err(RunError::LaunchFailed(std::io::ErrorKind::NotFound))
+    );
     assert_reclaimed();
 
     let background = pty_child("background").process_group(0).output().unwrap();

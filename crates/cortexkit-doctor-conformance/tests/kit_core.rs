@@ -32,9 +32,9 @@ impl Fixture {
         let program_dir = tempfile::tempdir().unwrap();
         let program = program_dir.path().join(mode);
         let binary = env!("CARGO_BIN_EXE_cortexkit-doctor-conformance-fixture");
-        if fs::hard_link(binary, &program).is_err() {
-            fs::copy(binary, &program).unwrap();
-        }
+        // A sibling fork can inherit a copy's write descriptor, so exec fails
+        // with "Text file busy". A symlink keeps the mode in argv[0] without a copy.
+        symlink(binary, &program).unwrap();
         Self {
             _program_dir: program_dir,
             program,
@@ -135,6 +135,28 @@ fn kit_core_rejects_invalid_check_without_output_text() {
 }
 
 #[test]
+fn kit_core_reports_missing_doctor_for_check_and_manifest() {
+    let runs = run(&mut Fixture::new("no-doctor"));
+    assert_eq!(
+        failures(&runs),
+        [
+            (
+                "output.valid",
+                Outcome::Failed {
+                    reason: "no_doctor"
+                }
+            ),
+            (
+                "manifest.valid",
+                Outcome::Failed {
+                    reason: "no_doctor"
+                }
+            ),
+        ]
+    );
+}
+
+#[test]
 fn kit_core_rejects_check_changes_to_either_home() {
     for mode in [
         "write-data",
@@ -196,6 +218,26 @@ fn kit_core_reports_manifest_shape_and_digest_independently() {
                 reason: "templates_digest"
             }
         )]
+    );
+}
+
+#[test]
+fn kit_core_reports_invalid_manifest_repository() {
+    let runs = run(&mut Fixture::new("invalid-repository"));
+    assert_eq!(
+        failures(&runs),
+        [(
+            "manifest.valid",
+            Outcome::Failed {
+                reason: "repository"
+            }
+        )]
+    );
+    assert_eq!(
+        outcome(&runs, "manifest.digest"),
+        Outcome::Skipped {
+            reason: "prerequisite_failed"
+        }
     );
 }
 

@@ -338,6 +338,25 @@ mod wire_contract {
             doc["module_id"] = json!(module);
             manifest_error(&doc, DecodeError::Shape);
         }
+        let mut doc = initial.clone();
+        doc["logs"] = json!([]);
+        manifest_error(&doc, DecodeError::Shape);
+        let mut doc = initial;
+        doc["templates"][0]["target"] = json!("x\u{85}");
+        manifest_error(&doc, DecodeError::Shape);
+    }
+
+    #[test]
+    fn manifest_distinguishes_invalid_repository_url_from_shape() {
+        let initial = manifest_doc();
+        for url in [
+            "http://github.com/owner/demo",
+            "https://example.com/owner/demo",
+        ] {
+            let mut doc = initial.clone();
+            doc["repository"] = json!(url);
+            manifest_error(&doc, DecodeError::Repository);
+        }
         for repo in [
             "owner/..",
             "owner/demo.git",
@@ -351,13 +370,16 @@ mod wire_contract {
         ] {
             let mut doc = initial.clone();
             doc["repository"] = json!(format!("https://github.com/{repo}"));
-            manifest_error(&doc, DecodeError::Shape);
+            manifest_error(&doc, DecodeError::Repository);
         }
         let mut doc = initial.clone();
+        doc["repository"] = json!("not a URL");
         doc["logs"] = json!([]);
         manifest_error(&doc, DecodeError::Shape);
         let mut doc = initial;
-        doc["templates"][0]["target"] = json!("x\u{85}");
+        doc["repository"] = json!(null);
+        manifest_error(&doc, DecodeError::Shape);
+        doc.as_object_mut().unwrap().remove("repository");
         manifest_error(&doc, DecodeError::Shape);
     }
 

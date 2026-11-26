@@ -13,7 +13,7 @@ use crate::{DecodeError, MAX_OUTPUT_BYTES};
 pub(super) fn run(
     command: &mut Command,
     try_foreground: bool,
-    is_manifest: bool,
+    subcommand: &str,
     timeout: Duration,
     limits: Limits,
 ) -> Result<Vec<u8>, RunError> {
@@ -24,7 +24,9 @@ pub(super) fn run(
     // foreground group even if the hook succeeded but exec failed.
     unsafe { command.pre_exec(move || start_group(tty)) };
     let start = Instant::now();
-    let mut child = command.spawn().map_err(|_| RunError::LaunchFailed)?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| RunError::LaunchFailed(error.kind()))?;
     let pgid = child.id() as libc::pid_t;
     let end = collect(child.stdout.take(), pgid, start, timeout, limits.exit_grace)?;
 
@@ -47,16 +49,15 @@ pub(super) fn run(
             ReadEnd::Exited { .. } => unreachable!(),
         };
     };
-    let status = status.map_err(|_| RunError::LaunchFailed)?;
+    let status = status.map_err(|error| RunError::LaunchFailed(error.kind()))?;
     if let Some(signal) = status.signal() {
         Err(RunError::Crashed(Crash::Signal(signal)))
     } else if !status.success() {
-        if is_manifest && bytes.is_empty() {
+        let code = status.code().expect("exited without a signal");
+        if bytes.is_empty() && matches!((subcommand, code), ("manifest", _) | ("check", 2)) {
             Err(RunError::NoDoctor)
         } else {
-            Err(RunError::Crashed(Crash::ExitCode(
-                status.code().expect("exited without a signal"),
-            )))
+            Err(RunError::Crashed(Crash::ExitCode(code)))
         }
     } else if read_failed {
         Err(RunError::InvalidOutput(DecodeError::NotJson))
@@ -83,7 +84,7 @@ fn collect(
     let mut read_failed = false;
     let mut buffer = [0; 16 * 1024];
     loop {
-        if exit.is_none() && exited(pid).map_err(|_| RunError::LaunchFailed)? {
+        if exit.is_none() && exited(pid).map_err(|error| RunError::LaunchFailed(error.kind()))? {
             exit = Some(Instant::now());
         }
         let wait = if let Some(exit) = exit {

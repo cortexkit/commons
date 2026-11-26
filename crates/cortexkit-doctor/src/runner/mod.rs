@@ -194,7 +194,7 @@ fn invoke<T>(
     let stdout = process::run(
         &mut command,
         terminal_handoff,
-        args[0] == "manifest",
+        args[0],
         timeout,
         options.limits,
     )?;
