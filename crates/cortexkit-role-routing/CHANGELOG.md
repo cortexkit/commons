@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.41
+
+- Treat an output limit at or above the known context window as unknown when
+  reserving output for `route.budget_quote` package ceilings.
+
 ## 0.7.40
 
 - Track llm-runner `0.9`.

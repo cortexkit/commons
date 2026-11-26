@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.46
+
+- Pin routing `=0.7.41` and check that budget quotes use the unknown output
+  reserve when the catalog output limit equals the context window.
+
 ## 0.10.45
 
 - Track routing `=0.7.40`.

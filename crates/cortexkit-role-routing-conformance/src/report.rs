@@ -107,6 +107,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("panel_replacement_invalid_slot", "select_panel: replace.slot at policy.size is invalid_request naming replace.slot"),
     check("budget_quote_matches_helper", "budget_quote: the answer equals budget::quote over retained selection capacities"),
     check("budget_quote_foreign_unknown", "budget_quote: a foreign decision is unknown_decision"),
+    check("budget_quote_output_placeholder", "budget_quote: an output limit equal to the context window uses the unknown output reserve"),
     check("explain_matches_selection", "explain: check_explain validates decision, route, runner and serving provider"),
     check("explain_foreign_unknown", "explain: a foreign decision is unknown_decision"),
     check("account_status_blocked_limited", "account_status: a blocked account is limited with its configured reset"),

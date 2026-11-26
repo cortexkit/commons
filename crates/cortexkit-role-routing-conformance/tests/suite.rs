@@ -226,6 +226,27 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
 }
 
 #[tokio::test]
+async fn budget_quote_output_placeholder_case_passes_and_rejects_known_reserve() {
+    let name = "budget_quote_output_placeholder";
+    let report = run_suite(&FakeSubject::new(Defects::default())).await;
+    assert_eq!(
+        report.outcome(name),
+        Some(&CheckOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    breaks(
+        Defects {
+            extension: Some(name),
+            ..Defects::default()
+        },
+        name,
+        "answer differs from the exact capacity quote",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn routing_078_panel_replacement_detail_requires_cause() {
     let check = "panel_replacement_detail_requires_cause";
     for declared in [true, false] {

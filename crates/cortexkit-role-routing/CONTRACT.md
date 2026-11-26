@@ -2110,6 +2110,7 @@ Replacement params and answer:
   max_output_tokens}` in request order. It also validates the decision list.
 - [pinned] With saturating arithmetic, window is the known context window or
   128,000. Output reserve is min(max output or 32,000 when unknown, 64,000).
+  For this reserve, a max output at or above the known context window is unknown.
   Seat package ceiling is floor((window − output reserve − 16,000) / 2).
   Panel ceiling is the smallest seat ceiling. A limiting tie takes the
   bytewise-smaller route key, then earlier decision in request order. Package

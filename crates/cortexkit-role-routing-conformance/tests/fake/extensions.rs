@@ -484,8 +484,15 @@ impl FakeRoute {
                         &seats,
                         params.get("prompt_tokens").and_then(Value::as_u64),
                     )?)?;
-                    if self.fault("budget_quote_matches_helper") {
+                    // Break the multi-seat package total, not single-seat capacity quotes.
+                    if self.fault("budget_quote_matches_helper") && seats.len() > 1 {
                         value["package"]["tokens"] = json!(0);
+                    }
+                    if self.fault("budget_quote_output_placeholder")
+                        && matches!(seats.as_slice(), [seat] if seat.max_output_tokens == seat.context_window)
+                    {
+                        value["package"]["tokens"] = json!(0);
+                        value["seats"][0]["package_tokens"] = json!(0);
                     }
                     Ok(value)
                 } else {

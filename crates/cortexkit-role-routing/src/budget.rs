@@ -249,7 +249,7 @@ pub fn quote(seats: &[BudgetSeat], prompt_tokens: Option<u64>) -> Result<BudgetQ
     for seat in seats {
         let known = seat.context_window != 0;
         let window = if known { seat.context_window } else { 128_000 };
-        let output = if seat.max_output_tokens == 0 {
+        let output = if seat.max_output_tokens == 0 || has_placeholder_output(seat) {
             32_000
         } else {
             seat.max_output_tokens
@@ -276,13 +276,17 @@ pub fn quote(seats: &[BudgetSeat], prompt_tokens: Option<u64>) -> Result<BudgetQ
     Ok(BudgetQuote::new(limiting.expect("non-empty seats"), quoted))
 }
 
+fn has_placeholder_output(seat: &BudgetSeat) -> bool {
+    seat.context_window != 0 && seat.max_output_tokens >= seat.context_window
+}
+
 fn output_limit(seat: &BudgetSeat, window: u64, prompt: u64) -> OutputLimit {
     let room = window.saturating_sub(prompt).saturating_sub(4_096);
     let reason = if seat.max_output_tokens == 0 {
         Some(OutputLimitReason::NoOutputLimit)
     } else if seat.context_window == 0 {
         Some(OutputLimitReason::NoContextWindow)
-    } else if seat.max_output_tokens >= window {
+    } else if has_placeholder_output(seat) {
         Some(OutputLimitReason::Placeholder)
     } else if room == 0 {
         Some(OutputLimitReason::NoRoom)
@@ -358,6 +362,14 @@ mod tests {
         );
         assert_eq!(answer, expected);
         assert_eq!(check_budget_quote(&seats, Some(90_000), &expected), Ok(()));
+    }
+
+    #[test]
+    fn budget_quote_clef_placeholder_uses_unknown_output_reserve() {
+        let answer = one(65_536, 65_536, None);
+        // (65,536 context - 32,000 unknown output - 16,000 prompt reserve) / 2.
+        assert_eq!(answer.package.tokens, 8_768);
+        assert_eq!(answer.seats[0].package_tokens, 8_768);
     }
 
     #[test]
@@ -467,7 +479,7 @@ mod tests {
             );
         }
         assert_eq!(
-            one(u64::MAX, u64::MAX, None).package.tokens,
+            one(u64::MAX, u64::MAX - 1, None).package.tokens,
             9_223_372_036_854_735_807
         );
     }

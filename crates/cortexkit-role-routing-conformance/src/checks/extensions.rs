@@ -28,6 +28,7 @@ pub(super) const CASES: &[(&str, &str, bool)] = &[
     ("panel_replacement_invalid_slot", "select_panel", false),
     ("budget_quote_matches_helper", "budget_quote", false),
     ("budget_quote_foreign_unknown", "budget_quote", false),
+    ("budget_quote_output_placeholder", "budget_quote", false),
     ("explain_matches_selection", "explain", false),
     ("explain_foreign_unknown", "explain", false),
     ("account_status_blocked_limited", "account_status", false),
@@ -149,6 +150,8 @@ impl<S: RoutingSubject> Suite<'_, S> {
             self.credential_refused_check(name).await?;
         } else if name.starts_with("panel_") {
             self.panel_check(name, &route).await?;
+        } else if name == "budget_quote_output_placeholder" {
+            self.budget_quote_output_placeholder(&route).await?;
         } else if name.starts_with("budget_quote_") || name.starts_with("explain_") {
             let selected = select(&route, &base(), "decision fixture").await?;
             let mut decisions = vec![selected.clone()];
@@ -279,6 +282,35 @@ impl<S: RoutingSubject> Suite<'_, S> {
             self.select_extension_check(name, &route).await?;
         }
         Ok(Ending::Passed)
+    }
+
+    async fn budget_quote_output_placeholder(&self, route: &S::Route) -> Check {
+        const CAPACITY: u64 = 65_536;
+        let mut catalog = fixture::catalog();
+        let model = &mut catalog.models[0];
+        model.context_window = CAPACITY;
+        model.max_output_tokens = CAPACITY;
+        let pin = model.route_key();
+        self.subject.configure_catalog(&catalog).await?;
+
+        let selected = select(
+            route,
+            &with(base(), "pin", json!(pin)),
+            "placeholder output decision",
+        )
+        .await?;
+        let seat = BudgetSeat::from_select_answer(&selected);
+        if (seat.context_window, seat.max_output_tokens) != (CAPACITY, CAPACITY) {
+            return Err("selection did not retain the placeholder output capacity".into());
+        }
+        let quote: BudgetQuote = answer(
+            route,
+            ops::ROUTE_BUDGET_QUOTE,
+            &json!({"decisions": [&seat.decision_id]}),
+            "placeholder output budget quote",
+        )
+        .await?;
+        check_budget_quote(&[seat], None, &quote).map_err(|e| e.to_string())
     }
 
     async fn panel_fixture(&self, shortfall: bool) -> Result<(), String> {
