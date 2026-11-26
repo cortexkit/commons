@@ -1,0 +1,16 @@
+2024-01-01T00:00:00.500Z WARN  example: canary.person@example.invalid | Canary Taxes 2025.pdf | Please summarise my canary diary entry. | ghp_CanaryToken0123456789abcdefABCDEF
+2024-01-01T00:00:00.000Z INFO  example: check extra=ok n_bytes=bad n_bytes=3 path=/h/share/collision-39165
+2024-01-01T00:00:00.000Z INFO  example.worker: [session=issuer:private-bound n_bytes=999 path=/bound/private] check self.session_id=s n_bytes=2 has_file=true extra=ok path=/h/share/cache.sqlite
+2024-01-01T00:00:01.000Z INFO  example: check x=1 n_bytes=3
+2024-01-01T00:00:02.000Z DEBUG example: escaped\\check _ref="q\"u\\w\u0007\r\n" ok=false
+2024-01-01T00:00:03.000Z INFO  example: check reason="closed"junk
+2024-01-01T00:00:04.000Z INFO  example: [span_id=secret-span] check reason=taxes-2025.pdf token=[REDACTED]
+2024-01-01T00:00:05.000Z INFO  example: check reason=0123456789abcdef0123456789abcdef version=sk-CanaryKey0123456789abcdef path=/h/share2/foreign
+2024-01-01T00:00:06.000Z INFO  example: check extra="canary.person@example.invalid" reason="canary.person@example.invalid" version="canary.person@example.invalid"
+2024-01-01T00:00:07.000Z INFO  example: check extra="Canary Taxes 2025.pdf" reason="Canary Taxes 2025.pdf" version="Canary Taxes 2025.pdf"
+2024-01-01T00:00:08.000Z INFO  example: check extra="Please summarise my canary diary entry." reason="Please summarise my canary diary entry." version="Please summarise my canary diary entry."
+2024-01-01T00:00:09.000Z INFO  example: check extra="ghp_CanaryToken0123456789abcdefABCDEF" reason="ghp_CanaryToken0123456789abcdefABCDEF" version="ghp_CanaryToken0123456789abcdefABCDEF"
+2024-01-01T00:00:10.000Z INFO  example2: check n_bytes=99
+
+not a log line
+2024-01-01T00:00:10.000Z INFO  example.dep.fixture: owner canary.person@example.invalid

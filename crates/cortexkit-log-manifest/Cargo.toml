@@ -1,0 +1,18 @@
+[package]
+name = "cortexkit-log-manifest"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Generate doctor log-template manifests from Rust source"
+readme = "README.md"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+cortexkit-doctor = { path = "../cortexkit-doctor", version = "0.1.0" }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+syn = { version = "2", features = ["full", "visit"] }
+tempfile = "3"

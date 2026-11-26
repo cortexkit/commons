@@ -1,0 +1,42 @@
+[package]
+name = "cortexkit-doctor"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Validated wire documents for CortexKit module diagnostics"
+
+[features]
+conformance = []
+# Test-only executable for the runner integration tests, not a doctor API.
+runner-test-fixture = []
+# Enables integration tests that read the repository's report vectors.
+test-vectors = []
+
+[dependencies]
+cortexkit-log = { version = "0.3.7", path = "../cortexkit-log", default-features = false }
+hmac = "0.12"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_jcs = "0.2"
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+cortexkit-store-types = { version = "0.2.2", path = "../cortexkit-store-types" }
+libc = "0.2"
+subc-presence = "0.2"
+
+[target.'cfg(unix)'.dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "cortexkit-doctor-runner-fixture"
+path = "tests/support/runner_fixture.rs"
+test = false
+required-features = ["runner-test-fixture"]
+
+[[test]]
+name = "report_vectors"
+required-features = ["test-vectors"]

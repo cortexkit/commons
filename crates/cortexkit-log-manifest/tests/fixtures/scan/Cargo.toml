@@ -1,0 +1,14 @@
+[package]
+name = "fixture-package"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+name = "fixture_core"
+path = "source/lib_root.rs"
+
+[[bin]]
+name = "fixed-cli"
+path = "tools/fixed.rs"

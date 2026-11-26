@@ -1,0 +1,12 @@
+[package]
+name = "join-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+cortexkit-log = { path = "../../../../cortexkit-log", version = "=0.3.7", default-features = false }
+join-dependency = { path = "dependency" }
+tracing = "0.1"

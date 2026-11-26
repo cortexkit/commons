@@ -1,0 +1,228 @@
+{
+  "canaries": [
+    "canary.person@example.invalid",
+    "Canary Taxes 2025.pdf",
+    "Please summarise my canary diary entry.",
+    "ghp_CanaryToken0123456789abcdefABCDEF",
+    "0123456789abcdef0123456789abcdef",
+    "sk-CanaryKey0123456789abcdef",
+    "invented-private-key-material",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "0123456789abcdef0123456789abcdefGHIjklMNOpqrs"
+  ],
+  "check": {
+    "findings": [
+      {
+        "evidence": [
+          {
+            "kind": "path",
+            "name": "file_path",
+            "value": {
+              "category": "project",
+              "path": "/h/share/cache.sqlite"
+            }
+          },
+          {
+            "kind": "ref",
+            "name": "session_id",
+            "value": "invented-scope"
+          },
+          {
+            "kind": "ref",
+            "name": "scope_ref",
+            "value": "invented-scope"
+          },
+          {
+            "kind": "code",
+            "name": "worker_code",
+            "value": "0123456789abcdef0123456789abcdef"
+          },
+          {
+            "kind": "version",
+            "name": "worker_version",
+            "value": "sk-CanaryKey0123456789abcdef"
+          },
+          {
+            "kind": "timestamp_ms",
+            "name": "seen_at_ms",
+            "value": 1704067200000
+          },
+          {
+            "kind": "timestamp_ms",
+            "name": "retry_at_ms",
+            "value": 1704067200500
+          },
+          {
+            "kind": "path",
+            "name": "canary_1_path",
+            "value": {
+              "category": "other",
+              "path": "canary.person@example.invalid"
+            }
+          },
+          {
+            "kind": "ref",
+            "name": "canary_1_ref",
+            "value": "canary.person@example.invalid"
+          },
+          {
+            "kind": "path",
+            "name": "canary_2_path",
+            "value": {
+              "category": "other",
+              "path": "Canary Taxes 2025.pdf"
+            }
+          },
+          {
+            "kind": "ref",
+            "name": "canary_2_ref",
+            "value": "Canary Taxes 2025.pdf"
+          },
+          {
+            "kind": "path",
+            "name": "canary_3_path",
+            "value": {
+              "category": "other",
+              "path": "Please summarise my canary diary entry."
+            }
+          },
+          {
+            "kind": "ref",
+            "name": "canary_3_ref",
+            "value": "Please summarise my canary diary entry."
+          },
+          {
+            "kind": "path",
+            "name": "canary_4_path",
+            "value": {
+              "category": "other",
+              "path": "ghp_CanaryToken0123456789abcdefABCDEF"
+            }
+          },
+          {
+            "kind": "ref",
+            "name": "canary_4_ref",
+            "value": "ghp_CanaryToken0123456789abcdefABCDEF"
+          }
+        ],
+        "fix": {
+          "class": "safe",
+          "needs_stop": true,
+          "plan": {
+            "digest": "sha256:95dee0f7cf5bb4d9def0a7fd3f6950165d3c832da515db114d457652f9a8c273",
+            "steps": [
+              "Review owner canary.person@example.invalid.",
+              "Discard ghp_CanaryToken0123456789abcdefABCDEF."
+            ],
+            "timeout_ms": 4321
+          }
+        },
+        "id": "store.backlog",
+        "severity": "warning",
+        "summary": "Store backlog. -----BEGIN RSA PRIVATE KEY----- invented-private-key-material -----END PRIVATE KEY----- Summary after END."
+      },
+      {
+        "evidence": [],
+        "fix": {
+          "class": "none",
+          "needs_stop": false
+        },
+        "id": "store.note",
+        "severity": "info",
+        "summary": "Nothing to apply."
+      }
+    ],
+    "schema": "ck.doctor-check/v1"
+  },
+  "config_home": "/h/config",
+  "cr_tail": "2024-01-01T00:00:11.000Z INFO  example: check\r\n",
+  "data_home": "/h/share",
+  "description": "User canary.person@example.invalid ghp_CanaryToken0123456789abcdefABCDEF\n-----BEGIN EC PRIVATE KEY-----\ninvented-private-key-material\n-----END EC PRIVATE KEY-----\nDescription after END.",
+  "evicted_body_bytes": 3247,
+  "other_report_key": [
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8
+  ],
+  "refused_fix": {
+    "code": "files_in_use",
+    "evidence": [
+      {
+        "kind": "path",
+        "name": "file_path",
+        "value": {
+          "category": "data",
+          "path": "/h/share/cache.sqlite"
+        }
+      }
+    ],
+    "result": "refused",
+    "schema": "ck.doctor-fix/v1"
+  },
+  "report_key": [
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7
+  ],
+  "report_time_ms": 1704067200000,
+  "temp_dir": "/h/tmp",
+  "title": "Report canary.person@example.invalid ghp_CanaryToken0123456789abcdefABCDEF sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0123456789abcdef0123456789abcdefGHIjklMNOpqrs"
+}
