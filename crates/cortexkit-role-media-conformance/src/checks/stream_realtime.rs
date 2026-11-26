@@ -1630,8 +1630,10 @@ async fn call_usage<S: MediaSubject>(
         }
         for record in rs {
             require(
-                record["status"] == "ended" && record["decision_id"] == "decision",
-                "call status or admission decision attribution",
+                record["status"] == "ended"
+                    && record["decision_id"] == "decision"
+                    && record["caller"]["agent_id"] == "agent",
+                "call status, admission decision or stated-agent attribution",
             )?;
         }
         let before = feed(s).await?;

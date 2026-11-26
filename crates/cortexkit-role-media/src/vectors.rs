@@ -6,6 +6,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/media-v1/README.md"),
     ),
     (
+        "attribution.json",
+        include_str!("../test-vectors/media-v1/attribution.json"),
+    ),
+    (
         "budgets.json",
         include_str!("../test-vectors/media-v1/budgets.json"),
     ),

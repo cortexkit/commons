@@ -1,0 +1,12 @@
+{
+  "submit_operation":"media.submit",
+  "submit_request":{"client_job_id":"job-attributed","kind":"transcribe","input":{"audio":{"mime":"audio/wav","bytes":1,"sha256":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb","data":"YQ=="}},"model":"speech","decision_id":"decision-1","agent_id":"agent-1"},
+  "submit_request_without_agent_id":{"client_job_id":"job-unattributed","kind":"transcribe","input":{"audio":{"mime":"audio/wav","bytes":1,"sha256":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb","data":"YQ=="}},"model":"speech","decision_id":"decision-1"},
+  "stream_transcribe_operation":"media.stream_transcribe",
+  "stream_request":{"stream_id":"stream-attributed","model":"speech","decision_id":"decision-1","format":"audio/L16;rate=16000;channels=1","agent_id":"agent-1"},
+  "records":[
+    {"record_id":"r-relayed-call","principal":"person-a","call_id":"call-relayed","decision_id":"decision-1","provider":"example","model":"live","charge_basis":"vendor","started_at_ms":1,"finished_at_ms":2,"status":"ended","caller":{"agent_id":"agent-relayed","device":{"class":"phone","fingerprint":"device-fingerprint-1","pairing_id":"pairing-1","name":"Relayed phone"}},"selectors":{},"measurements":[{"role":"output_audio","unit":"second","quantity":"1","measure":"billed","source":"vendor_reply"}]},
+    {"record_id":"r-local-dictation","principal":"person-a","stream_id":"stream-local-dictation","provider":"local","model":"speech","charge_basis":"local","started_at_ms":1,"finished_at_ms":2,"status":"done","caller":{"agent_id":"agent-local","device":null},"selectors":{},"measurements":[{"role":"input_audio","unit":"second","quantity":"1","measure":"observed","source":"provider_measured"}]},
+    {"record_id":"r-caller-absent","principal":"person-a","job_id":"job-unattributed","provider":"example","model":"speech","charge_basis":"vendor","started_at_ms":1,"finished_at_ms":2,"status":"done","selectors":{},"measurements":[]}
+  ]
+}

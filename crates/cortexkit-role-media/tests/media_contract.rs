@@ -516,6 +516,36 @@ fn media_contract_message_budget_vectors() {
 }
 
 #[test]
+fn media_contract_attribution_vectors() {
+    let v = vector("attribution.json");
+    assert_eq!(v["submit_operation"], "media.submit");
+    assert_eq!(v["stream_transcribe_operation"], "media.stream_transcribe");
+    let submit: SubmitRequest = round_trip(&v["submit_request"]);
+    assert_eq!(submit.agent_id.as_deref(), Some("agent-1"));
+    let submit_without: SubmitRequest = round_trip(&v["submit_request_without_agent_id"]);
+    assert_eq!(submit_without.agent_id, None);
+    let stream: StreamRequest = round_trip(&v["stream_request"]);
+    assert_eq!(stream.agent_id.as_deref(), Some("agent-1"));
+    let records: Vec<UsageRecord> = v["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| {
+            let record: UsageRecord = round_trip(value);
+            check_usage_record(&record).unwrap();
+            record
+        })
+        .collect();
+    let relayed = records[0].caller.as_ref().unwrap();
+    assert_eq!(relayed.agent_id.as_deref(), Some("agent-relayed"));
+    assert_eq!(relayed.device.as_ref().unwrap().pairing_id, "pairing-1");
+    let local = records[1].caller.as_ref().unwrap();
+    assert_eq!(local.agent_id.as_deref(), Some("agent-local"));
+    assert_eq!(local.device, None);
+    assert_eq!(records[2].caller, None);
+}
+
+#[test]
 fn media_contract_call_usage_two_models() {
     let cases = vector("call-usage.json");
     let records: Vec<UsageRecord> = cases["records"]
@@ -876,6 +906,15 @@ fn media_contract_usage_unicode_string_and_entry_bounds() {
     )
     .with_job_id(text.clone())
     .with_decision_id(text.clone())
+    .with_caller(UsageCaller::new(
+        Some(text.clone()),
+        Some(UsageDevice::new(
+            text.clone(),
+            text.clone(),
+            text.clone(),
+            text.clone(),
+        )),
+    ))
     .with_credential_ref(text.clone())
     .with_auth_method(AuthMethod::Unknown(text.clone()))
     .with_vendor_request_id(text.clone())
@@ -1188,6 +1227,7 @@ fn media_contract_live_call_operation_names_are_pinned() {
     assert_eq!(STREAM_AUDIO_WINDOW, 8);
     assert!(contract.contains("`media.stream.open`: `media.stream_transcribe`"));
     assert!(contract.contains("`media.stream.audio`: `media.stream_audio`"));
+    assert!(contract.contains("`media.jobs.submit`: `media.submit`"));
 }
 
 #[test]
@@ -1218,6 +1258,7 @@ fn media_contract_stream_audio_requests_are_strict_and_independent() {
 fn media_contract_live_call_watch_operation_name_is_pinned() {
     let contract = include_str!("../CONTRACT.md");
     assert!(contract.contains("`media.realtime.watch`: `realtime.watch`"));
+    assert!(contract.contains("`media.realtime.token`: `realtime.token`"));
 }
 
 #[test]

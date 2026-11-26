@@ -31,6 +31,7 @@ pub const CASES: &[&str] = &[
     "wire_extension",
     "realtime_watch",
     "submit_idempotent_on_client_job_id",
+    "submit_agent_id_usage_attribution",
     "submit_refuses_client_job_id_reuse",
     "refused_submit_not_remembered",
     "submit_refuses_outside_declared_facts",
@@ -433,7 +434,8 @@ fn local_inapplicable_reason(name: &str) -> Option<&'static str> {
         | "usage_request_derived"
         | "usage_quantity_bounds"
         | "usage_quantity_coefficient_bounds"
-        | "usage_record_bounds" => {
+        | "usage_record_bounds"
+        | "submit_agent_id_usage_attribution" => {
             Some("this case requires a remote job usage record and vendor usage metadata")
         }
         "usage_feed_redelivers_until_ack"
@@ -735,10 +737,68 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
                 "replay wrote usage",
             )
         }
+        "submit_agent_id_usage_attribution" => {
+            script(
+                s,
+                "transcribe",
+                vec![ScriptStep::Output(transcript("attributed words"))],
+            )
+            .await?;
+            let mut attributed = request("attributed", "transcribe");
+            attributed["agent_id"] = json!("agent");
+            let attributed_id = submit(s, attributed.clone()).await?;
+            let unattributed_id = submit(s, request("unattributed", "transcribe")).await?;
+            expect_status(s, &attributed_id, "done").await?;
+            expect_status(s, &unattributed_id, "done").await?;
+            let rs = wait_records(s, 2).await?;
+            let attributed_record = rs
+                .iter()
+                .find(|record| record["job_id"] == attributed_id)
+                .ok_or("missing attributed job record")?;
+            require(
+                attributed_record["caller"]["agent_id"] == "agent",
+                "usage caller did not echo the stated agent",
+            )?;
+            let unattributed_record = rs
+                .iter()
+                .find(|record| record["job_id"] == unattributed_id)
+                .ok_or("missing unattributed job record")?;
+            require(
+                unattributed_record["caller"]["agent_id"].is_null(),
+                "absent agent_id gained a stated owner",
+            )?;
+            require(
+                submit(s, attributed.clone()).await? == attributed_id,
+                "attributed replay changed job",
+            )?;
+            require(
+                records(s).await?.len() == 2,
+                "attributed replay wrote usage",
+            )?;
+            let mut changed = attributed;
+            changed["agent_id"] = json!("different-agent");
+            refusal(
+                s,
+                "alice",
+                "media.submit",
+                changed,
+                "client_job_id_reuse",
+                Some("agent_id"),
+            )
+            .await?;
+            Ok(())
+        }
         "submit_refuses_client_job_id_reuse" => {
             let original = request("reuse", "transcribe");
             let id = completed(s, "reuse").await?;
-            for field in ["kind", "input", "model", "decision_id", "deadline_ms"] {
+            for field in [
+                "kind",
+                "input",
+                "model",
+                "decision_id",
+                "deadline_ms",
+                "agent_id",
+            ] {
                 let mut changed = original.clone();
                 changed[field] = match field {
                     "input" => json!({"audio":media(b"different", "audio/wav")}),

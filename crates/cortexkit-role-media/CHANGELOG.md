@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.12
+
+- Add optional usage-record `caller` attribution with a stated nullable
+  `agent_id` and nullable relayed `device` (`class`, `fingerprint`, `pairing_id`,
+  `name`). Absent attribution means unknown ownership, never nobody. Caller is
+  immutable record content and follows the existing string bounds and
+  contradiction quarantine.
+- Add optional `agent_id` to `SubmitRequest` and `StreamRequest`, include it in
+  submit idempotency comparison and copy it onto usage produced by jobs and
+  streams. The existing realtime token `agent_id` feeds voice-front and dictation
+  records the same way. Device attribution comes only from daemon-stamped
+  federated scope, never request bodies; neither member changes route identity
+  or permissions.
+- Pin the `media.submit`, `media.stream_transcribe` and `realtime.token` wire
+  operation names and add attribution vectors for relayed calls, local
+  dictation, requests with and without `agent_id`, and records without `caller`.
+- Readers first: a reader on an older version that refuses unknown members must
+  adopt 0.1.12 before any provider emits `caller`. Providers must adopt 0.1.12
+  before callers send `agent_id`, because older strict request decoders refuse
+  the new member. Rust usage-record readers tolerate unknown members but discard
+  `caller`; readers that expose typed attribution must adopt 0.1.12 before
+  relying on it. Requests and records without the new members keep their old
+  bytes.
+
 ## 0.1.11
 
 - Include the principal when deriving attached-call usage record ids so calls

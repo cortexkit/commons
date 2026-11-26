@@ -336,6 +336,9 @@ impl State {
         };
         let mut v = json!({"record_id":record_id,"principal":p,"provider":"fixture","model":req["model"],"decision_id":req["decision_id"],"charge_basis":"vendor","credential_ref":"fixture-credential","auth_method":"api_key","started_at_ms":self.now(),"finished_at_ms":self.now(),"status":status,"selectors":{},"measurements":usage.unwrap_or(json!([]))});
         v[work] = json!(id);
+        if let Some(agent_id) = req["agent_id"].as_str() {
+            v["caller"] = json!({"agent_id":agent_id,"device":null});
+        }
         if let Some(f) = failure {
             v["failure"] = f;
         }

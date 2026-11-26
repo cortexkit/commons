@@ -259,6 +259,14 @@ impl State {
         if j.attempt == 1 {
             r["decision_id"] = j.request["decision_id"].clone();
         }
+        if let Some(agent_id) = j.request["agent_id"].as_str() {
+            let stated = if self.fault("submit_agent_id_usage_attribution") {
+                "different-agent"
+            } else {
+                agent_id
+            };
+            r["caller"] = json!({"agent_id":stated,"device":null});
+        }
         if let Some(v) = &j.script.vendor_request_id {
             r["vendor_request_id"] = json!(if v.chars().count() > 256 {
                 format!("sha256:{}", sha256(v.as_bytes()))
@@ -458,7 +466,14 @@ impl State {
             .iter()
             .find(|(_, j)| j.principal == p && j.request["client_job_id"] == req["client_job_id"])
         {
-            for field in ["kind", "input", "model", "decision_id", "deadline_ms"] {
+            for field in [
+                "kind",
+                "input",
+                "model",
+                "decision_id",
+                "deadline_ms",
+                "agent_id",
+            ] {
                 if j.request[field] != req[field] {
                     return Err(refuse(
                         "client_job_id_reuse",

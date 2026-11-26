@@ -56,6 +56,17 @@ wire_struct!(Measurement {
     source: Source
 });
 
+wire_struct!(UsageDevice {
+    class: String,
+    fingerprint: String,
+    pairing_id: String,
+    name: String
+});
+wire_struct!(UsageCaller {
+    agent_id: Option<String>,
+    device: Option<UsageDevice>
+});
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct UsageRecord {
@@ -69,6 +80,8 @@ pub struct UsageRecord {
     pub call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<UsageCaller>,
     pub provider: String,
     pub model: String,
     pub charge_basis: ChargeBasis,
@@ -113,6 +126,7 @@ impl UsageRecord {
             stream_id: None,
             call_id: None,
             decision_id: None,
+            caller: None,
             credential_ref: None,
             auth_method: None,
             vendor_request_id: None,
@@ -126,7 +140,8 @@ impl UsageRecord {
     record_builder! {
         job_id: String => with_job_id, stream_id: String => with_stream_id,
         call_id: String => with_call_id, decision_id: String => with_decision_id,
-        credential_ref: String => with_credential_ref, auth_method: AuthMethod => with_auth_method,
+        caller: UsageCaller => with_caller, credential_ref: String => with_credential_ref,
+        auth_method: AuthMethod => with_auth_method,
         vendor_request_id: String => with_vendor_request_id, failure: Failure => with_failure,
     }
     pub fn with_times(mut self, started_at_ms: u64, finished_at_ms: u64) -> Self {

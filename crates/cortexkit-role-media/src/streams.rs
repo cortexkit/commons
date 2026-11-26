@@ -15,6 +15,7 @@ pub const STREAM_AUDIO_WINDOW: u64 = 8;
 
 wire_struct!(#[serde(deny_unknown_fields)] StreamRequest { stream_id: String, model: String, format: String } optional {
     decision_id: String => with_decision_id, language: String => with_language, bias: Bias => with_bias,
+    agent_id: String => with_agent_id,
 });
 wire_struct!(
     #[serde(deny_unknown_fields)]

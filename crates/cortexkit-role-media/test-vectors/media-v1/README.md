@@ -3,6 +3,12 @@
 JSON files are UTF-8. Test quantities are decimal strings, never numbers.
 Tokens are placeholders, not credentials. `SHA256SUMS` covers every other file.
 
+`attribution.json` names the `media.submit` and `media.stream_transcribe` wire
+operations and includes requests with and without `agent_id`. Its usage records
+cover a relayed call with stated agent and daemon-stamped device, local
+dictation with a stated agent and null device, and an absent caller. Caller is
+record content, not identity or permission; absent caller means unknown owner.
+
 `call-usage.json` is one attached voice-front call with routed realtime token
 usage and billed companion transcription seconds. Both records carry the same
 admission decision; the companion is not the model named by that decision.

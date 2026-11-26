@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.12
+
+- Pin media `=0.1.12` and add `submit_agent_id_usage_attribution`, covering
+  submits with and without a stated agent, stable replay, `agent_id` reuse
+  refusal, unknown attribution when absent, and usage records echoing the stated
+  agent. A deliberately incorrect implementation fails this named case.
+- Propagate stated agents through the fake provider's job, stream, voice-front
+  and dictation records, including companion-model records and unchanged
+  redelivery. Local streams have no device attribution.
+- Readers first: use media 0.1.12 providers before sending request `agent_id`,
+  and media 0.1.12 readers before relying on typed `caller` attribution. Any
+  reader on an older version that refuses unknown members must adopt 0.1.12
+  before any provider emits `caller`. Older strict request readers refuse
+  `agent_id`; Rust usage-record readers tolerate but discard `caller`. Absent
+  new members preserve the old wire bytes.
+
 ## 0.2.11
 
 - Select unsupported languages, formats, voices, sizes, resolutions and

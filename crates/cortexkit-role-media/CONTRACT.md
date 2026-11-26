@@ -20,6 +20,13 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   `client_job_id`, `stream_id` and `call_id` are 1–128 characters, unique within
   their principal and never reused for new work. Invalid lengths are
   `invalid_params {field}`. Derived keys include the principal.
+- [pinned] `media.identity.attribution`: Usage-record `caller` is attribution
+  only. The route's principal remains the caller identity; no member of `caller`
+  admits, scopes or looks up work. `caller.device` is copied only from the
+  daemon-stamped federated scope of a relayed route on a provider declaring
+  `scope-federated/v1`, never from a request body. `caller.agent_id` is the agent
+  stated by the caller application and is not verified. Readers show it as the
+  stated agent and never use it for permissions.
 - [pinned] `media.refusal.class`: An ERROR frame is `{code, message, detail}`;
   detail always has `class` and may have `retry_after_ms` and code-specific
   members. Codes are open strings. Class is open (`transient`, `permanent`);
@@ -158,8 +165,11 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 ## Jobs
 
-- [pinned] `media.jobs.submit`: submit `{client_job_id, kind, input, model,
-  decision_id?, deadline_ms?}` returns `{job_id}` (at most 64 characters).
+- [pinned] `media.jobs.submit`: `media.submit` `{client_job_id, kind, input, model,
+  decision_id?, deadline_ms?, agent_id?}` returns `{job_id}` (at most 64 characters).
+  Optional agent_id is at most 256 scalar values and attribution only under
+  media.identity.attribution. The provider copies a stated agent_id onto
+  caller.agent_id of every usage record the job produces.
   Only transcribe, synthesize, image and video are job kinds; others give
   unsupported kind. A decision_id is at most 256 characters and required for
   remote engines, otherwise invalid_params decision_id. Declared but absent
@@ -171,7 +181,7 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   first routing admission use their own refusals.
 - [pinned] `media.jobs.idempotent`: Compare decoded JSON requests. Same
   principal/client_job_id and equal request returns the same job, starting
-  nothing. Differing kind, input, model, decision_id or deadline_ms gives
+  nothing. Differing kind, input, model, decision_id, deadline_ms or agent_id gives
   client_job_id_reuse field naming the first difference in that order. A refused
   first submit remembers nothing, and a later refusal never alters an accepted
   job or replay. Accepted ids and results remain readable at least 3,600 seconds
@@ -296,10 +306,16 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   Refused/unstarted work, repeats, unattached tokens and released never-started
   admissions write none.
 - [pinned] `media.usage.record`: A record is `{record_id, principal, job_id |
-  stream_id | call_id, decision_id?, provider, model, charge_basis,
+  stream_id | call_id, decision_id?, caller?, provider, model, charge_basis,
   credential_ref?, auth_method?, vendor_request_id?, started_at_ms,
   finished_at_ms, status, failure?, selectors, measurements}` with exactly one
-  work id. Record ids differ between attempts and stay equal across redelivery.
+  work id. Optional caller is `{agent_id: string|null, device: {class,
+  fingerprint, pairing_id, name}|null}`; both caller members are present and may
+  be null. Absent caller means the owner is unknown, never "nobody". Caller is
+  part of the record's immutable content: a redelivered record carries the same
+  caller, and reusing its record_id with a different caller is a contradiction
+  that readers quarantine like any other content change.
+  Record ids differ between attempts and stay equal across redelivery.
   For attached calls, derive record_id from (principal, call_id, provider, model).
   Never reuse a record_id with different content: readers quarantine contradictions.
   Principal is the caller; every record of a call carries decision_id exactly
@@ -310,7 +326,8 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   failure. Open charge_basis is vendor/local; local records have no credential
   or vendor fields. Open auth_method is api_key/oauth, never a secret.
 - [pinned] `media.usage.bounds`: All string members and map keys except
-  failure.message are at most 256 scalar values; that message is at most 1,024.
+  failure.message are at most 256 scalar values, including caller.agent_id and
+  every caller.device string; that message is at most 1,024.
   Long vendor request ids become `sha256:` plus lowercase SHA-256. Selectors
   and measurements have at most 16 entries each. Selectors carry price facts
   such as size, quality, resolution and speed_mode, never folded into role.
@@ -389,8 +406,12 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 ## Streaming
 
 - [pinned] `media.stream.open`: `media.stream_transcribe`
-  `{stream_id, model, decision_id?, format, language?, bias?}` opens a stream; submit
-  refusals apply. Accepted stream ids stay remembered across restart for 3,600
+  `{stream_id, model, decision_id?, format, language?, bias?, agent_id?}` opens a stream; submit
+  refusals apply. Optional agent_id follows media.jobs.submit: it is at most 256
+  scalar values, attribution only, and copied onto caller.agent_id of every usage
+  record the stream produces. Local stream-transcribe records have no relayed
+  scope, so their caller.device is absent, represented as null when caller is
+  present. Accepted stream ids stay remembered across restart for 3,600
   seconds, repeats give stream_id_reuse. A refused open, including
   routing_refused/realtime_lane_full, is ERROR, opens/writes nothing. The open
   request stays open, emits the partial and final events below as stream data,
@@ -459,9 +480,11 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 ## Realtime
 
-- [pinned] `media.realtime.token`: token `{call_id, agent_id, purpose, model,
+- [pinned] `media.realtime.token`: `realtime.token` `{call_id, agent_id, purpose, model,
   decision_id}` returns `{token, token_ref, expires_at_ms, provider, model,
-  connect_url?}`. Optional connect_url is the full HTTPS URL to which the phone
+  connect_url?}`. The existing agent_id follows media.identity.attribution and
+  feeds caller.agent_id on every voice-front call and dictation usage record,
+  including companion-model records. Optional connect_url is the full HTTPS URL to which the phone
   posts its WebRTC SDP offer, derived from the same catalog base under which the
   token was minted (for OpenAI, `<base>/realtime/calls`). It is at most 2,048
   bytes and its scheme is https only. Readers must accept its absence. Roll out

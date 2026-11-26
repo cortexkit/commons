@@ -10,6 +10,7 @@ open_enum!(JobStatus { Queued => "queued", Running => "running", Done => "done",
 
 wire_struct!(#[serde(deny_unknown_fields)] SubmitRequest { client_job_id: String, kind: Kind, input: JobInput, model: String } optional {
     decision_id: String => with_decision_id, deadline_ms: u64 => with_deadline_ms,
+    agent_id: String => with_agent_id,
 });
 wire_struct!(SubmitAnswer { job_id: String });
 wire_struct!(

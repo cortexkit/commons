@@ -24,7 +24,7 @@ async fn media_kit_full_featured_case_count_unchanged() {
         );
         passed += 1;
     }
-    assert_eq!(passed, 90, "full-featured case count from 0.2.9");
+    assert_eq!(passed, 91, "full-featured case count from 0.2.12");
 }
 
 #[tokio::test]
@@ -63,8 +63,8 @@ async fn media_kit_fixed_catalog_non_stream_cases() {
         assert_eq!(engines[0].kind.as_str(), "transcribe", "{case}");
         assert!(engines[0].local, "{case}");
     }
-    assert_eq!((passed, not_applicable), (21, 25));
-    assert_eq!(passed + not_applicable, 46);
+    assert_eq!((passed, not_applicable), (21, 26));
+    assert_eq!(passed + not_applicable, 47);
 }
 
 #[tokio::test]
@@ -259,6 +259,7 @@ case_tests! {
     media_kit_core_wire_extension,
     media_kit_core_realtime_watch,
     media_kit_core_submit_idempotent_on_client_job_id,
+    media_kit_core_submit_agent_id_usage_attribution,
     media_kit_core_submit_refuses_client_job_id_reuse,
     media_kit_core_refused_submit_not_remembered,
     media_kit_core_submit_refuses_outside_declared_facts,
