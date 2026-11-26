@@ -252,11 +252,14 @@ fn broad_cross_target_only_catch_keeps_collateral_and_wrong_test_grading() {
 #[test]
 fn broad_mutant_timeout_names_its_target_and_phase() {
     for runner in runners() {
+        // Only the mutated `other` target may overrun. The empty targets need
+        // room under the deadline: on a loaded Windows runner the library's
+        // empty unit-test target alone took 1.6 s, past a one-second deadline.
         let f = Fixture::new(
             "assert!(deadline_fixture::guarded());",
-            "if !deadline_fixture::guarded() { std::thread::sleep(std::time::Duration::from_secs(10)); }",
+            "if !deadline_fixture::guarded() { std::thread::sleep(std::time::Duration::from_secs(30)); }",
         );
-        let rows = f.run(&[1], runner);
+        let rows = f.run(&[5], runner);
         let row = &rows[0];
         assert_eq!(row["outcome"], "TIMED_OUT", "{runner}: {rows}");
         assert_eq!(row["timed_out_phase"], "test");
