@@ -195,7 +195,8 @@
     "still_running": "nv1:example-writer:still_running:1",
     "fold_earlier": "nv1:example-writer:still_running:1",
     "fold_later": "nv1:example-writer:finished:1",
-    "watch": "nv1:example-writer:watch:1"
+    "watch": "nv1:example-writer:watch:1",
+    "record_key_without_send": "nv1:example-writer:finished:1"
   },
   "refusals": [
     {

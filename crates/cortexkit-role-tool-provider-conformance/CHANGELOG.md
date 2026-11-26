@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.23
+
+- Pin tool-provider `=0.15.21` (sample data only). No case changes.
+
 ## 0.15.22
 
 - Pin tool-provider `=0.15.20` and remove the catalog capability-filter request

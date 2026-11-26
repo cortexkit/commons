@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.21
+
+- `test-vectors/tool-provider-v1/notice-views.json` maps tool-display's new
+  `record_key_without_send` notice case to `nv1:example-writer:finished:1`, so
+  the cross-check against tool-display 0.1.15's notice samples covers every
+  case. No type or rule changes.
+
 ## 0.15.20
 
 - Remove the catalog capability-filter request from the contract.
