@@ -1,4 +1,7 @@
-use super::test_support::{assert_broad_inherited, assert_owner_only, grant_everyone, read_acl};
+use super::test_support::{
+    assert_broad_inherited, assert_owner_only, current_user_sid, grant_everyone, read_acl,
+    set_protected_dacl,
+};
 use crate::{
     create_private_dir, create_private_file, durable_replace, protect_dir_only, protect_file,
     reset_to_inherited, sync_dir, verify_private, NotPrivate,
@@ -44,6 +47,17 @@ fn owner_sid(path: &std::path::Path) -> Vec<u8> {
         )
         .to_vec()
     }
+}
+
+fn user_sid_text() -> String {
+    let user = super::User::current().unwrap();
+    // `principal` may append a human-readable alias after the SID.
+    super::principal(user.sid())
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned()
 }
 
 fn junction(link: &std::path::Path, target: &std::path::Path) {
@@ -222,9 +236,18 @@ fn directory_protection_preserves_current_owner_without_requiring_write_owner() 
         let path = root.0.join(name);
         create_private_dir(&path).unwrap();
         restrict_user_access_without_write_owner(&path, true);
+        let before = read_acl(&path);
         protect(&path).unwrap();
         verify_private(&path).unwrap();
-        assert_owner_only(&path, true, true);
+        if name == "create" {
+            assert_eq!(
+                read_acl(&path),
+                before,
+                "existing user rights must not grow"
+            );
+        } else {
+            assert_owner_only(&path, true, true);
+        }
     }
 }
 
@@ -539,6 +562,118 @@ fn create_private_dir_has_a_protected_user_only_dacl_and_private_children() {
 }
 
 #[test]
+fn create_private_dir_keeps_explicit_denies() {
+    use std::io::ErrorKind;
+
+    let root = TempDir::new();
+    let user = user_sid_text();
+    // Deny the current user FILE_ADD_FILE and Guests FILE_DELETE_CHILD. An
+    // unrelated allow forces a DACL update rather than an already-private no-op.
+    set_protected_dacl(
+        &root.0,
+        &format!("D:P(D;;0x2;;;{user})(D;;0x40;;;BG)(A;OICI;FA;;;{user})(A;;FR;;;WD)"),
+    );
+    let probe = root.0.join("probe");
+    assert_eq!(
+        std::fs::write(&probe, b"before").unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+    let mut expected = read_acl(&root.0);
+    assert_eq!(expected.aces.len(), 4);
+    assert_eq!(expected.aces[0].kind, 1);
+    assert_eq!(expected.aces[1].kind, 1);
+    expected.aces.pop();
+
+    create_private_dir(&root.0).unwrap();
+
+    assert_eq!(read_acl(&root.0), expected);
+    assert_eq!(
+        std::fs::write(&probe, b"after").unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+}
+
+#[test]
+fn create_private_dir_drops_other_allows_without_granting_user_rights() {
+    let root = TempDir::new();
+    let sid = current_user_sid();
+    let user = user_sid_text();
+    set_protected_dacl(
+        &root.0,
+        &format!("D:P(A;;FRFW;;;{user})(A;;FR;;;WD)(A;;FA;;;BA)(A;;FA;;;SY)"),
+    );
+    let before = read_acl(&root.0);
+    let owner = owner_sid(&root.0);
+    assert!(before.aces.iter().any(|ace| ace.sid != sid));
+    let mut expected = before;
+    expected.aces.retain(|ace| ace.sid == sid);
+    assert!(expected
+        .aces
+        .iter()
+        .all(|ace| ace.mask != super::FILE_ALL_ACCESS));
+
+    create_private_dir(&root.0).unwrap();
+
+    assert_eq!(read_acl(&root.0), expected);
+    assert_eq!(owner_sid(&root.0), owner);
+    std::fs::write(root.0.join("probe"), b"still writable").unwrap();
+}
+
+#[test]
+fn create_private_dir_makes_inherited_user_access_explicit_without_granting_rights() {
+    use std::io::ErrorKind;
+    use windows_sys::Win32::{Security::INHERITED_ACE, Storage::FileSystem::FILE_ADD_FILE};
+
+    let root = TempDir::new();
+    let user = user_sid_text();
+    let mask = super::FILE_ALL_ACCESS & !FILE_ADD_FILE;
+    set_protected_dacl(&root.0, &format!("D:P(A;OICI;{mask:#x};;;{user})"));
+    let dir = root.0.join("inherited");
+    std::fs::create_dir(&dir).unwrap();
+    let probe = dir.join("probe");
+    assert_eq!(
+        std::fs::write(&probe, b"before").unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+    let mut expected = read_acl(&dir);
+    assert!(!expected.protected);
+    assert_eq!(expected.aces.len(), 1);
+    let ace = &mut expected.aces[0];
+    assert_eq!(ace.sid, current_user_sid());
+    assert_eq!(ace.mask, mask);
+    assert_ne!(ace.flags & INHERITED_ACE as u8, 0);
+    ace.flags &= !(INHERITED_ACE as u8);
+    expected.protected = true;
+
+    create_private_dir(&dir).unwrap();
+
+    assert_eq!(read_acl(&dir), expected);
+    assert_eq!(
+        std::fs::write(&probe, b"after").unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+}
+
+#[test]
+fn create_private_dir_narrows_a_null_dacl_without_granting_rights_to_existing_children() {
+    let root = TempDir::new();
+    set_protected_dacl(&root.0, "D:NO_ACCESS_CONTROL");
+    let (handle, _) = super::open_no_follow(&root.0, super::READ_CONTROL).unwrap();
+    assert!(super::Security::read(&handle).unwrap().dacl.is_null());
+    let file = root.0.join("existing");
+    std::fs::write(&file, b"existing file").unwrap();
+    let before = security_descriptor(&file);
+
+    create_private_dir(&root.0).unwrap();
+
+    assert_owner_only(&root.0, true, true);
+    assert_eq!(security_descriptor(&file), before);
+    let new_file = root.0.join("new");
+    std::fs::write(&new_file, b"new file").unwrap();
+    assert_owner_only(&new_file, false, false);
+}
+
+#[test]
 fn protect_file_replaces_an_inherited_broad_acl_with_a_protected_user_only_dacl() {
     let root = TempDir::new();
     grant_everyone(&root.0);
@@ -552,7 +687,8 @@ fn protect_file_replaces_an_inherited_broad_acl_with_a_protected_user_only_dacl(
 #[test]
 fn create_private_dir_narrows_an_existing_broad_directory_without_changing_its_parent() {
     let root = TempDir::new();
-    grant_everyone(&root.0);
+    let user = user_sid_text();
+    set_protected_dacl(&root.0, &format!("D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;WD)"));
     let before = read_acl(&root.0);
     let dir = root.0.join("existing");
     std::fs::create_dir(&dir).unwrap();
@@ -569,7 +705,8 @@ fn create_private_dir_narrows_an_existing_broad_directory_without_changing_its_p
 #[test]
 fn create_private_dir_removes_broad_inherited_acls_from_existing_descendants() {
     let root = TempDir::new();
-    grant_everyone(&root.0);
+    let user = user_sid_text();
+    set_protected_dacl(&root.0, &format!("D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;WD)"));
     let parent_before = read_acl(&root.0);
     let dir = root.0.join("existing");
     std::fs::create_dir(&dir).unwrap();

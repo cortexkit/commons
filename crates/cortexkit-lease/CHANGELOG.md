@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10
+
+- On Windows, `create_private_dir` no longer grants full control or changes
+  ownership on an existing directory. It preserves denies and the current
+  user's grants, makes retained inherited entries explicit, and removes grants
+  to other principals. Newly created directories still get a protected,
+  inheritable current-user DACL.
+
 ## 0.1.9
 
 - `FileLeaseStore::remove_if_free` removes a lease file by name without a key or

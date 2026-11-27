@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5
+
+- Require `cortexkit-lease` 0.1.10 so opening a store on Windows does not grant
+  write access on an existing directory where the owner has denied it.
+
 ## 0.4.4
 
 - Fix a process losing its SQLite locks when it called `read_schema_versions`

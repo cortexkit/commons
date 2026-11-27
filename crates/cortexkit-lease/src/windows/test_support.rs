@@ -78,9 +78,9 @@ pub fn current_user_sid() -> Vec<u8> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-/// An access-allowed ACE observed directly in a named filesystem object's DACL.
+/// An ordinary allow or deny ACE observed in a named filesystem object's DACL.
 pub struct Ace {
-    /// Native ACE type; `read_acl` rejects types other than ACCESS_ALLOWED (0).
+    /// Native ACE type: ACCESS_ALLOWED (0) or ACCESS_DENIED (1).
     pub kind: u8,
     /// Native ACE flags, including object/container inheritance and inherited status.
     pub flags: u8,
@@ -101,7 +101,8 @@ pub struct Snapshot {
 
 /// Reads a named filesystem object's DACL with GetNamedSecurityInfoW.
 ///
-/// Panics on a failed Win32 call, a null DACL, or any non-ACCESS_ALLOWED ACE.
+/// Panics on a failed Win32 call, a null DACL, or any ACE other than an ordinary
+/// ACCESS_ALLOWED or ACCESS_DENIED ACE.
 pub fn read_acl(path: &Path) -> Snapshot {
     let name = wide(path).expect("resolve path for Win32 security API");
     let mut acl: *mut ACL = null_mut();
@@ -153,11 +154,11 @@ pub fn read_acl(path: &Path) -> Snapshot {
         let mut raw_ace = null_mut();
         // SAFETY: index is within the count obtained from this live ACL.
         assert_ne!(unsafe { GetAce(acl, index, &mut raw_ace) }, 0);
-        // SAFETY: The test fixtures contain ACCESS_ALLOWED ACEs. Check their type
-        // before reading the corresponding mask and variable-length SID.
+        // SAFETY: Ordinary allow and deny ACEs have identical layouts. Check
+        // the type before reading the mask and variable-length SID.
         unsafe {
             let header = &*raw_ace.cast::<ACE_HEADER>();
-            assert_eq!(header.AceType, 0, "expected ACCESS_ALLOWED_ACE_TYPE");
+            assert!(matches!(header.AceType, 0 | 1), "expected allow or deny");
             let ace = &*raw_ace.cast::<ACCESS_ALLOWED_ACE>();
             let sid: PSID = std::ptr::addr_of!(ace.SidStart).cast_mut().cast();
             aces.push(Ace {
@@ -221,11 +222,19 @@ pub fn assert_owner_only(path: &Path, directory: bool, protected: bool) {
 /// This deliberately broadens access. Use only on disposable test paths.
 /// Panics if Windows cannot apply or read back the fixture ACL.
 pub fn grant_everyone(dir: &Path) {
+    set_protected_dacl(dir, "D:P(A;OICI;FA;;;WD)");
+    let snapshot = read_acl(dir);
+    assert_eq!(snapshot.aces.len(), 1);
+    assert_ne!(
+        snapshot.aces[0].sid,
+        current_user_sid(),
+        "broad fixture must not already be owner-only"
+    );
+}
+
+pub(super) fn set_protected_dacl(dir: &Path, sddl: &str) {
     let name = wide(dir).expect("resolve path for Win32 security API");
-    let sddl: Vec<u16> = "D:P(A;OICI;FA;;;WD)"
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
+    let sddl: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
     let mut raw = null_mut();
     // SAFETY: sddl is terminated; raw receives a LocalFree-owned descriptor.
     assert_ne!(
@@ -251,12 +260,8 @@ pub fn grant_everyone(dir: &Path) {
         0
     );
     assert_ne!(present, 0);
-    assert!(!acl.is_null());
-    // SAFETY: name and the ACL inside descriptor stay alive for the call. The
-    // ACL grants Everyone (WD) full control, inherited by files and folders
-    // (OICI), so the test starts from a deliberately broad directory. It is set
-    // with the raw Win32 call, not the code under test, so the precondition
-    // does not depend on what is being tested.
+    // SAFETY: name and the ACL inside descriptor (if non-null) stay alive for
+    // the call. Set the fixture independently of the production ACL writer.
     assert_eq!(
         unsafe {
             SetNamedSecurityInfoW(
@@ -270,13 +275,6 @@ pub fn grant_everyone(dir: &Path) {
             )
         },
         0
-    );
-    let snapshot = read_acl(dir);
-    assert_eq!(snapshot.aces.len(), 1);
-    assert_ne!(
-        snapshot.aces[0].sid,
-        current_user_sid(),
-        "broad fixture must not already be owner-only"
     );
 }
 

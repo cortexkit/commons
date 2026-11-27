@@ -4,13 +4,13 @@
 use std::{
     fs::{File, OpenOptions},
     io,
-    mem::{size_of, zeroed},
+    mem::{offset_of, size_of, zeroed},
     os::windows::{
         fs::{MetadataExt, OpenOptionsExt},
         io::{AsRawHandle, FromRawHandle},
     },
     path::Path,
-    ptr::{null, null_mut},
+    ptr::{copy_nonoverlapping, null, null_mut},
 };
 
 use windows_sys::Win32::{
@@ -21,13 +21,15 @@ use windows_sys::Win32::{
     Security::{
         AddAccessAllowedAceEx,
         Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SetSecurityInfo, SE_FILE_OBJECT},
-        EqualSid, GetAce, GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation,
-        InitializeAcl, InitializeSecurityDescriptor, SetKernelObjectSecurity,
-        SetSecurityDescriptorControl, SetSecurityDescriptorDacl, SetSecurityDescriptorOwner,
-        TokenUser, ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE,
-        DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-        SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        DeleteAce, EqualSid, GetAce, GetLengthSid, GetSecurityDescriptorControl,
+        GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor, IsValidSid,
+        IsWellKnownSid, SetKernelObjectSecurity, SetSecurityDescriptorControl,
+        SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser, WinCreatorOwnerRightsSid,
+        ACCESS_ALLOWED_ACE, ACCESS_ALLOWED_OBJECT_ACE, ACE_HEADER,
+        ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL, ACL_REVISION,
+        CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, INHERITED_ACE, OBJECT_INHERIT_ACE,
+        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+        PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
         UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
     Storage::FileSystem::{
@@ -378,6 +380,18 @@ impl Security {
             dacl,
         })
     }
+
+    fn dacl_is_protected(&self) -> io::Result<bool> {
+        let mut control = 0;
+        let mut revision = 0;
+        // SAFETY: GetSecurityInfo returned the live descriptor and both outputs are writable.
+        if unsafe { GetSecurityDescriptorControl(self._descriptor.0, &mut control, &mut revision) }
+            == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(control & SE_DACL_PROTECTED != 0)
+    }
 }
 
 struct Protection {
@@ -485,15 +499,7 @@ pub(super) fn verify_private(path: &Path) -> Result<(), NotPrivate> {
             principal: principal(security.owner)?,
         });
     }
-    let mut control = 0;
-    let mut revision = 0;
-    // SAFETY: GetSecurityInfo returned the live descriptor; both outputs are writable.
-    if unsafe { GetSecurityDescriptorControl(security._descriptor.0, &mut control, &mut revision) }
-        == 0
-    {
-        return Err(io::Error::last_os_error().into());
-    }
-    if control & SE_DACL_PROTECTED == 0 {
+    if !security.dacl_is_protected()? {
         return Err(NotPrivate::Unprotected);
     }
     if security.dacl.is_null() {
@@ -573,11 +579,8 @@ pub(super) fn reset_to_inherited(path: &Path, recursive: bool) -> io::Result<()>
     Ok(())
 }
 
-fn apply(protection: &Protection, directory: bool) -> io::Result<()> {
-    let mut acl = OwnerAcl::new(directory)?;
-    // Windows can bypass directory traversal checks. SetSecurityInfo also
-    // replaces inherited ACEs on existing descendants, so their own ACLs lose
-    // broad access when the directory is narrowed. Protected child DACLs stay intact.
+fn apply_file_protection(protection: &Protection) -> io::Result<()> {
+    let mut acl = OwnerAcl::new(false)?;
     // SAFETY: The handle has WRITE_DAC and, only when needed, WRITE_OWNER.
     // ACL/SID storage stays live through the call. Group/SACL are unchanged,
     // and an already-correct owner is not requested. Protection disables parent ACEs.
@@ -655,7 +658,7 @@ pub(super) fn protect_file(path: &Path) -> io::Result<()> {
             "not a regular file",
         ));
     }
-    apply(&protection, false)
+    apply_file_protection(&protection)
 }
 
 pub(super) fn create_private_dir(dir: &Path) -> io::Result<()> {
@@ -666,25 +669,167 @@ pub(super) fn create_private_dir(dir: &Path) -> io::Result<()> {
     }
     // Existing directories may belong to another account. As on Unix, failure
     // to tighten them is diagnostic only; failure to create them is an error.
-    let result = Protection::open(dir).and_then(|protection| {
-        if protection.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Ok(());
-        }
-        if protection.attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "not a directory",
-            ));
-        }
-        apply(&protection, true)
-    });
-    if let Err(error) = result {
+    if let Err(error) = narrow_existing_dir(dir) {
         eprintln!(
             "cortexkit-lease: {} could not be made owner-only: {error}",
             dir.display()
         );
     }
     Ok(())
+}
+
+fn narrow_existing_dir(dir: &Path) -> io::Result<()> {
+    let (handle, attributes) = open_no_follow(dir, READ_CONTROL | WRITE_DAC)?;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Ok(());
+    }
+    if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a directory",
+        ));
+    }
+    let user = User::current()?;
+    let security = Security::read(&handle)?;
+    let information = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+    if security.dacl.is_null() {
+        // A null DACL grants everyone full control. Limit the new grant to the
+        // user, without propagating a new inheritable ACE to existing children.
+        let mut acl = OwnerAcl::new(true)?;
+        let mut descriptor = private_descriptor(&mut acl, &user)?;
+        // SAFETY: The handle has WRITE_DAC and the descriptor keeps referring to
+        // live ACL/SID storage. No ownership change is requested.
+        if unsafe {
+            SetKernelObjectSecurity(
+                handle.0,
+                information,
+                (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        return Ok(());
+    }
+
+    let (mut acl, changed) = narrow_dacl(&security, &user)?;
+    if !changed && security.dacl_is_protected()? {
+        return Ok(());
+    }
+    // Apply protection with the copied ACEs, never by resetting the owner or
+    // granting full control. The file security setter also removes discarded
+    // inherited access from existing, unprotected descendants.
+    // SAFETY: The handle has WRITE_DAC and the filtered ACL buffer is live.
+    let error = unsafe {
+        SetSecurityInfo(
+            handle.0,
+            SE_FILE_OBJECT,
+            information,
+            null_mut(),
+            null_mut(),
+            acl.as_mut_ptr(),
+            null(),
+        )
+    };
+    if error != 0 {
+        return Err(io::Error::from_raw_os_error(error as i32));
+    }
+    Ok(())
+}
+
+fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)> {
+    // SAFETY: The caller checked for a null DACL. The live descriptor owns the
+    // OS-supplied ACL and its header gives the size of the full allocation.
+    let (bytes, count) = unsafe {
+        let acl = &*security.dacl;
+        (usize::from(acl.AclSize), u32::from(acl.AceCount))
+    };
+    let mut acl = OwnerAcl(vec![0; bytes.div_ceil(size_of::<u32>())]);
+    // SAFETY: The destination has at least AclSize bytes and does not alias the source.
+    unsafe { copy_nonoverlapping(security.dacl.cast::<u8>(), acl.as_mut_ptr().cast(), bytes) };
+
+    // Removing entries backwards preserves order and keeps the remaining
+    // indices stable. Order matters when an allow and deny cover the same right.
+    let mut changed = false;
+    for index in (0..count).rev() {
+        let mut raw = null_mut();
+        // SAFETY: The index still exists in the live ACL and raw is writable.
+        if unsafe { GetAce(acl.as_mut_ptr(), index, &mut raw) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let header = raw.cast::<ACE_HEADER>();
+        // SAFETY: The ACE starts with a header and AceSize covers its bytes.
+        let ace = unsafe { std::slice::from_raw_parts(raw.cast::<u8>(), (*header).AceSize.into()) };
+        if !keep_directory_ace(ace, security.owner, user)? {
+            // SAFETY: The index still exists in the writable ACL; ace is no longer borrowed.
+            if unsafe { DeleteAce(acl.as_mut_ptr(), index) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            changed = true;
+        } else if ace[1] & INHERITED_ACE as u8 != 0 {
+            // SAFETY: The live ACL owns this writable header. Clearing the
+            // inherited bit makes the ACE explicit without changing its scope.
+            unsafe { (*header).AceFlags &= !(INHERITED_ACE as u8) };
+            changed = true;
+        }
+    }
+    Ok((acl, changed))
+}
+
+fn keep_directory_ace(ace: &[u8], owner: PSID, user: &User) -> io::Result<bool> {
+    let sid_start = match ace[0] {
+        // All deny forms (ordinary, object, callback, and callback object).
+        1 | 6 | 10 | 12 => return Ok(true),
+        // Ordinary and callback allows have the same SID offset.
+        0 | 9 => offset_of!(ACCESS_ALLOWED_ACE, SidStart),
+        // Object and callback-object allows may omit either GUID before the SID.
+        5 | 11 => {
+            let start = offset_of!(ACCESS_ALLOWED_OBJECT_ACE, ObjectType);
+            let flags = ace.get(start - 4..start).ok_or_else(invalid_ace_sid)?;
+            let flags = u32::from_le_bytes([flags[0], flags[1], flags[2], flags[3]]);
+            start
+                + size_of::<windows_sys::core::GUID>()
+                    * (flags & (ACE_OBJECT_TYPE_PRESENT | ACE_INHERITED_OBJECT_TYPE_PRESENT))
+                        .count_ones() as usize
+        }
+        // Leave a DACL containing an unknown ACE untouched: guessing which
+        // entries to remove could discard an access restriction.
+        kind => {
+            return Err(io::Error::other(format!(
+                "unsupported DACL ACE type {kind}"
+            )))
+        }
+    };
+    let sid_bytes = ace.get(sid_start..).ok_or_else(invalid_ace_sid)?;
+    let sub_authorities = *sid_bytes.get(1).ok_or_else(invalid_ace_sid)?;
+    if sid_bytes.len() < 8 + 4 * usize::from(sub_authorities) {
+        return Err(invalid_ace_sid());
+    }
+    let sid: PSID = sid_bytes.as_ptr().cast_mut().cast();
+    // SAFETY: The ACE's full SID is in bounds; user and any non-null owner point
+    // into live Win32 security structures. The SID APIs only read the buffers.
+    unsafe {
+        if IsValidSid(sid) == 0 {
+            return Err(invalid_ace_sid());
+        }
+        if EqualSid(sid, user.sid()) != 0 {
+            return Ok(true);
+        }
+        if IsWellKnownSid(sid, WinCreatorOwnerRightsSid) != 0 {
+            if !owner.is_null() && EqualSid(owner, user.sid()) != 0 {
+                return Ok(true);
+            }
+            // Leave the DACL untouched if OWNER RIGHTS refers to a different
+            // owner: deleting it could give them implicit READ_CONTROL/WRITE_DAC.
+            return Err(io::Error::other("OWNER RIGHTS ACE for a different owner"));
+        }
+    }
+    // There is no special grant for SYSTEM, Administrators, or any other SID.
+    Ok(false)
+}
+
+fn invalid_ace_sid() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "invalid SID in DACL ACE")
 }
 
 fn create_all(dir: &Path) -> io::Result<()> {
