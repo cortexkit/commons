@@ -312,11 +312,12 @@ pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
 /// list (DACL) granting full control to the current user. For an existing
 /// directory, this preserves the owner, the user's grants and all denies,
 /// removes other principals' grants, and makes retained inherited entries
-/// explicit before disabling inheritance. If no grant applies to the user
-/// directly or as owner, the function adds an inheritable full-control grant
-/// only if the user owns the directory and can already change its DACL. For a
-/// non-owner without a direct grant, it leaves the DACL unchanged rather than
-/// risk removing access the user gets through a group.
+/// explicit before disabling inheritance. Changing the access list requires
+/// permission to write it (`WRITE_DAC`), not ownership of the directory. If
+/// the directory cannot be opened with that permission, its access list is
+/// left unchanged and the error is logged. Otherwise, if no grant applies to
+/// the current user directly or as owner, the function adds an inheritable
+/// full-control grant for the current user after the retained denies.
 /// A null DACL, which grants everyone full control, becomes user-only.
 ///
 /// These rules apply to the requested directory. Windows recomputes inherited

@@ -642,16 +642,17 @@ fn create_private_dir_makes_owned_group_only_access_user_only() {
 }
 
 #[test]
-fn narrow_dacl_refuses_group_only_access_for_a_different_owner() {
-    use std::{io::ErrorKind, ptr::null_mut};
+fn narrow_dacl_replaces_group_allow_on_an_administrators_owned_directory() {
+    use std::ptr::{addr_of, null_mut};
     use windows_sys::Win32::Security::{
         Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
-        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, PSECURITY_DESCRIPTOR,
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, IsWellKnownSid,
+        WinBuiltinAdministratorsSid, PSECURITY_DESCRIPTOR,
     };
 
-    // Give Authenticated Users and SYSTEM access, with Guests as an unrelated
-    // owner in memory. No fixture directory needs an ownership change.
-    let sddl: Vec<u16> = "O:BGD:P(A;OICI;FA;;;AU)(A;OICI;FA;;;SY)"
+    // An elevated process can create a folder owned by BUILTIN\Administrators.
+    // Model that owner in memory, with an Everyone allow and a Create Files deny.
+    let sddl: Vec<u16> = "O:BAD:P(D;OICI;0x2;;;WD)(A;OICI;FA;;;WD)"
         .encode_utf16()
         .chain(Some(0))
         .collect();
@@ -690,11 +691,50 @@ fn narrow_dacl_refuses_group_only_access_for_a_different_owner() {
     assert!(!security.dacl.is_null());
     let user = super::User::current().unwrap();
     // SAFETY: Both SIDs point into live token or descriptor storage.
+    assert_ne!(
+        unsafe { IsWellKnownSid(security.owner, WinBuiltinAdministratorsSid) },
+        0
+    );
     assert_eq!(unsafe { super::EqualSid(security.owner, user.sid()) }, 0);
-    assert!(matches!(super::narrow_dacl(&security, &user), Err(error)
-        if error.kind() == ErrorKind::PermissionDenied));
-    // SAFETY: The DACL still belongs to the live descriptor.
+
+    let (mut narrowed, changed) = super::narrow_dacl(&security, &user).unwrap();
+    assert!(changed);
+    let acl = narrowed.as_mut_ptr();
+    // SAFETY: Both ACLs are live, one in the descriptor and one in narrowed.
     assert_eq!(unsafe { (*security.dacl).AceCount }, 2);
+    assert_eq!(unsafe { (*acl).AceCount }, 2);
+    let ace_at = |acl, index| {
+        let mut raw = null_mut();
+        // SAFETY: The caller passes a live ACL and an index within its count.
+        assert_ne!(unsafe { super::GetAce(acl, index, &mut raw) }, 0);
+        raw
+    };
+    let deny_bytes = |acl| {
+        let raw = ace_at(acl, 0);
+        // SAFETY: GetAce returned a full ACE whose size is in its header.
+        unsafe {
+            let header = &*raw.cast::<super::ACE_HEADER>();
+            assert_eq!(header.AceType, 1);
+            std::slice::from_raw_parts(raw.cast::<u8>(), usize::from(header.AceSize)).to_vec()
+        }
+    };
+    assert_eq!(deny_bytes(acl), deny_bytes(security.dacl));
+    let raw = ace_at(acl, 1);
+    // SAFETY: Check the ACE type before reading the allow layout; the embedded
+    // SID and token SID stay live for the comparison.
+    unsafe {
+        assert_eq!((*raw.cast::<super::ACE_HEADER>()).AceType, 0);
+        let allow = &*raw.cast::<super::ACCESS_ALLOWED_ACE>();
+        assert_eq!(allow.Mask, super::FILE_ALL_ACCESS);
+        assert_eq!(
+            u32::from(allow.Header.AceFlags),
+            super::OBJECT_INHERIT_ACE | super::CONTAINER_INHERIT_ACE
+        );
+        assert_ne!(
+            super::EqualSid(addr_of!(allow.SidStart).cast_mut().cast(), user.sid()),
+            0
+        );
+    }
 }
 
 #[test]

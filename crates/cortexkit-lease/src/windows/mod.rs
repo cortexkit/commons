@@ -261,7 +261,7 @@ impl OwnerAcl {
         let bytes = used_bytes + offset_of!(ACCESS_ALLOWED_ACE, SidStart) + sid_bytes;
         let words = bytes.div_ceil(size_of::<u32>());
         let needed = u16::try_from(words * size_of::<u32>())
-            .map_err(|_| io::Error::other("DACL is too large to add the owner's entry"))?;
+            .map_err(|_| io::Error::other("DACL is too large to add the current user's entry"))?;
         if needed > capacity {
             self.0.resize(words, 0);
             // SAFETY: The initialized ACL now has at least needed bytes of aligned storage.
@@ -821,17 +821,9 @@ fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)>
         }
     }
     if !has_own_grant {
-        // SAFETY: Both non-null SIDs belong to live Win32 structures.
-        if security.owner.is_null() || unsafe { EqualSid(security.owner, user.sid()) } == 0 {
-            // A non-owner may rely on access through a group or logon session.
-            // Leave the original DACL in place rather than strip that access.
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "no current-user grant on a directory owned by another principal; refusing to remove possible group access",
-            ));
-        }
-        // The owner can set the DACL. Replace group-only access with a direct
-        // grant to the owner, without allowing any other principal or removing denies.
+        // The caller opens the directory with WRITE_DAC, so the user can
+        // already edit its access list regardless of who owns the directory.
+        // Replace group-only access with a user grant after the retained denies.
         acl.append_directory_allow(user, used_bytes)?;
         changed = true;
     }

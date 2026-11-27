@@ -2,14 +2,14 @@
 
 ## 0.1.10
 
-- On Windows, `create_private_dir` no longer resets permissions or ownership
-  on an existing directory. It preserves denies and the current
+- On Windows, `create_private_dir` preserves existing denies and the current
   user's grants, makes retained inherited entries explicit, and removes grants
-  to other principals. If the user has no grant, an existing directory they
-  own gets a direct, inheritable full-control grant while keeping all denies;
-  a directory they do not own is left unchanged to avoid removing group-only
-  access. Newly created directories still get a protected, inheritable
-  current-user DACL.
+  to other principals without changing ownership. It needs `WRITE_DAC` to
+  change the access list and leaves the list unchanged if it cannot open the
+  directory with that right. If no grant applies to the user, it adds an
+  inheritable full-control grant for that user after the retained denies.
+  Newly created directories still get a protected, inheritable current-user
+  DACL.
 
 ## 0.1.9
 
