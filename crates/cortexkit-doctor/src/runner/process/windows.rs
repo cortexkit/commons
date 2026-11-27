@@ -1,3 +1,5 @@
+#[path = "windows/job.rs"]
+mod job;
 #[path = "windows/spawn.rs"]
 mod spawn;
 
@@ -31,7 +33,7 @@ pub(super) fn run(
     if matches!(result, Err(RunError::TimedOut | RunError::Cancelled)) {
         child.interrupt(limits.term_to_kill);
     }
-    child.terminate();
+    child.terminate().map_err(launch_failed)?;
 
     let ReadEnd {
         bytes,

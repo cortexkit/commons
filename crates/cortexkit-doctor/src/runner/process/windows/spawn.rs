@@ -16,10 +16,9 @@ use windows_sys::Win32::System::Console::{
     GenerateConsoleCtrlEvent, GetConsoleProcessList, CTRL_BREAK_EVENT,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
-    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-    TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
@@ -32,7 +31,8 @@ use windows_sys::Win32::System::Threading::{
 pub(super) struct Child {
     job: OwnedHandle,
     process: OwnedHandle,
-    console_group: Option<u32>,
+    pid: u32,
+    shares_console: bool,
 }
 
 impl Child {
@@ -114,12 +114,13 @@ impl Child {
         let child = Self {
             job,
             process,
-            console_group: share_console.then_some(info.dwProcessId),
+            pid: info.dwProcessId,
+            shares_console: share_console,
         };
         // SAFETY: the new main thread is still suspended and its handle is live.
         if unsafe { ResumeThread(main_thread.as_raw_handle()) } == u32::MAX {
             let error = io::Error::last_os_error();
-            child.terminate();
+            child.terminate()?;
             return Err(error);
         }
         Ok((child, read))
@@ -141,44 +142,16 @@ impl Child {
     }
 
     pub(super) fn interrupt(&self, grace: Duration) {
-        if let Some(group) = self.console_group {
-            // SAFETY: group is nonzero and identifies the new process group.
-            // The open process handle keeps its identity reserved until cleanup.
-            unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, group) };
+        if self.shares_console {
+            // SAFETY: pid is nonzero and identifies the new process group.
+            // The open process handle keeps that process ID reserved until cleanup.
+            unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid) };
             thread::sleep(grace);
         }
     }
 
-    pub(super) fn terminate(self) {
-        // SAFETY: the handle refers only to our new job, never an inherited job.
-        if unsafe { TerminateJobObject(self.job.as_raw_handle(), 1) } == 0 {
-            // Closing the last job handle also requests termination.
-            drop(self.job);
-            // SAFETY: the process handle is owned and job close requests its exit.
-            unsafe { WaitForSingleObject(self.process.as_raw_handle(), INFINITE) };
-            return;
-        }
-        // SAFETY: the direct child was assigned to the job and its handle stays open.
-        unsafe { WaitForSingleObject(self.process.as_raw_handle(), INFINITE) };
-        // Termination can be asynchronous for descendants with pending I/O.
-        // Wait for the job to be empty, not just for the direct child to exit.
-        loop {
-            let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
-            // SAFETY: accounting is writable and its type matches the requested class.
-            let ok = unsafe {
-                QueryInformationJobObject(
-                    self.job.as_raw_handle(),
-                    JobObjectBasicAccountingInformation,
-                    (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
-                    size_of_val(&accounting) as u32,
-                    null_mut(),
-                )
-            };
-            if ok == 0 || accounting.ActiveProcesses == 0 {
-                break;
-            }
-            thread::sleep(Duration::from_millis(1));
-        }
+    pub(super) fn terminate(self) -> io::Result<()> {
+        super::job::terminate(self.job, self.process, self.pid)
     }
 }
 
