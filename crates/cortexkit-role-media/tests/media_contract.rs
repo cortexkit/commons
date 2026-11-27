@@ -1067,6 +1067,50 @@ fn media_contract_usage_feed_entries_ack_answers_and_bounds() {
 }
 
 #[test]
+fn media_contract_usage_feed_identity() {
+    let legacy: UsageReadAnswer = round_trip(&json!({"entries":[]}));
+    assert!(legacy.feed.is_none());
+    check_usage_answer(&legacy).unwrap();
+
+    let empty: UsageReadAnswer = round_trip(&json!({"entries":[],"feed":{"id":"!","head_seq":0}}));
+    assert_eq!(
+        empty,
+        UsageReadAnswer::new(vec![]).with_feed(UsageFeed::new("!".into(), 0))
+    );
+    check_usage_answer(&empty).unwrap();
+
+    let page = UsageReadAnswer::new(vec![
+        UsageEntry::new(3).with_raw(RawEntry::new("/w==".into(), "undecodable".into()))
+    ])
+    .with_last_seq(3);
+    for head_seq in [3, 8] {
+        let answer = page
+            .clone()
+            .with_feed(UsageFeed::new("~".repeat(64), head_seq));
+        check_usage_answer(&answer).unwrap();
+    }
+    for id in [
+        "".into(),
+        "a".repeat(65),
+        "a b".into(),
+        "\n".into(),
+        "\x7f".into(),
+        "é".into(),
+    ] {
+        let answer = page.clone().with_feed(UsageFeed::new(id, 3));
+        assert_eq!(
+            check_usage_answer(&answer).unwrap_err().code,
+            "invalid_usage_answer"
+        );
+    }
+    let answer = page.with_feed(UsageFeed::new("store".into(), 2));
+    assert_eq!(
+        check_usage_answer(&answer).unwrap_err().code,
+        "invalid_usage_answer"
+    );
+}
+
+#[test]
 fn media_contract_token_connect_url_absent() {
     let v = vector("realtime.json");
     let answer: TokenAnswer = round_trip(&v["token_answer"]);

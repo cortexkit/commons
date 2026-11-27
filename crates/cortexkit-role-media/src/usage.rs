@@ -271,7 +271,16 @@ pub fn check_usage_record(record: &UsageRecord) -> CheckResult {
 wire_struct!(#[serde(deny_unknown_fields)] UsageReadRequest { limit: u64 } optional { after_seq: u64 => with_after_seq });
 wire_struct!(RawEntry { bytes_b64: String, reason: String } optional { bytes: u64 => with_bytes, sha256: String => with_sha256 });
 wire_struct!(UsageEntry { seq: u64 } optional { record: UsageRecord => with_record, raw: RawEntry => with_raw });
-wire_struct!(UsageReadAnswer { entries: Vec<UsageEntry> } optional { last_seq: u64 => with_last_seq });
+wire_struct!(
+    /// Identifies the numbering behind a cursor so readers can detect a reset.
+    UsageFeed {
+        id: String,
+        head_seq: u64
+    }
+);
+wire_struct!(UsageReadAnswer { entries: Vec<UsageEntry> } optional {
+    last_seq: u64 => with_last_seq, feed: UsageFeed => with_feed
+});
 wire_struct!(
     #[serde(deny_unknown_fields)]
     UsageAckRequest { through_seq: u64 }
@@ -350,6 +359,13 @@ pub fn check_usage_answer(answer: &UsageReadAnswer) -> CheckResult {
         previous = entry.seq;
     }
     if answer.last_seq != answer.entries.last().map(|entry| entry.seq)
+        || answer.feed.as_ref().is_some_and(|feed| {
+            !(1..=64).contains(&feed.id.len())
+                || !feed.id.bytes().all(|byte| (0x21..=0x7E).contains(&byte))
+                || answer
+                    .last_seq
+                    .is_some_and(|last_seq| feed.head_seq < last_seq)
+        })
         || crate::encoded_len(answer)? > crate::MESSAGE_MAX
     {
         return Err(CheckError::new("invalid_usage_answer"));

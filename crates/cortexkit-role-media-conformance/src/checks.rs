@@ -55,6 +55,7 @@ pub const CASES: &[&str] = &[
     "usage_quantity_coefficient_bounds",
     "usage_record_bounds",
     "usage_feed_redelivers_until_ack",
+    "usage_feed_identity_answer",
     "usage_feed_admits_only_reader",
     "usage_ack_beyond_written_refused",
     "usage_ack_answer",
@@ -225,7 +226,7 @@ async fn declared_inapplicable_reason<S: MediaSubject>(
                 .is_empty()
                 .then(|| "no declared fact could be probed".into()));
         }
-        "usage_feed_oversize_entry_acks" => {
+        "usage_feed_identity_answer" | "usage_feed_oversize_entry_acks" => {
             return Ok((!describe(s).await?.groups.contains(&Group::UsageFeed))
                 .then(|| "describe does not declare usage_feed".into()));
         }
@@ -1204,6 +1205,7 @@ async fn run_more<S: MediaSubject>(
                 "acked entry redelivered",
             )
         }
+        "usage_feed_identity_answer" => feed(s).await.map(|_| ()),
         "usage_feed_admits_only_reader" => {
             completed(s, "private-feed").await?;
             for who in ["alice", "bob", "stranger"] {

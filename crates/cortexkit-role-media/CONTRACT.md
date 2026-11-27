@@ -396,6 +396,19 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   or `{seq, raw: {bytes_b64, reason}}`, preserving undecodable bytes across
   redelivery. Stored bytes over 262,144 return raw with empty bytes_b64,
   reason oversize, bytes and sha256 so they fit and can be acknowledged.
+- [pinned] `media.feed.identity`: A usage.read reply may carry
+  `feed: {id, head_seq}`. `id` is an opaque string of 1 to 64 visible ASCII bytes
+  (0x21–0x7E) that the provider chooses. It changes whenever the provider's
+  numbering may have restarted or gone backwards: at store creation, and after
+  any rollback the provider detects. How the provider detects a rollback is its
+  own business. `head_seq` is the newest seq written now, 0 for an empty feed;
+  it is at least every returned seq. A reader resets its cursor to 0 when `id`
+  differs from the last `id` it saw, or when `head_seq` is below its cursor. It
+  then reads again and drops redelivered records by `record_id`, since an
+  identical redelivery is already a no-op. A reader never acknowledges a seq it
+  did not read under the current `id`. A reply without `feed` comes from an
+  older provider and keeps the old rules. Readers first: a reader decodes and
+  honours `feed` before any provider sends it.
 - [pinned] `media.feed.ack`: usage.ack `{through_seq}` returns
   `{acked_through_seq}`. Watermark begins at zero; integers from zero at/below
   it are no-ops returning it unchanged. Above highest written is invalid_params

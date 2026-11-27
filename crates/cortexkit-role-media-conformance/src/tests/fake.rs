@@ -64,6 +64,7 @@ struct State {
     local_records: bool,
     fixed_catalog: bool,
     no_usage_feed: bool,
+    feed_identity: bool,
     usage_reads: usize,
     seeded_entries: usize,
     refused_submit_fields: Vec<String>,
@@ -71,6 +72,10 @@ struct State {
 impl Fake {
     pub(super) fn without_usage_feed(mut self) -> Self {
         self.state.get_mut().unwrap().no_usage_feed = true;
+        self
+    }
+    pub(super) fn with_feed_identity(mut self) -> Self {
+        self.state.get_mut().unwrap().feed_identity = true;
         self
     }
     pub(super) fn with_fixed_catalog(mut self, bytes: Option<u64>, duration: Option<u64>) -> Self {
@@ -801,6 +806,19 @@ impl State {
                 let mut out = json!({"entries":entries});
                 if let Some(last) = entries.last() {
                     out["last_seq"] = last["seq"].clone();
+                }
+                if self.feed_identity {
+                    let id = if self.fault("usage_feed_identity_bad_id") {
+                        "bad id"
+                    } else {
+                        "fixture-store"
+                    };
+                    let head_seq = if self.fault("usage_feed_identity_bad_head") {
+                        0
+                    } else {
+                        self.usage.len()
+                    };
+                    out["feed"] = json!({"id":id,"head_seq":head_seq});
                 }
                 Ok(out)
             }

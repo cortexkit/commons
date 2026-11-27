@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.13
+
+- Pin media `=0.1.13`. Add a scripted reader reset scenario and a provider case
+  that validates optional usage-feed identities. These checks are additive;
+  existing provider adapters need no changes.
+
 ## 0.2.12
 
 - Pin media `=0.1.12` and add `submit_agent_id_usage_attribution`, covering

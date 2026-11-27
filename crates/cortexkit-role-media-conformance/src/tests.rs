@@ -1,5 +1,6 @@
 mod fake;
 mod stream_realtime;
+mod usage_feed;
 
 use crate::{
     checks::{run_case, Outcome, CASES},
@@ -24,7 +25,7 @@ async fn media_kit_full_featured_case_count_unchanged() {
         );
         passed += 1;
     }
-    assert_eq!(passed, 91, "full-featured case count from 0.2.12");
+    assert_eq!(passed, 92, "full-featured case count from 0.2.13");
 }
 
 #[tokio::test]
@@ -63,8 +64,8 @@ async fn media_kit_fixed_catalog_non_stream_cases() {
         assert_eq!(engines[0].kind.as_str(), "transcribe", "{case}");
         assert!(engines[0].local, "{case}");
     }
-    assert_eq!((passed, not_applicable), (21, 26));
-    assert_eq!(passed + not_applicable, 47);
+    assert_eq!((passed, not_applicable), (21, 27));
+    assert_eq!(passed + not_applicable, 48);
 }
 
 #[tokio::test]
@@ -77,6 +78,7 @@ async fn media_kit_fixed_catalog_inapplicable_reasons() {
         ("empty_output_is_a_failure", "synthesize, image, video"),
         ("chunked_result_checksum", "synthesize"),
         ("usage_feed_oversize_entry_acks", "usage_feed"),
+        ("usage_feed_identity_answer", "usage_feed"),
     ] {
         let subject =
             Fake::new(None, true, true).with_fixed_catalog(Some(32 * 1024 * 1024), Some(3_600_000));
@@ -316,6 +318,7 @@ const LOCAL_JOB_CASES: &[&str] = &[
     "empty_transcript_is_a_failure",
     "empty_output_is_a_failure",
     "usage_feed_oversize_entry_acks",
+    "usage_feed_identity_answer",
     "failure_identical_across_surfaces",
     "usage_record_per_attempt",
     "restart_keeps_terminal_jobs",

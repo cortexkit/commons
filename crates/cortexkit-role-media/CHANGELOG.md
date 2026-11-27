@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.13
+
+- Add optional `feed: {id, head_seq}` to `usage.read`. This additive change
+  lets readers reset stale cursors when numbering changes or moves backwards.
+  Replies without `feed` keep their old wire shape and behavior. Readers must
+  support `feed` before providers emit it.
+
 ## 0.1.12
 
 - Add optional usage-record `caller` attribution with a stated nullable

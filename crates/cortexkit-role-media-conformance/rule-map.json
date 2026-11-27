@@ -36,6 +36,7 @@
     {"id":"media.usage.decimal","cases":["usage_absent_is_not_zero","usage_no_rounding","usage_input_image","usage_output_image","usage_output_video","usage_cache_read","usage_request_derived","usage_quantity_bounds","usage_quantity_coefficient_bounds"],"bug_shaped":true},
     {"id":"media.feed.admission","cases":["usage_feed_admits_only_reader"],"bug_shaped":false},
     {"id":"media.feed.read","cases":["usage_feed_redelivers_until_ack","usage_feed_oversize_entry_acks"],"bug_shaped":false},
+    {"id":"media.feed.identity","cases":["usage_feed_identity_answer"],"bug_shaped":true},
     {"id":"media.feed.ack","cases":["usage_ack_beyond_written_refused","usage_ack_answer"],"bug_shaped":false},
     {"id":"media.stream.open","cases":["stream_id_reuse_refused","stream_first_frame_refused","stream_remote_requires_decision"],"bug_shaped":false},
     {"id":"media.stream.audio","cases":["stream_audio_outside_window","stream_audio_reorders_window","stream_audio_invalid_data"],"bug_shaped":true},
