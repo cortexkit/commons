@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3
+
+- `plan_notes`: a note whose anchor a view removed before the full apply is
+  delivered again at the next request, mid-run included, as a separate
+  system-role turn after the last user turn or tool result, on routes with a
+  confirmed system-role turn form; otherwise at the next run's start (§10.2).
+
 ## 0.10.2
 
 - `plan_notes` compares a refresh with the applied plan plus delivered notes.

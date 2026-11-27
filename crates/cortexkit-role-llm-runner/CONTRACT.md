@@ -7854,7 +7854,8 @@ every request, answer and refusal.
   gate with the removal string, and an addition waits for the full apply as
   below.
 - [pinned] Delivery is in the first request of the next run, after the user
-  turn starting it, never mid-run. A plan note never uses `tool_result`
+  turn starting it, never mid-run, except for the re-delivery of a note whose
+  anchor a view removed (below). A plan note never uses `tool_result`
   form and never rides a tool result: a view replacing a tool output can
   drop notices riding it. Notes preserve the old system text and tool list
   rendering byte for byte until the full apply. A removed tool is refused
@@ -7902,8 +7903,10 @@ every request, answer and refusal.
   accepted pending change at a normal run boundary. Recovery alone neither
   refetches the plan nor changes a note's form.
 - [pinned] A note is anchored at its run's first request. If a view removes
-  that anchor before the full apply, the runner delivers a fresh note at
-  the next run's start so the change is not lost. A compaction cut through a
+  that anchor before the full apply, the runner delivers a fresh note at the
+  next request, mid-run included, as a separate system-role turn after the
+  last user turn or tool result, on routes with a confirmed system-role turn
+  form; otherwise at the next run's start. A compaction cut through a
   pending note's position needs nothing kept: the reconciled system text
   carries the change. Notes never become compaction steps or stored entries.
 - [pinned] These are three Rust views of one `session.refresh` wire body:

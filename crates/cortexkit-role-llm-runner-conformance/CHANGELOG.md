@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.5
+
+- Pin cortexkit-role-llm-runner 0.10.3. No case changes.
+
 ## 0.18.4
 
 - `retention_no_content_served` no longer sends a `title` member, which the
