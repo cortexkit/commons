@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-client"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "async-nats",
  "async-trait",

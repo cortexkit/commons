@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.20
+
+- A disconnect immediately after `User Authentication Expired` and a recovery within 60 seconds log at
+  debug, not WARN and INFO. NATS closes the old connection so the client can redial with the renewed
+  credential. Other disconnects and recoveries keep their usual levels, and long outages still report at
+  ERROR with the failed retry count.
+
 ## 0.1.19
 
 - The server closing a connection because its credential expired (`User Authentication Expired`) logs at debug,

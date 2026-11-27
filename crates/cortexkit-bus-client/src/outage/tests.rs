@@ -25,11 +25,15 @@ impl std::io::Write for Capture {
 
 impl Capture {
     fn start() -> (Self, DefaultGuard) {
+        Self::with_default_level("info")
+    }
+
+    fn with_default_level(level: &str) -> (Self, DefaultGuard) {
         let capture = Self::default();
         let writer = capture.clone();
         let filter = ASYNC_NATS_LOG_DIRECTIVE
             .split(',')
-            .fold(EnvFilter::new("info"), |filter, directive| {
+            .fold(EnvFilter::new(level), |filter, directive| {
                 filter.add_directive(directive.parse().unwrap())
             });
         let subscriber = tracing_subscriber::fmt()
@@ -53,6 +57,109 @@ impl Capture {
 
 fn emit(observation: &ConnectionObservation, log: &OutageLog, event: Event) {
     observation.observe(NatsConnectionEvent::Event(&event), log, SERVER, false);
+}
+
+#[test]
+fn credential_expiry_quietly_reconnects_then_plain_disconnect_warns() {
+    let (capture, _subscriber) = Capture::with_default_level("debug");
+    let log = OutageLog::new();
+    let connection = ConnectionObservation::default();
+    emit(&connection, &log, Event::Connected);
+    connection.ready(&log, SERVER);
+
+    emit(
+        &connection,
+        &log,
+        Event::ServerError(ServerError::Other("User Authentication Expired".into())),
+    );
+    emit(&connection, &log, Event::Disconnected);
+    emit(&connection, &log, Event::Connected);
+
+    emit(&connection, &log, Event::Disconnected);
+    emit(&connection, &log, Event::Connected);
+
+    emit(
+        &connection,
+        &log,
+        Event::ServerError(ServerError::Other("User Authentication Expired".into())),
+    );
+    emit(&connection, &log, Event::SlowConsumer(3));
+    emit(&connection, &log, Event::Disconnected);
+    emit(&connection, &log, Event::Connected);
+
+    let lines = capture.lines();
+    let expected = [
+        ("DEBUG", "credential expired"),
+        ("DEBUG", "lost; reconnecting"),
+        ("DEBUG", "restored"),
+        ("WARN", "lost; reconnecting"),
+        ("INFO", "restored"),
+        ("DEBUG", "credential expired"),
+        ("WARN", "slow bus consumer"),
+        ("WARN", "lost; reconnecting"),
+        ("INFO", "restored"),
+    ];
+    assert_eq!(lines.len(), expected.len(), "{lines:?}");
+    for (line, (level, message)) in lines.iter().zip(expected) {
+        assert!(
+            line.trim_start().starts_with(level) && line.contains(message),
+            "expected {level} {message}, got {line}"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn credential_expiry_still_reports_long_outage_and_failed_retries() {
+    let (capture, _subscriber) = Capture::start();
+    let log = Arc::new(OutageLog::new());
+    let reporter = tokio::spawn({
+        let log = log.clone();
+        async move { log.report_long_outages().await }
+    });
+    let connection = ConnectionObservation::default();
+    emit(&connection, &log, Event::Connected);
+    connection.ready(&log, SERVER);
+    emit(
+        &connection,
+        &log,
+        Event::ServerError(ServerError::Other("User Authentication Expired".into())),
+    );
+    emit(&connection, &log, Event::Disconnected);
+    for kind in ["IO error", "timed out"] {
+        emit(
+            &connection,
+            &log,
+            Event::ClientError(ClientError::Other(kind.into())),
+        );
+    }
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(FIRST_REPORT - Duration::from_secs(1)).await;
+    assert!(capture.lines().is_empty(), "{:?}", capture.lines());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    tokio::task::yield_now().await;
+
+    let lines = capture.lines();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("ERROR ")
+            && lines[0].contains("is still down; reconnecting")
+            && lines[0].contains("outage_ms=60000")
+            && lines[0].contains("reported_failed_retries=2"),
+        "{lines:?}"
+    );
+
+    emit(&connection, &log, Event::Connected);
+    let lines = capture.lines();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[1].trim_start().starts_with("INFO ")
+            && lines[1].contains("restored")
+            && lines[1].contains("reported_failed_retries=2"),
+        "{lines:?}"
+    );
+    reporter.abort();
+    assert!(reporter.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test(start_paused = true)]

@@ -15,6 +15,7 @@ struct Outage {
     started: Instant,
     next_report: Instant,
     failed_retries: u64,
+    credential_reconnect: bool,
 }
 
 /// Shared by a managed connection and its replacements, since async-nats can
@@ -26,18 +27,23 @@ impl OutageLog {
         Self(watch::Sender::new(None))
     }
 
-    fn disconnected(&self, server: &str) {
+    fn disconnected(&self, server: &str, credential_reconnect: bool) {
         self.0.send_if_modified(|state| {
             if state.is_some() {
                 return false;
             }
             let now = Instant::now();
-            tracing::warn!("bus connection to {server} lost; reconnecting");
+            if credential_reconnect {
+                tracing::debug!("bus connection to {server} lost; reconnecting");
+            } else {
+                tracing::warn!("bus connection to {server} lost; reconnecting");
+            }
             *state = Some(Outage {
                 server: server.to_owned(),
                 started: now,
                 next_report: now + FIRST_REPORT,
                 failed_retries: 0,
+                credential_reconnect,
             });
             true
         });
@@ -48,11 +54,21 @@ impl OutageLog {
             let Some(outage) = state.take() else {
                 return false;
             };
-            tracing::info!(
-                outage_ms = outage.started.elapsed().as_millis() as u64,
-                reported_failed_retries = outage.failed_retries,
-                "bus connection to {server} restored"
-            );
+            let elapsed = outage.started.elapsed();
+            let outage_ms = elapsed.as_millis() as u64;
+            if outage.credential_reconnect && elapsed < FIRST_REPORT {
+                tracing::debug!(
+                    outage_ms,
+                    reported_failed_retries = outage.failed_retries,
+                    "bus connection to {server} restored"
+                );
+            } else {
+                tracing::info!(
+                    outage_ms,
+                    reported_failed_retries = outage.failed_retries,
+                    "bus connection to {server} restored"
+                );
+            }
             true
         });
     }
@@ -114,6 +130,7 @@ enum Status {
 struct ConnectionState {
     status: Status,
     ready: bool,
+    credential_expired: bool,
 }
 
 #[derive(Default)]
@@ -134,6 +151,9 @@ impl ConnectionObservation {
         if stale {
             return;
         }
+        // async-nats queues the server error before the disconnect callback.
+        // Only use the cause for the immediately following event on this connection.
+        let credential_expired = std::mem::take(&mut state.credential_expired);
         match event {
             NatsConnectionEvent::ConnectFailed(error) => {
                 let kind = error.kind();
@@ -145,7 +165,7 @@ impl ConnectionObservation {
             NatsConnectionEvent::Event(event) => match event {
                 Event::Disconnected if state.status != Status::Finished => {
                     state.status = Status::Disconnected;
-                    log.disconnected(server);
+                    log.disconnected(server, credential_expired);
                 }
                 Event::Connected if state.status != Status::Finished => {
                     if state.ready && state.status == Status::Disconnected {
@@ -162,6 +182,8 @@ impl ConnectionObservation {
                     // with expires, and the client redials with the renewed one.
                     // That's expected and recovers on its own, so it logs at
                     // debug, where it doesn't bury real errors.
+                    state.credential_expired =
+                        matches!(state.status, Status::Initial | Status::Connected);
                     tracing::debug!(
                         server,
                         "bus connection credential expired; reconnecting with the renewed one"
@@ -214,7 +236,7 @@ impl ConnectionObservation {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some((log, server)) = ended {
             // A handler can exit before its queued Disconnected is delivered.
-            log.disconnected(server);
+            log.disconnected(server, false);
         }
         state.status = Status::Finished;
     }

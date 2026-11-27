@@ -26,6 +26,9 @@ bus.publish_event("fact.created", 1, None, "fact-42", "public fact").await?;
 An outage logs one WARN when the connection is lost and one INFO when it is
 restored, with the elapsed time and the number of reported failed retries. An
 outage still open after 60 seconds logs an ERROR, then another every 10 minutes.
+If NATS closes the connection because its credential expired, the disconnect and
+a recovery within 60 seconds log at debug instead. The client normally redials
+with the renewed credential right away; long-outage reports still apply.
 
 Add `ASYNC_NATS_LOG_DIRECTIVE` to the module's `EnvFilter` to suppress the
 dependency's reconnect and handshake logs while keeping its other WARN and
