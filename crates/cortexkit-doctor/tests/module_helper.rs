@@ -1,10 +1,14 @@
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStringExt;
 use std::process::{self, Command, ExitCode};
 use std::sync::Arc;
 use std::time::Instant;
@@ -60,12 +64,7 @@ fn module_helper_fixture_child() {
     // The harness has already written its banner. Capture only the command's
     // stdout, including anything that escapes from a callback or a late flush.
     let output = OpenOptions::new().write(true).open(path).unwrap();
-    // SAFETY: output is open and outlives dup2, which duplicates its descriptor.
-    assert_eq!(
-        unsafe { libc::dup2(output.as_raw_fd(), libc::STDOUT_FILENO) },
-        libc::STDOUT_FILENO
-    );
-    drop(output);
+    capture_stdout(output);
 
     let mut manifest = example_manifest();
     match mode.as_str() {
@@ -129,6 +128,25 @@ fn module_helper_fixture_child() {
         assert_eq!(code, ExitCode::from(2));
         2
     });
+}
+
+#[cfg(unix)]
+fn capture_stdout(output: std::fs::File) {
+    // SAFETY: output is open and outlives dup2, which duplicates its descriptor.
+    assert_eq!(
+        unsafe { libc::dup2(output.as_raw_fd(), libc::STDOUT_FILENO) },
+        1
+    );
+}
+
+#[cfg(windows)]
+fn capture_stdout(output: std::fs::File) {
+    use std::os::windows::io::IntoRawHandle;
+    use windows_sys::Win32::System::Console::{SetStdHandle, STD_OUTPUT_HANDLE};
+
+    let output = output.into_raw_handle();
+    // SAFETY: output stays open until this fixture process exits.
+    assert_ne!(unsafe { SetStdHandle(STD_OUTPUT_HANDLE, output) }, 0);
 }
 
 fn invoke(mode: &str, args: &[impl AsRef<OsStr>], exit: i32) -> Vec<u8> {
@@ -197,12 +215,11 @@ fn module_helper_process_usage_errors_do_not_write() {
     ] {
         assert!(invoke("usage", args, 2).is_empty(), "{args:?}");
     }
-    let non_utf8 = [
-        "fix".into(),
-        OsString::from_vec(vec![0xff]),
-        "--digest".into(),
-        digest.into(),
-    ];
+    #[cfg(unix)]
+    let invalid = OsString::from_vec(vec![0xff]);
+    #[cfg(windows)]
+    let invalid = OsString::from_wide(&[0xd800]);
+    let non_utf8 = ["fix".into(), invalid, "--digest".into(), digest.into()];
     assert!(invoke("usage", &non_utf8, 2).is_empty());
 }
 

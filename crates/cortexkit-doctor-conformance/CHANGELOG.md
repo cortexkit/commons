@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- Run the same conformance rules on Windows and pin `cortexkit-doctor` 0.4.0.
+
 ## 0.3.1
 
 - Pin `cortexkit-doctor` 0.3.1. The conformance checks are unchanged.

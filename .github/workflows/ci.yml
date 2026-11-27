@@ -86,6 +86,13 @@ jobs:
           echo "CK_NATS_SERVER_BIN=$RUNNER_TEMP/nats-server-v2.15.0-linux-amd64/nats-server" >> "$GITHUB_ENV"
           echo 'CK_REQUIRE_NATS_SERVER=1' >> "$GITHUB_ENV"
 
+      # The workspace defaults do not build the helper executables these tests run.
+      - name: Test doctor runner and conformance fixtures
+        run: >-
+          cargo test --locked --no-fail-fast
+          -p cortexkit-doctor -p cortexkit-doctor-conformance
+          --features "cortexkit-doctor/runner-test-fixture,cortexkit-doctor-conformance/test-fixture"
+
       - name: Test
         run: cargo test --workspace --all-targets --locked
 

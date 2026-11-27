@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Run module doctor commands and manage their deadlines on Windows, with
+  console confirmation and Job Object cleanup. The `doctor/v1` wire format
+  and Unix behavior are unchanged.
+
 ## 0.3.1
 
 - Add `runner::check_cancellable` and a shared `runner::Cancel` handle so

@@ -5,7 +5,8 @@
 > Breaking changes will happen between versions, including changes to its settings,
 > stored data and interfaces. Pin an exact version if you depend on it.
 
-A Unix kit for the [module doctor contract](../cortexkit-doctor/CONTRACT.md).
+A kit for the [module doctor contract](../cortexkit-doctor/CONTRACT.md) on Windows,
+Linux, and macOS.
 Implement `Adapter` and pass it to `run(&mut impl Adapter) -> Vec<RuleResult>`.
 Each `RuleResult` has a `name` and an `Outcome`: `Passed`, `Failed { reason }`,
 or `Skipped { reason }`. Reasons are fixed codes, not child output or adapter
@@ -19,22 +20,24 @@ and fresh homes for the shared manifest invocation.
 `output.valid` validates the quick check document, and `check.read_only` compares
 both home trees before and after a separate quick check. `check.full` validates
 the full check document and runs the same before-and-after comparison. The
-comparison includes relative paths, entry types, exact symlink targets, file
-sizes, and SHA-256 of regular files. It does not follow symlinks. The two
-manifest rules inspect the same manifest invocation: `manifest.digest` is
+comparison includes relative paths, entry types, exact link targets, file
+sizes, and SHA-256 of regular files. It does not follow symlinks or junctions.
+The two manifest rules inspect the same manifest invocation: `manifest.digest` is
 skipped if `manifest.valid` fails. A stale templates digest fails only
 `manifest.digest`.
 
 The adapter has optional `fixable_id()`, `full_fixable_id()`, and `needs_stop_id()`
 getters (returning `Option<&FindingId>`) and `liveness()` (returning `Option<&Liveness>`).
 `Liveness::PidFile(PathBuf)` and `Liveness::FlockFile(PathBuf)` specify a path
-relative to the data home with no `..`. Use only a module test build for fix
-checks. Its test-only switch must check `CORTEXKIT_DOCTOR_CONFORMANCE=1` before
+relative to the data home with no `..`. `FlockFile` uses `flock` on Unix and
+an exclusive `LockFileEx` lock on the byte at offset `0x7fff_ffff_ffff_fffe`
+on Windows. Use only a module test build for fix checks. Its test-only switch
+must check `CORTEXKIT_DOCTOR_CONFORMANCE=1` before
 reading `CORTEXKIT_DOCTOR_TEST_PRESENCE`; when the switch is `no_presence`,
 inject a presence function returning `NoPresence`. Leave the switch out of
 release builds. Declare that behavior with `non_prompting() -> bool`; it
-defaults to `false`. The runner supplies the switches in a new session for
-kit fixes only. Ordinary check, manifest and fix invocations do not get them.
+defaults to `false`. The runner supplies the switches without terminal or console
+access for kit fixes only. Ordinary check, manifest and fix invocations do not get them.
 
 When `non_prompting()` returns `true`, `fix.stale_digest` and `fix.no_terminal`
 use the fixable id to check that a changed digest and a missing terminal each
@@ -55,7 +58,7 @@ active at the first snapshot and stays active through the second. If no fix
 runs, the comparison rule skips. Without the non-prompting declaration all
 fix rules skip and the kit never invokes `doctor fix`.
 
-The kit uses scratch homes and isolates process groups; it is not a filesystem
+The kit uses scratch homes and isolates process trees; it is not a filesystem
 sandbox. Only run programs you trust. A before/after comparison does not detect
 changes that were fully undone before the child exited.
 

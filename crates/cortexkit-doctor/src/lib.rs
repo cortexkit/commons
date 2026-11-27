@@ -53,12 +53,12 @@
 mod evidence;
 mod jcs;
 mod manifest;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub mod module;
 mod output;
 mod report;
 mod run_error;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub mod runner;
 mod secrets;
 mod wire;
@@ -85,9 +85,9 @@ pub enum Mode {
     Full,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const QUICK_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const FULL_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const CONFIRMATION_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);

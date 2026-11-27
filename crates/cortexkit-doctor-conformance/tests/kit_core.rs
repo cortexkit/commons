@@ -1,11 +1,8 @@
-#![cfg(all(unix, feature = "test-fixture"))]
+#![cfg(all(any(unix, windows), feature = "test-fixture"))]
 
 use std::collections::HashSet;
-use std::ffi::CString;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -13,6 +10,9 @@ use cortexkit_doctor::runner::{self, Options};
 use cortexkit_doctor::{FindingId, FixResult, Mode};
 use cortexkit_doctor_conformance::{run, Adapter, Liveness, Outcome, RuleResult};
 
+#[cfg(windows)]
+#[path = "support/junction.rs"]
+mod junction;
 #[path = "kit_core/fix_rules.rs"]
 mod kit_fix;
 
@@ -20,7 +20,7 @@ struct Fixture {
     _program_dir: tempfile::TempDir,
     program: PathBuf,
     seeded: Vec<(PathBuf, PathBuf)>,
-    fifo: bool,
+    unsupported_entry: bool,
     fixable: Option<FindingId>,
     full_fixable: Option<FindingId>,
     needs_stop: Option<FindingId>,
@@ -31,16 +31,23 @@ struct Fixture {
 impl Fixture {
     fn new(mode: &str) -> Self {
         let program_dir = tempfile::tempdir().unwrap();
-        let program = program_dir.path().join(mode);
+        let program = program_dir
+            .path()
+            .join(format!("{mode}{}", std::env::consts::EXE_SUFFIX));
         let binary = env!("CARGO_BIN_EXE_cortexkit-doctor-conformance-fixture");
         // A sibling fork can inherit a copy's write descriptor, so exec fails
         // with "Text file busy". A symlink keeps the mode in argv[0] without a copy.
-        symlink(binary, &program).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(binary, &program).unwrap();
+        #[cfg(windows)]
+        if fs::hard_link(binary, &program).is_err() {
+            fs::copy(binary, &program).unwrap();
+        }
         Self {
             _program_dir: program_dir,
             program,
             seeded: Vec::new(),
-            fifo: false,
+            unsupported_entry: false,
             fixable: None,
             full_fixable: None,
             needs_stop: None,
@@ -61,14 +68,9 @@ impl Adapter for Fixture {
         fs::create_dir(data.join("empty"))?;
         fs::write(data.join("nested/item"), "old")?;
         fs::write(config.join("settings"), "old")?;
-        symlink("nested/item", data.join("link"))?;
-        symlink("missing-target", config.join("dangling"))?;
-        if self.fifo {
-            let fifo = CString::new(config.join("fifo").as_os_str().as_bytes()).unwrap();
-            // SAFETY: fifo is NUL-terminated and remains alive for the call.
-            if unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) } != 0 {
-                return Err(io::Error::last_os_error());
-            }
+        seed_links(data, config)?;
+        if self.unsupported_entry {
+            unsupported_entry(&config.join("unsupported"))?;
         }
         Ok(())
     }
@@ -92,6 +94,42 @@ impl Adapter for Fixture {
     fn non_prompting(&self) -> bool {
         self.non_prompting
     }
+}
+
+#[cfg(unix)]
+fn seed_links(data: &Path, config: &Path) -> io::Result<()> {
+    use std::os::unix::fs::symlink;
+    symlink("nested/item", data.join("link"))?;
+    symlink("missing-target", config.join("dangling"))
+}
+
+#[cfg(windows)]
+fn seed_links(data: &Path, config: &Path) -> io::Result<()> {
+    // Junctions exercise no-follow behavior without developer mode or elevation.
+    junction::junction(&data.join("original-target"), &data.join("link"))?;
+    junction::junction(&config.join("missing-target"), &config.join("dangling"))
+}
+
+#[cfg(unix)]
+fn unsupported_entry(path: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let fifo = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: fifo is NUL-terminated and remains alive for the call.
+    if unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn unsupported_entry(path: &Path) -> io::Result<()> {
+    fs::File::create(path)?;
+    // A third-party reparse point has a tag and GUID but needs no driver to be
+    // visible in a directory listing. It is neither a symlink nor a junction.
+    let mut data = [1u8; 24];
+    data[..8].copy_from_slice(&[0x42, 0, 0, 0, 0, 0, 0, 0]);
+    junction::reparse::set(path, &data)
 }
 
 fn outcome(results: &[RuleResult], name: &str) -> Outcome {
@@ -207,9 +245,9 @@ fn kit_core_rejects_check_changes_to_either_home() {
 }
 
 #[test]
-fn kit_core_rejects_fifo_in_a_snapshot() {
+fn kit_core_rejects_unsupported_entry_in_a_snapshot() {
     let mut fixture = Fixture::new("correct");
-    fixture.fifo = true;
+    fixture.unsupported_entry = true;
     let runs = run(&mut fixture);
     assert_eq!(
         failures(&runs),

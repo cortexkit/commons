@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-doctor"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cortexkit-log",
  "cortexkit-store-types",
@@ -719,17 +719,19 @@ dependencies = [
  "sha2 0.10.9",
  "subc-presence",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "cortexkit-doctor-conformance"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cortexkit-doctor",
  "libc",
  "rustix",
  "sha2 0.10.9",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -792,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-log-manifest"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "cortexkit-doctor",

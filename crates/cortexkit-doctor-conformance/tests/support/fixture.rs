@@ -1,16 +1,18 @@
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn main() {}
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn main() -> std::process::ExitCode {
-    unix::main()
+    fixture::main()
 }
 
-#[cfg(unix)]
-mod unix {
+#[cfg(windows)]
+mod junction;
+
+#[cfg(any(unix, windows))]
+mod fixture {
     use std::fs::{self, File, OpenOptions};
     use std::io::Write;
-    use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
     use std::sync::Arc;
@@ -19,12 +21,11 @@ mod unix {
     use cortexkit_doctor::{
         Finding, FindingId, Fix, LogSource, Manifest, Mode, ModuleId, Severity,
     };
-    use rustix::{fs::FlockOperation, io::Errno};
 
     pub(super) fn main() -> ExitCode {
         let mut args = std::env::args_os();
         let executable = PathBuf::from(args.next().unwrap());
-        let mode = executable.file_name().unwrap().to_str().unwrap();
+        let mode = executable.file_stem().unwrap().to_str().unwrap();
         assert_eq!(args.next().unwrap(), "doctor");
         if mode == "no-doctor" {
             return ExitCode::from(2);
@@ -61,9 +62,7 @@ mod unix {
                 fs::write(config.join("settings"), "new").unwrap()
             }
             ("check", "retarget-symlink") if !full_check => {
-                let link = data.join("link");
-                fs::remove_file(&link).unwrap();
-                symlink("nested//item", link).unwrap();
+                retarget_link(&data);
             }
             ("check", "remove-empty-dir") if !full_check => {
                 fs::remove_dir(data.join("empty")).unwrap()
@@ -186,10 +185,55 @@ mod unix {
             .ok()
             .and_then(|text| text.strip_suffix('\n')?.parse::<u32>().ok())
             .is_some_and(|pid| pid > 0)
-            || File::open(data.join("nested/doctor.lock")).is_ok_and(|file| {
-                rustix::fs::flock(file, FlockOperation::NonBlockingLockExclusive)
-                    == Err(Errno::WOULDBLOCK)
-            })
+            || File::open(data.join("nested/doctor.lock")).is_ok_and(lock_is_held)
+    }
+
+    #[cfg(unix)]
+    fn lock_is_held(file: File) -> bool {
+        use rustix::{fs::FlockOperation, io::Errno};
+        rustix::fs::flock(file, FlockOperation::NonBlockingLockExclusive) == Err(Errno::WOULDBLOCK)
+    }
+
+    #[cfg(windows)]
+    fn lock_is_held(file: File) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
+        use windows_sys::Win32::Storage::FileSystem::{
+            LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
+        };
+        use windows_sys::Win32::System::IO::OVERLAPPED;
+
+        // Probe with a whole-file lock, which must cover the stand-in byte.
+        let mut range = OVERLAPPED::default();
+        // SAFETY: file is synchronous and range is writable until the call returns.
+        let ok = unsafe {
+            LockFileEx(
+                file.as_raw_handle(),
+                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                0,
+                u32::MAX,
+                u32::MAX,
+                &mut range,
+            )
+        };
+        ok == 0
+            && std::io::Error::last_os_error().raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32)
+    }
+
+    #[cfg(unix)]
+    fn retarget_link(data: &Path) {
+        let link = data.join("link");
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink("nested//item", link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn retarget_link(data: &Path) {
+        let link = data.join("link");
+        fs::remove_dir(&link).unwrap();
+        // Neither destination exists: a snapshot must compare the junction's
+        // own target, not the files it can reach through the junction.
+        super::junction::junction(&data.join("other-target"), &link).unwrap();
     }
 
     fn findings(data: &Path, mode: &str, check_mode: Mode) -> Vec<Finding> {

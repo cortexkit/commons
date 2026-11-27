@@ -7,10 +7,10 @@ for public review. Module callbacks own any store access; the doctor library
 does not read stores or vaults, or use the network.
 
 Rules marked **[pinned]** are binding requirements of `doctor/v1`. The module
-helper, runner helper, and conformance kit are Unix-only. The wire types,
-digests, sanitizer, report builder, and separate `cortexkit-log-manifest`
-generator are platform-independent. `cortexkit-log` is unchanged and does not
-emit template ids.
+helper, runner helper, and conformance kit run on Windows, Linux, and macOS.
+The wire types, digests, sanitizer, report builder, and separate
+`cortexkit-log-manifest` generator are platform-independent. `cortexkit-log`
+is unchanged and does not emit template ids.
 
 ## 1. Commands and documents
 
@@ -77,10 +77,12 @@ emit template ids.
   store, daemon connection, or network.
 - [pinned] Dispatch `doctor` before any normal module initialization,
   including setting up logging or opening stores. At entry the module helper
-  duplicates fd 1 close-on-exec (`F_DUPFD_CLOEXEC`),
-  redirects fd 1 to `/dev/null`, and never restores it. It writes the document
-  on the saved descriptor. Callback output, even if buffered until exit, does
-  not enter the document. A terminal prompt goes only to the terminal.
+  saves a non-inheritable copy of stdout and redirects stdout to the null
+  device without restoring it. Unix redirects fd 1; Windows redirects both
+  the standard output handle and the C runtime's stdout descriptor. The helper
+  writes the document on the saved descriptor or handle. Callback output,
+  even if buffered until exit, does not enter the document. A terminal
+  prompt goes only to the terminal.
 
 ## 2. Validation order and evidence kinds
 
@@ -130,7 +132,7 @@ emit template ids.
 | `path` | `{category, path}` with a path of 1 to 4096 UTF-8 bytes and category `data`, `config`, `project`, `temp`, or `other` | `<category>/#<alias>` |
 | `ref` | Opaque string of 1 to 256 UTF-8 bytes | `<prefix>#<alias>` |
 
-## 3. Applying a fix (Unix module helper)
+## 3. Applying a fix
 
 Use `cortexkit_doctor::module::run` in the module's CLI and return its
 `ExitCode` from `main`. The argument slice excludes `doctor` itself:
@@ -207,12 +209,14 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
   `LocalAuthenticationError`, and unknown outcomes fall back to the terminal.
 - [pinned] Before opening the terminal the helper rechecks the confirmation
   gate (10 seconds for quick, 30 minutes for full). If more time has elapsed,
-  it refuses `out_of_time`. Otherwise it opens `/dev/tty` by default and
-  refuses `no_terminal` if it cannot open it.
+  it refuses `out_of_time`. Otherwise it opens the controlling terminal
+  (`/dev/tty` on Unix or `CONIN$` and `CONOUT$` on Windows) and refuses
+  `no_terminal` if it cannot open it.
   It writes the untruncated prompt text above, a newline, and
   `Type <module_id> to confirm:` followed by a space. It reads one line
-  terminated by LF within 120 seconds, strips that LF and one optional CR,
-  and accepts only the exact module id. A wrong line, EOF, or timeout gives
+  terminated by LF within 120 seconds (Enter ends a line on the Windows
+  console), strips that LF and one optional CR, and accepts only the exact
+  module id. A wrong line, EOF, or timeout gives
   `not_confirmed`. The fallback proves only that a line was typed on the
   controlling terminal, not who typed it. A program that controls the
   terminal can type the public module id.
@@ -224,8 +228,8 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
   the configured lengths; tests shorten them. The terminal seam writes a
   prompt and reads a line, EOF, or timeout by a deadline. Module helper tests
   use the injected presence and terminal rather than making real OS prompts
-  or opening `/dev/tty`. None of the seams is a runtime flag or environment
-  setting in production. `run_with` takes the same arguments and final
+  or opening the controlling terminal. None of the seams is a runtime flag
+  or environment setting in production. `run_with` takes the same arguments and final
   `hooks: Hooks<'_>`, returning `ExitCode`. `Hooks` contains `now: &dyn Fn() ->
   Instant`, `presence: Arc<Presence>`, `open_terminal: &dyn Fn() ->
   Option<Box<dyn Terminal>>`, and `timing: Timing`. `Presence` is
@@ -250,7 +254,7 @@ the callback result with `FixOutcome::fixed(Vec<Evidence>)` or
 
 ## 4. Running a doctor program
 
-The Unix-only `cortexkit_doctor::runner` takes the same `cortexkit_doctor::Mode`
+The `cortexkit_doctor::runner` takes the same `cortexkit_doctor::Mode`
 as the module helper:
 
 ```rust,ignore
@@ -277,9 +281,9 @@ absolute path (`impl Into<PathBuf>`); `with_force_setsid(bool)` disables the
 terminal handoff for fixes when set to `true`. `with_limits(Limits)` overrides
 the contract defaults for tests. For `fix`, use the digest and `timeout_ms`
 from the selected plan, and the mode from the check that reported it. The
-runner must own waiting for its child; don't have a separate SIGCHLD handler
-reap it or enable automatic reaping. Serialize foreground fixes on any one
-terminal.
+runner must own waiting for its child; on Unix don't have a separate SIGCHLD
+handler reap it or enable automatic reaping. Serialize fixes that share a
+terminal or console.
 
 Create a `Cancel` with `Cancel::new()` and pass a shared reference to
 `check_cancellable`. Clones share the same cancellation state and can be
@@ -297,20 +301,24 @@ arguments, limits, and output interpretation as `check`.
   variables when set: on Linux `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`,
   `DISPLAY`, and `WAYLAND_DISPLAY`; on macOS none. macOS itself can add
   `__CF_USER_TEXT_ENCODING` at process startup; the runner does not pass it.
-  The contract defines `SystemRoot`, `windir`, `USERPROFILE`, `LOCALAPPDATA`,
-  and `TEMP` as the prompt allowlist for Windows, but this crate ships no
-  Windows runner. A missing variable can prevent the OS prompt and lead to
-  terminal fallback; it cannot confirm a fix.
-- [pinned] The runner connects stdin to `/dev/null` and discards stderr.
-  `check` and `manifest` start with `setsid` and have no controlling terminal.
-  For `fix`, the child gets its own process group and becomes foreground on
-  the terminal before exec only if the runner has a controlling terminal, is
+  On Windows the prompt allowlist is `SystemRoot`, `windir`, `USERPROFILE`,
+  `LOCALAPPDATA`, and `TEMP`. A missing variable can prevent the OS prompt
+  and lead to terminal fallback; it cannot confirm a fix.
+- [pinned] The runner connects stdin and stderr to the null device.
+  `check` and `manifest` have no controlling terminal or console. On Unix
+  they start with `setsid`.
+  For a Unix `fix`, the child gets its own process group and becomes foreground
+  on the terminal before exec only if the runner has a controlling terminal, is
   foreground on it, and `force_setsid` was not set. It blocks `SIGTTOU` for
   `tcsetpgrp` and restores the inherited signal mask before exec. The runner
   restores its own foreground group with `SIGTTOU` blocked on every return
   path, including timeout and kill. Otherwise the child uses `setsid`; the
   terminal fallback cannot open `/dev/tty`. Either way the child pid equals
-  the managed group id.
+  the managed group id. On Windows there is no foreground process group: a fix
+  shares the runner's attached console unless `force_setsid` was set, and all
+  other launches start detached. The Windows runner creates the child suspended
+  in a new process group, assigns it to a new kill-on-close Job Object with no
+  breakaway, then resumes the child.
 - [pinned] `Limits` defaults to 10 seconds for `check`, 30 minutes for
   `full_check`, and two seconds for `manifest`. The quick fix limit is
   `Plan::timeout_ms` plus 150 seconds. That allowance covers five seconds
@@ -324,8 +332,8 @@ arguments, limits, and output interpretation as `check`.
   the entire callback budget is guaranteed only if helper entry is within five
   seconds of launch. A slower start can end in `timed_out`.
 - [pinned] `Limits` also defaults to a two-second post-exit read grace and a
-  two-second interval between `SIGTERM` and `SIGKILL`. The runner observes the
-  direct child with `waitid(WEXITED | WNOWAIT)` and reaps it only after its last
+  two-second interval between `SIGTERM` and `SIGKILL`. On Unix, the runner
+  observes the direct child with `waitid(WEXITED | WNOWAIT)` and reaps it only after its last
   signal to the group, so its group id cannot be reused while signalling.
   If the direct child has not exited by the deadline, the runner stops
   reading, sends `SIGTERM` to the group, waits the interval, sends `SIGKILL`
@@ -335,14 +343,21 @@ arguments, limits, and output interpretation as `check`.
   With the defaults, the call returns by the deadline plus two seconds and
   reaping time. The runner sends `SIGKILL` to the managed group before it
   returns; the system reaps orphaned descendants. A descendant that escapes
-  the group with its own `setsid` is outside the teardown guarantee.
+  the group with its own `setsid` is outside the teardown guarantee. On Windows,
+  the runner observes the direct child through its process handle and terminates
+  its own job instead of signaling a Unix group. On timeout, it first sends
+  `CTRL_BREAK_EVENT` to a child group sharing its console and waits the same
+  grace interval before terminating the job; a detached child job is terminated
+  immediately. The Windows helper uses the default control-break termination,
+  so fixes must be crash-consistent, just as for Unix signals.
 - [pinned] If cancellation is requested before launch, `check_cancellable`
   returns `cancelled` without starting the helper. If the runner observes
-  cancellation while the direct child is still running, it stops reading,
-  sends `SIGTERM` to the group it created, waits `term_to_kill`, sends
+  cancellation while the direct child is still running, it stops reading. On
+  Unix it sends `SIGTERM` to the group it created, waits `term_to_kill`, sends
   `SIGKILL` to that group while the direct child is still unreaped, then
-  reaps the child and returns `cancelled`. Cancellation after the direct
-  child exits does not interrupt the read grace or change the result.
+  reaps the child. On Windows it terminates the detached job immediately and
+  waits for the child to exit. Both return `cancelled`. Cancellation after
+  the direct child exits does not interrupt the read grace or change the result.
 - [pinned] For runs not cancelled, the runner decides the result after
   reading, not at the provisional exit notification. Bytes received during
   the grace count. Cleanup after the decision does not change it. The first
@@ -353,7 +368,7 @@ arguments, limits, and output interpretation as `check`.
      `too_large`. Reading stops and teardown starts immediately; no decoding
      is attempted.
   3. The direct child had not exited by the deadline: `timed_out`.
-  4. The child died from a signal: `crashed` with the integer `signal`.
+  4. On Unix, the child died from a signal: `crashed` with the integer `signal`.
   5. `manifest` exited nonzero with empty stdout: `no_doctor`.
   6. `check` exited 2 with empty stdout: `no_doctor`.
   7. Any other nonzero exit: `crashed` with the integer `exit_code`.
@@ -368,7 +383,10 @@ to a quick check by itself; the caller decides.
 
 `RunError` has variants `LaunchFailed(std::io::ErrorKind)`, `HomeRelative`,
 `Crashed(Crash)`, `TimedOut`, `InvalidOutput(DecodeError)`, `NoDoctor`, and
-`Cancelled`. `Crash` is either `ExitCode(i32)` or `Signal(i32)`.
+`Cancelled`. `Crash` is either `ExitCode(i32)` or `Signal(i32)`. Windows reports
+the native process status as a signed `exit_code` and cannot distinguish a crash
+from a deliberate exit with the same code; Unix reports a terminating signal
+as `signal` and a normal exit code as `exit_code`.
 `RunError::as_str()` returns the failure name without details (`cancelled` for
 `Cancelled`), and reports omit the launch error kind.
 
@@ -597,7 +615,7 @@ The Rust API is `build_report(&ReportContext, &ReportInput)`, with the selected
 module, manifest, text, check result and budget supplied to `ReportInput::new`.
 Use `with_fix_results` and `with_log_tails` to include those inputs. The returned
 bytes have no trailing newline. `RunError` and `Crash` are platform-independent;
-the Unix `runner` module also exports the same types.
+the `runner` module also exports the same types.
 
 When no valid manifest is available, `build_local_report(&ReportContext,
 &ModuleId, &CheckOutput)` returns a local note in the same canonical JSON form
@@ -615,8 +633,12 @@ or emits the original value to resolve a collision.
   adapter. The adapter seeds scratch data and config homes and may name a
   quick fixable finding id, a full-only fixable id (`full_fixable_id()`), and
   a `needs_stop` id. A `needs_stop` id needs a liveness signal: a pid file
-  (decimal pid and LF) or an `flock(LOCK_EX)`
-  lock file at a path relative to the data home with no `..`.
+  (decimal pid and LF) or a `FlockFile` lock at a path relative to the data
+  home with no `..`. `FlockFile` uses `flock(LOCK_EX)` on Unix and an exclusive
+  `LockFileEx` lock at offset `0x7fff_ffff_ffff_fffe` for one byte on Windows.
+  A Windows byte lock blocks ordinary reads of the locked range, so the reserved
+  byte lies past the file contents the kit hashes. A module's whole-file lock
+  (offset zero, maximum length) covers the reserved byte too.
 - [pinned] The kit never raises a real OS prompt. It runs no `doctor fix`
   unless the adapter declares that the module test build injects a
   non-prompting presence function. In the module's test build, only when
@@ -625,18 +647,21 @@ or emits the original value to resolve a collision.
   only when its value is `no_presence`. Leave this switch out of release
   builds. The runner's non-default `conformance` feature supplies the two
   values only to kit fixes, in place of the OS prompt environment. All kit
-  fixes use a new session, with no controlling terminal. Do not enable this
+  fixes run without a controlling terminal or console. Do not enable this
   feature in the ordinary doctor caller.
-- [pinned] The stand-in opens each liveness path component with `openat`,
-  `O_NOFOLLOW`, and `O_NONBLOCK`. Every parent must be a directory; the final
+- [pinned] The stand-in opens each liveness path component relative to its
+  open parent without following symlinks or reparse points. Unix uses `openat`
+  with `O_NOFOLLOW` and `O_NONBLOCK`; Windows opens the reparse point itself
+  and refuses to traverse it. Every parent must be a directory; the final
   entry must be absent or a regular file. If not, fail with
   `unsafe_liveness_path` without writing anything.
 - [pinned] Each rule gets newly seeded homes. If a fix needs the stand-in,
   start it before the before snapshot and stop it only after the after
   snapshot. Compare both home trees without following symlinks. The relative
-  paths, entry types, symlink target strings, regular-file lengths, and
-  regular-file SHA-256 hashes must match. Never open other entry types
-  such as FIFOs, sockets, and devices; fail with `unsupported_entry`.
+  paths, entry types, symlink and junction target strings, regular-file lengths,
+  and regular-file SHA-256 hashes must match. Never open other entry types
+  such as FIFOs, sockets, and devices, or read unrecognized Windows reparse
+  points; fail with `unsupported_entry`.
 - [pinned] `output.valid` checks that the quick check output decodes.
   `check.read_only` checks that the quick check changes neither home.
   `check.full` checks that a full check decodes and changes neither home.
