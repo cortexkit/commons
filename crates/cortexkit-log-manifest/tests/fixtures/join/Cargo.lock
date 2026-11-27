@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-lease"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "fs2",
  "libc",

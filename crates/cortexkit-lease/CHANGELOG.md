@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.10
+
+- On Windows, `create_private_dir` preserves existing denies and the current
+  user's grants, makes retained inherited entries explicit, and removes grants
+  to other principals without changing ownership. It needs `WRITE_DAC` to
+  change the access list and leaves the list unchanged if it cannot open the
+  directory with that right. If no grant applies to the user, it adds an
+  inheritable full-control grant for that user after the retained denies.
+  Newly created directories still get a protected, inheritable current-user
+  DACL.
+
 ## 0.1.9
 
 - `FileLeaseStore::remove_if_free` removes a lease file by name without a key or

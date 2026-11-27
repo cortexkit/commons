@@ -2119,6 +2119,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn opening_store_respects_an_explicit_deny_on_creating_files() {
+        use std::{io::ErrorKind, process::Command};
+
+        let (root, descriptor) = tmp();
+        cortexkit_lease::create_private_dir(&root).expect("create the fixture directory");
+        let output = Command::new("whoami")
+            .args(["/user", "/fo", "csv", "/nh"])
+            .output()
+            .expect("read the current account SID");
+        assert!(output.status.success(), "whoami: {output:?}");
+        let text = String::from_utf8_lossy(&output.stdout);
+        let (_, sid) = text.trim().rsplit_once(',').expect("account and SID");
+        let sid = sid.trim_matches('"');
+        assert!(sid.starts_with("S-1-"), "expected a SID: {text}");
+        // A numeric SID avoids localized account names. WD is Write Data on
+        // files, but Create Files (FILE_ADD_FILE) on the directory itself.
+        let output = Command::new("icacls")
+            .arg(&root)
+            .args(["/deny", &format!("*{sid}:(WD)")])
+            .output()
+            .expect("deny creating files for the current account");
+        assert!(output.status.success(), "icacls: {output:?}");
+        let probe = root.join("probe");
+        assert_eq!(
+            std::fs::write(&probe, b"before").unwrap_err().kind(),
+            ErrorKind::PermissionDenied,
+            "the fixture must prevent creating files before opening the store"
+        );
+
+        let result = open_sqlite(&descriptor);
+        let child_access = std::fs::write(&probe, b"after");
+        let db_created = root.join("store.db").exists();
+        let open_result = result.map(drop);
+        std::fs::remove_dir_all(&root).expect("remove fixture");
+
+        assert!(
+            matches!(&open_result, Err(StoreError::Lease(cortexkit_lease::LeaseError::Io(err)))
+                if err.kind() == ErrorKind::PermissionDenied),
+            "store open must fail to create its lease, got {open_result:?}"
+        );
+        assert_eq!(
+            child_access.unwrap_err().kind(),
+            ErrorKind::PermissionDenied
+        );
+        assert!(!db_created);
+    }
+
     /// A store directory an older build left at 0755 is tightened on open, and
     /// the directory above it, which the store does not own, is not touched.
     #[cfg(unix)]

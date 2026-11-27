@@ -307,6 +307,24 @@ pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
 /// above it belong to whoever created them. A `dir` that is a symlink is left
 /// alone rather than followed, for the same reason `protect_file` refuses
 /// symlinks.
+///
+/// On Windows a new directory gets a protected discretionary access control
+/// list (DACL) granting full control to the current user. For an existing
+/// directory, this preserves the owner, the user's grants and all denies,
+/// removes other principals' grants, and makes retained inherited entries
+/// explicit before disabling inheritance. Changing the access list requires
+/// permission to write it (`WRITE_DAC`), not ownership of the directory. If
+/// the directory cannot be opened with that permission, its access list is
+/// left unchanged and the error is logged. Otherwise, if no grant applies to
+/// the current user directly or as owner, the function adds an inheritable
+/// full-control grant for the current user after the retained denies.
+/// A null DACL, which grants everyone full control, becomes user-only.
+///
+/// These rules apply to the requested directory. Windows recomputes inherited
+/// entries on unprotected descendants when an existing non-null DACL is
+/// narrowed. If a child's inherited entries were out of sync
+/// with its parent's inheritable entries, this can restore a missing entry.
+/// Replacing a null DACL leaves existing descendants unchanged.
 pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
