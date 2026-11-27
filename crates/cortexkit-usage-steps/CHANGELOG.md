@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.10
+
+- State in the contract that a producer never reuses a `step_ref` within its
+  `harness`, also after a restore or reinstall restarts its counters. A producer
+  whose ids could repeat folds its lineage into `step_ref`. The row identity
+  stays `harness` plus `step_ref`.
+
 ## 0.2.9
 
 - Track llm-runner `0.9`.

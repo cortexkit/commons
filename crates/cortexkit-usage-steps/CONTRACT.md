@@ -146,7 +146,13 @@ attributing them to the session.
 
 ## The row
 
-A row's identity is `harness` plus `step_ref`. When any field of a step
+A row's identity is `harness` plus `step_ref`. A producer never reuses a
+`step_ref` within its `harness`, for as long as it runs, across sessions and
+across a restore, reinstall or anything else that restarts its own counters. A
+producer whose ids could repeat after such a restart folds what makes them
+distinct (an install or lineage id, for example) into `step_ref` itself.
+Consumers key on `harness` plus `step_ref` alone and never need a lineage
+member. When any field of a step
 changes (a runner-announced step later recorded from its log, a finish reason
 that arrives late, or a verdict recomputed because an earlier step of its
 session arrived late), the whole row is sent again at a new cursor. **The last
