@@ -27,10 +27,10 @@ use windows_sys::Win32::{
         SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser, WinCreatorOwnerRightsSid,
         ACCESS_ALLOWED_ACE, ACCESS_ALLOWED_OBJECT_ACE, ACE_HEADER,
         ACE_INHERITED_OBJECT_TYPE_PRESENT, ACE_OBJECT_TYPE_PRESENT, ACL, ACL_REVISION,
-        CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, INHERITED_ACE, OBJECT_INHERIT_ACE,
-        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
-        UNPROTECTED_DACL_SECURITY_INFORMATION,
+        CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, INHERITED_ACE, INHERIT_ONLY_ACE,
+        OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+        TOKEN_QUERY, TOKEN_USER, UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
     Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, FileDispositionInfoEx, FileIdInfo, FlushFileBuffers,
@@ -751,6 +751,7 @@ fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)>
     // Removing entries backwards preserves order and keeps the remaining
     // indices stable. Order matters when an allow and deny cover the same right.
     let mut changed = false;
+    let mut has_own_grant = false;
     for index in (0..count).rev() {
         let mut raw = null_mut();
         // SAFETY: The index still exists in the live ACL and raw is writable.
@@ -760,26 +761,49 @@ fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)>
         let header = raw.cast::<ACE_HEADER>();
         // SAFETY: The ACE starts with a header and AceSize covers its bytes.
         let ace = unsafe { std::slice::from_raw_parts(raw.cast::<u8>(), (*header).AceSize.into()) };
-        if !keep_directory_ace(ace, security.owner, user)? {
+        let entry = classify_directory_ace(ace, security.owner, user)?;
+        if matches!(entry, DirectoryAce::OtherAllow) {
             // SAFETY: The index still exists in the writable ACL; ace is no longer borrowed.
             if unsafe { DeleteAce(acl.as_mut_ptr(), index) } == 0 {
                 return Err(io::Error::last_os_error());
             }
             changed = true;
-        } else if ace[1] & INHERITED_ACE as u8 != 0 {
+            continue;
+        }
+        if matches!(entry, DirectoryAce::OwnAllow) && ace[1] & INHERIT_ONLY_ACE as u8 == 0 {
+            // An entry for descendants only or with no rights does not grant
+            // the user access to this directory.
+            let mask = offset_of!(ACCESS_ALLOWED_ACE, Mask);
+            has_own_grant |= ace[mask..mask + size_of::<u32>()].iter().any(|&b| b != 0);
+        }
+        if ace[1] & INHERITED_ACE as u8 != 0 {
             // SAFETY: The live ACL owns this writable header. Clearing the
             // inherited bit makes the ACE explicit without changing its scope.
             unsafe { (*header).AceFlags &= !(INHERITED_ACE as u8) };
             changed = true;
         }
     }
+    if !has_own_grant {
+        // Leave the real DACL intact: the user may get all access through a
+        // group or logon session whose grants the proposed DACL would remove.
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "no current-user grant on the directory; refusing to remove possible group access",
+        ));
+    }
     Ok((acl, changed))
 }
 
-fn keep_directory_ace(ace: &[u8], owner: PSID, user: &User) -> io::Result<bool> {
+enum DirectoryAce {
+    Deny,
+    OwnAllow,
+    OtherAllow,
+}
+
+fn classify_directory_ace(ace: &[u8], owner: PSID, user: &User) -> io::Result<DirectoryAce> {
     let sid_start = match ace[0] {
         // All deny forms (ordinary, object, callback, and callback object).
-        1 | 6 | 10 | 12 => return Ok(true),
+        1 | 6 | 10 | 12 => return Ok(DirectoryAce::Deny),
         // Ordinary and callback allows have the same SID offset.
         0 | 9 => offset_of!(ACCESS_ALLOWED_ACE, SidStart),
         // Object and callback-object allows may omit either GUID before the SID.
@@ -813,11 +837,11 @@ fn keep_directory_ace(ace: &[u8], owner: PSID, user: &User) -> io::Result<bool> 
             return Err(invalid_ace_sid());
         }
         if EqualSid(sid, user.sid()) != 0 {
-            return Ok(true);
+            return Ok(DirectoryAce::OwnAllow);
         }
         if IsWellKnownSid(sid, WinCreatorOwnerRightsSid) != 0 {
             if !owner.is_null() && EqualSid(owner, user.sid()) != 0 {
-                return Ok(true);
+                return Ok(DirectoryAce::OwnAllow);
             }
             // Leave the DACL untouched if OWNER RIGHTS refers to a different
             // owner: deleting it could give them implicit READ_CONTROL/WRITE_DAC.
@@ -825,7 +849,7 @@ fn keep_directory_ace(ace: &[u8], owner: PSID, user: &User) -> io::Result<bool> 
         }
     }
     // There is no special grant for SYSTEM, Administrators, or any other SID.
-    Ok(false)
+    Ok(DirectoryAce::OtherAllow)
 }
 
 fn invalid_ace_sid() -> io::Error {

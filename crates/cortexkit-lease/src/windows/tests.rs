@@ -620,6 +620,29 @@ fn create_private_dir_drops_other_allows_without_granting_user_rights() {
 }
 
 #[test]
+fn create_private_dir_leaves_group_only_access_unchanged() {
+    let root = TempDir::new();
+    set_protected_dacl(&root.0, "D:P(A;OICI;FA;;;AU)(A;OICI;FA;;;SY)");
+    let user = current_user_sid();
+    let snapshot = read_acl(&root.0);
+    assert_eq!(snapshot.aces.len(), 2);
+    assert!(snapshot.aces.iter().all(|ace| ace.sid != user));
+    let probe = root.0.join("probe");
+    std::fs::write(&probe, b"writable through Authenticated Users").unwrap();
+    std::fs::remove_file(&probe).unwrap();
+    let before = security_descriptor(&root.0);
+
+    create_private_dir(&root.0).unwrap();
+
+    assert_eq!(
+        security_descriptor(&root.0),
+        before,
+        "DACL must stay intact"
+    );
+    std::fs::write(&probe, b"still writable through Authenticated Users").unwrap();
+}
+
+#[test]
 fn create_private_dir_makes_inherited_user_access_explicit_without_granting_rights() {
     use std::io::ErrorKind;
     use windows_sys::Win32::{Security::INHERITED_ACE, Storage::FileSystem::FILE_ADD_FILE};

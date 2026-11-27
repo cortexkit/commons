@@ -5,8 +5,10 @@
 - On Windows, `create_private_dir` no longer grants full control or changes
   ownership on an existing directory. It preserves denies and the current
   user's grants, makes retained inherited entries explicit, and removes grants
-  to other principals. Newly created directories still get a protected,
-  inheritable current-user DACL.
+  to other principals. If the existing DACL has no grant for the current user
+  directly or as owner, it is left unchanged to avoid taking away group-only
+  access. Newly created directories still get a protected, inheritable
+  current-user DACL.
 
 ## 0.1.9
 

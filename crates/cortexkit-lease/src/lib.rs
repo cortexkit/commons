@@ -312,7 +312,9 @@ pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
 /// list (DACL) granting full control to the current user. For an existing
 /// directory, this preserves the owner, the user's grants and all denies,
 /// removes other principals' grants, and makes retained inherited entries
-/// explicit before disabling inheritance.
+/// explicit before disabling inheritance. If no entry grants the current user
+/// access to the directory directly or as its owner, the DACL is left unchanged
+/// rather than risk removing the access the user gets through a group.
 /// A null DACL, which grants everyone full control, becomes user-only.
 ///
 /// The narrow-only guarantee covers the requested directory. Windows
