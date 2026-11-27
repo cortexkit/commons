@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-naming"
-version = "0.5.10"
+version = "0.5.11"
 dependencies = [
  "serde_json",
 ]

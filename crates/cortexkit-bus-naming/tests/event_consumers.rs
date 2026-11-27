@@ -44,6 +44,7 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.cerebellum.late_result_ready.v1.prefrontal"),
                 format!("ck.{account}.event.fusiform.catalog_changed.v1"),
                 format!("ck.{account}.event.basal.flow_owner_notice.v1"),
+                format!("ck.{account}.event.basal.flow_version_changed.v1"),
                 format!("ck.{account}.event.cingulate.card_settled.v1.prefrontal"),
             ]
         );

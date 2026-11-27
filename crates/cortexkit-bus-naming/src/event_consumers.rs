@@ -62,6 +62,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.cerebellum.late_result_ready.v1.prefrontal",
             "event.fusiform.catalog_changed.v1",
             "event.basal.flow_owner_notice.v1",
+            "event.basal.flow_version_changed.v1",
             "event.cingulate.card_settled.v1.prefrontal",
         ],
     },
@@ -893,6 +894,7 @@ mod tests {
                 "ck.box_readers.event.cerebellum.late_result_ready.v1.prefrontal",
                 "ck.box_readers.event.fusiform.catalog_changed.v1",
                 "ck.box_readers.event.basal.flow_owner_notice.v1",
+                "ck.box_readers.event.basal.flow_version_changed.v1",
                 "ck.box_readers.event.cingulate.card_settled.v1.prefrontal",
             ]
         );

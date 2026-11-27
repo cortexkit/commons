@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.11
+
+- `m_prefrontal` also reads `event.basal.flow_version_changed.v1`, the notice
+  that an installed flow's version changed or its install was revoked. The
+  durable's filter changes in place when ck-bus adopts this release.
+
 ## 0.5.10
 
 - Remove `$JS.API.CONSUMER.CREATE.<census stream>.>` and
