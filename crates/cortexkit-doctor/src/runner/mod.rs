@@ -1,9 +1,10 @@
-//! Run a module's doctor commands as isolated Unix processes.
+//! Run a module's doctor commands in isolated process trees.
 //!
-//! The runner owns waiting for its direct child. Callers must not reap it from
-//! a separate SIGCHLD handler or configure the OS to reap children automatically.
-//! Serialize foreground fixes on a given terminal.
+//! The runner owns waiting for its direct child. On Unix, callers must not
+//! reap it from a separate SIGCHLD handler or enable automatic reaping.
+//! Serialize fixes that share a terminal or console.
 
+#[cfg_attr(windows, path = "process/windows.rs")]
 mod process;
 
 use std::borrow::Cow;
@@ -98,7 +99,7 @@ impl Options {
         self
     }
 
-    /// Disable terminal handoff for fixes, even if the runner is foreground.
+    /// Disable terminal or console access for fixes.
     pub fn with_force_setsid(mut self, force_setsid: bool) -> Self {
         self.force_setsid = force_setsid;
         self
@@ -179,8 +180,8 @@ impl Cancel {
 
 /// Invoke [`check`] with a caller-controlled cancellation handle.
 /// If the handle is cancelled before launch, the helper is not started. If
-/// cancellation is observed while the helper is running, its process group
-/// is terminated and the direct child is reaped before returning
+/// cancellation is observed while the helper is running, its process tree
+/// is terminated and the direct child has exited before returning
 /// [`RunError::Cancelled`]. An exited helper keeps its result.
 pub fn check_cancellable(
     program: impl AsRef<Path>,
@@ -245,7 +246,15 @@ const PROMPT_VARS: &[&str] = &[
     "DISPLAY",
     "WAYLAND_DISPLAY",
 ];
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+const PROMPT_VARS: &[&str] = &[
+    "SystemRoot",
+    "windir",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "TEMP",
+];
+#[cfg(not(any(target_os = "linux", windows)))]
 const PROMPT_VARS: &[&str] = &[];
 
 fn invoke<T>(

@@ -1,10 +1,13 @@
-//! Run named conformance rules against a module's Unix doctor program.
+//! Run named conformance rules against a module's doctor program.
 
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 
 mod fix_rules;
 mod scratch;
+#[cfg_attr(windows, path = "stand_in/windows.rs")]
 mod stand_in;
+#[cfg(windows)]
+mod windows_fs;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -49,6 +52,8 @@ pub trait Adapter {
 #[non_exhaustive]
 pub enum Liveness {
     PidFile(PathBuf),
+    /// An exclusive `flock` on Unix or an exclusive `LockFileEx` lock on the
+    /// single byte at offset `0x7fff_ffff_ffff_fffe` on Windows.
     FlockFile(PathBuf),
 }
 

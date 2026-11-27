@@ -1,9 +1,8 @@
-#![cfg(all(unix, feature = "runner-test-fixture"))]
+#![cfg(all(any(unix, windows), feature = "runner-test-fixture"))]
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -14,8 +13,12 @@ use cortexkit_doctor::{
     MAX_OUTPUT_BYTES,
 };
 
+#[cfg(unix)]
 #[path = "support/runner_terminal.rs"]
 mod terminal;
+#[cfg(windows)]
+#[path = "support/runner_windows.rs"]
+mod windows;
 
 struct Fixture {
     _scratch: tempfile::TempDir,
@@ -39,12 +42,17 @@ impl Fixture {
 
     fn program(&self, mode: &str) -> PathBuf {
         let source = env!("CARGO_BIN_EXE_cortexkit-doctor-runner-fixture");
-        let target = self._scratch.path().join(mode);
+        let target = self._scratch.path().join(program_name(mode));
         // A concurrent fork can inherit an open copy's write descriptor and
         // cause exec to fail with "Text file busy". Keep the mode in argv[0]
         // without opening the executable for writing.
         if !target.exists() {
-            symlink(source, &target).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(source, &target).unwrap();
+            #[cfg(windows)]
+            if fs::hard_link(source, &target).is_err() {
+                fs::copy(source, &target).unwrap();
+            }
         }
         target
     }
@@ -55,6 +63,7 @@ impl Fixture {
             .with_config_home(&self.config)
     }
 
+    #[cfg(unix)]
     fn start(&self) -> Start {
         let line = fs::read_to_string(self.data.join("start")).unwrap();
         let parts: Vec<_> = line.split_whitespace().collect();
@@ -68,6 +77,11 @@ impl Fixture {
     }
 }
 
+fn program_name(mode: &str) -> String {
+    format!("{mode}{}", std::env::consts::EXE_SUFFIX)
+}
+
+#[cfg(unix)]
 #[derive(Debug)]
 struct Start {
     pid: libc::pid_t,
@@ -112,8 +126,12 @@ fn runner_helper_exit_and_output_precedence() {
         start.elapsed() < Duration::from_secs(1),
         "waited for grace after EOF"
     );
+    #[cfg(unix)]
+    let abort = RunError::Crashed(Crash::Signal(6));
+    #[cfg(windows)]
+    let abort = RunError::Crashed(Crash::ExitCode(0xc000_0005u32 as i32));
     for (mode, expected) in [
-        ("abort", RunError::Crashed(Crash::Signal(6))),
+        ("abort", abort),
         ("exit3-text", RunError::Crashed(Crash::ExitCode(3))),
         (
             "extra-output",
@@ -139,9 +157,13 @@ fn runner_helper_exit_and_output_precedence() {
         runner::manifest(fixture.program("exit3-text"), &options),
         Err(RunError::Crashed(Crash::ExitCode(3)))
     );
+    #[cfg(unix)]
+    let manifest_abort = abort;
+    #[cfg(windows)]
+    let manifest_abort = RunError::NoDoctor;
     assert_eq!(
         runner::manifest(fixture.program("abort"), &options),
-        Err(RunError::Crashed(Crash::Signal(6)))
+        Err(manifest_abort)
     );
 }
 
@@ -241,13 +263,23 @@ fn runner_helper_launch_error_preserves_io_kind() {
     let fixture = Fixture::new();
     let options = fixture.options();
     let missing = fixture.data.join("missing-program");
-    let non_executable = fixture.data.join("non-executable");
+    let non_executable = fixture.data.join(program_name("non-executable"));
     fs::write(&non_executable, "#!/bin/sh\nexit 0\n").unwrap();
-    fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o600)).unwrap();
+    #[cfg(unix)]
+    let not_executable_kind = {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&non_executable, fs::Permissions::from_mode(0o600)).unwrap();
+        ErrorKind::PermissionDenied
+    };
+    #[cfg(windows)]
+    let not_executable_kind = std::io::Error::from_raw_os_error(
+        windows_sys::Win32::Foundation::ERROR_BAD_EXE_FORMAT as i32,
+    )
+    .kind();
 
     for (path, kind) in [
         (missing, ErrorKind::NotFound),
-        (non_executable, ErrorKind::PermissionDenied),
+        (non_executable, not_executable_kind),
     ] {
         let error = runner::check(path, Mode::Quick, &options).unwrap_err();
         assert_eq!(error, RunError::LaunchFailed(kind));
@@ -307,9 +339,8 @@ fn runner_helper_environment() {
     if let Some(root) = std::env::var_os(HOME) {
         assert_eq!(std::env::var("OTHER").as_deref(), Ok("not passed"));
         let root = PathBuf::from(root);
-        let data = root.join(".local/share");
-        let config = root.join(".config");
-        let program = root.join("probe");
+        let (data, config) = resolved_fixture_homes(&root);
+        let program = root.join(program_name("probe"));
         let options = Options::new();
         let expected = BTreeMap::from([
             (
@@ -342,9 +373,11 @@ fn runner_helper_environment() {
             FixResult::Fixed
         );
         let mut expected_fix = expected.clone();
-        if cfg!(target_os = "linux") {
-            expected_fix.extend(prompt_env().map(|(k, v)| (k.to_owned(), v.to_owned())));
-        }
+        expected_fix.extend(
+            prompt_env()
+                .iter()
+                .map(|&(k, v)| (k.to_owned(), v.to_owned())),
+        );
         assert_eq!(env(), expected_fix);
 
         #[cfg(feature = "conformance")]
@@ -368,17 +401,19 @@ fn runner_helper_environment() {
     let fixture = Fixture::new();
     let program = fixture.program("probe");
     let root = program.parent().unwrap();
-    fs::create_dir_all(root.join(".local/share")).unwrap();
+    let (data, _) = resolved_fixture_homes(root);
+    fs::create_dir_all(&data).unwrap();
     let output = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "runner_helper_environment", "--nocapture"])
         .env_clear()
         .env(HOME, root)
         .env("HOME", root)
+        .env("APPDATA", root.join("AppData"))
         .env("TERM", "fixture")
         .env("OTHER", "not passed")
         .env(MARKER, "not passed")
         .env(SWITCH, "not passed")
-        .envs(prompt_env())
+        .envs(prompt_env().iter().copied())
         .output()
         .unwrap();
     assert!(
@@ -416,8 +451,20 @@ fn runner_helper_environment() {
     }
 }
 
-fn prompt_env() -> [(&'static str, &'static str); 4] {
-    [
+fn resolved_fixture_homes(root: &Path) -> (PathBuf, PathBuf) {
+    #[cfg(unix)]
+    {
+        (root.join(".local").join("share"), root.join(".config"))
+    }
+    #[cfg(windows)]
+    {
+        (root.join("AppData"), root.join("AppData"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prompt_env() -> &'static [(&'static str, &'static str)] {
+    &[
         ("DBUS_SESSION_BUS_ADDRESS", "fixture-address"),
         ("XDG_RUNTIME_DIR", "/fixture-runtime"),
         ("DISPLAY", ":99"),
@@ -425,6 +472,23 @@ fn prompt_env() -> [(&'static str, &'static str); 4] {
     ]
 }
 
+#[cfg(windows)]
+fn prompt_env() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("SystemRoot", r"C:\FixtureWindows"),
+        ("windir", r"C:\FixtureWindows"),
+        ("USERPROFILE", r"C:\FixtureUser"),
+        ("LOCALAPPDATA", r"C:\FixtureUser\Local"),
+        ("TEMP", r"C:\FixtureTemp"),
+    ]
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn prompt_env() -> &'static [(&'static str, &'static str)] {
+    &[]
+}
+
+#[cfg(unix)]
 fn group_test_subprocess(test: &str) -> bool {
     const CHILD: &str = "CK_DOCTOR_RUNNER_GROUP_CASES";
     if std::env::var_os(CHILD).is_none() {
@@ -456,6 +520,7 @@ fn group_test_subprocess(test: &str) -> bool {
 }
 
 #[test]
+#[cfg(unix)]
 fn runner_helper_group_cleanup() {
     if !group_test_subprocess("runner_helper_group_cleanup") {
         return;
@@ -535,6 +600,7 @@ fn runner_helper_group_cleanup() {
 }
 
 #[test]
+#[cfg(unix)]
 fn runner_helper_cancel_running_check() {
     if group_test_subprocess("runner_helper_cancel_running_check") {
         cancel_running_check("term-grandchild");
@@ -542,12 +608,14 @@ fn runner_helper_cancel_running_check() {
 }
 
 #[test]
+#[cfg(unix)]
 fn runner_helper_cancel_kills_term_ignoring_check() {
     if group_test_subprocess("runner_helper_cancel_kills_term_ignoring_check") {
         cancel_running_check("hang");
     }
 }
 
+#[cfg(unix)]
 fn cancel_running_check(fixture_mode: &str) {
     let fixture = Fixture::new();
     let mut limits = Limits::default();
@@ -603,6 +671,7 @@ fn runner_helper_cancel_before_start_never_spawns() {
 }
 
 #[test]
+#[cfg(unix)]
 fn runner_helper_cancel_after_exit_preserves_result() {
     if !group_test_subprocess("runner_helper_cancel_after_exit_preserves_result") {
         return;
@@ -658,6 +727,7 @@ fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
     }
 }
 
+#[cfg(unix)]
 fn assert_reaped(child: &Start) {
     assert_eq!(child.pid, child.pgid);
     // SAFETY: signal zero only probes the recorded direct child's PID.
@@ -669,6 +739,7 @@ fn assert_reaped(child: &Start) {
     wait_for_group_to_empty(child.pgid);
 }
 
+#[cfg(unix)]
 fn wait_for_group_to_empty(pgid: libc::pid_t) {
     let start = Instant::now();
     loop {

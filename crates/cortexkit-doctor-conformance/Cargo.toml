@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-doctor-conformance"
-version = "0.3.1"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,11 +10,19 @@ description = "Conformance runner for a CortexKit module's doctor commands"
 [features]
 test-fixture = []
 
-[target.'cfg(unix)'.dependencies]
-cortexkit-doctor = { version = "=0.3.1", path = "../cortexkit-doctor", features = ["conformance"] }
-rustix = { version = "1", features = ["fs"] }
+[target.'cfg(any(unix, windows))'.dependencies]
+cortexkit-doctor = { version = "=0.4.0", path = "../cortexkit-doctor", features = ["conformance"] }
 sha2 = "0.10"
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Security", "Win32_Storage_FileSystem",
+    "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_SystemServices",
+] }
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

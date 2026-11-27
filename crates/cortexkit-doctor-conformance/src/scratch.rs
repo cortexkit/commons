@@ -2,20 +2,26 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use cortexkit_doctor::runner::Options;
+#[cfg(unix)]
 use rustix::fd::AsFd;
+#[cfg(unix)]
 use rustix::fs::{self as unix, AtFlags, Dir, FileType, Mode, OFlags};
+#[cfg(unix)]
 use rustix::io::Errno;
 use sha2::{Digest, Sha256};
 
 use crate::Adapter;
 
+#[cfg(unix)]
 pub(super) const ENTRY_FLAGS: OFlags = OFlags::NOFOLLOW
     .union(OFlags::NONBLOCK)
     .union(OFlags::CLOEXEC);
+#[cfg(unix)]
 pub(super) const DIRECTORY_FLAGS: OFlags =
     ENTRY_FLAGS.union(OFlags::RDONLY).union(OFlags::DIRECTORY);
 
@@ -61,8 +67,11 @@ impl Scratch {
     }
 
     pub(super) fn snapshot(&self) -> Result<Snapshot, &'static str> {
+        #[cfg(unix)]
         let root = unix::open(&self.root, DIRECTORY_FLAGS, Mode::empty())
             .map_err(|_| "snapshot_failed")?;
+        #[cfg(windows)]
+        let root = crate::windows_fs::root(&self.root).map_err(|_| "snapshot_failed")?;
         let mut snapshot = Snapshot::default();
         for home in ["data", "config"] {
             snapshot.record(&root, home.as_ref(), home.as_ref())?;
@@ -78,10 +87,16 @@ pub(super) struct Snapshot(BTreeMap<PathBuf, Entry>);
 enum Entry {
     Directory,
     Symlink(OsString),
-    File { size: u64, sha256: [u8; 32] },
+    #[cfg(windows)]
+    Junction(OsString),
+    File {
+        size: u64,
+        sha256: [u8; 32],
+    },
 }
 
 impl Snapshot {
+    #[cfg(unix)]
     fn record(&mut self, parent: impl AsFd, name: &OsStr, path: &Path) -> Result<(), &'static str> {
         let stat = match unix::statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW) {
             Ok(stat) => stat,
@@ -114,12 +129,54 @@ impl Snapshot {
         self.0.insert(path.to_owned(), entry);
         Ok(())
     }
+
+    #[cfg(windows)]
+    fn record(&mut self, parent: &File, name: &OsStr, path: &Path) -> Result<(), &'static str> {
+        use crate::windows_fs::{self as win, Kind};
+        use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_READ_ATTRIBUTES, FILE_READ_DATA};
+
+        let file = match win::relative(
+            parent,
+            name,
+            FILE_READ_ATTRIBUTES | FILE_READ_DATA,
+            FILE_OPEN,
+            0,
+        ) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("snapshot_failed"),
+        };
+        let kind = win::kind(&file).map_err(|_| "snapshot_failed")?;
+        let entry = match kind {
+            Kind::Directory => {
+                for name in win::children(&file).map_err(|_| "snapshot_failed")? {
+                    self.record(&file, &name, &path.join(&name))?;
+                }
+                Entry::Directory
+            }
+            Kind::Symlink => {
+                Entry::Symlink(win::link_target(&file, kind).map_err(|_| "snapshot_failed")?)
+            }
+            Kind::Junction => {
+                Entry::Junction(win::link_target(&file, kind).map_err(|_| "snapshot_failed")?)
+            }
+            Kind::File => hash_file(file)?,
+            Kind::Unsupported => return Err("unsupported_entry"),
+        };
+        self.0.insert(path.to_owned(), entry);
+        Ok(())
+    }
 }
 
+#[cfg(unix)]
 fn regular_file(parent: impl AsFd, name: &OsStr) -> Result<Entry, &'static str> {
     let file = unix::openat(parent, name, ENTRY_FLAGS | OFlags::RDONLY, Mode::empty())
         .map_err(|_| "snapshot_failed")?;
-    let mut file = File::from(file);
+    hash_file(File::from(file))
+}
+
+fn hash_file(mut file: File) -> Result<Entry, &'static str> {
     let metadata = file.metadata().map_err(|_| "snapshot_failed")?;
     if !metadata.is_file() {
         return Err("unsupported_entry");

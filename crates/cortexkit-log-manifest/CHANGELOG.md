@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Use `cortexkit-doctor` 0.4.0. Generated manifest bytes are unchanged.
+
 ## 0.3.0
 
 - Use `cortexkit-doctor` 0.3.0 for the public manifest types. Generated

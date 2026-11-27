@@ -1,12 +1,11 @@
-//! Unix implementation of a module's `doctor` subcommand.
+//! Process entry point for a module's `doctor` subcommand.
 
 mod confirmation;
+mod stdout;
 mod terminal;
 
 use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::io::Write;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::ExitCode;
 
@@ -79,8 +78,8 @@ impl FixOutcome {
 /// Serve the arguments following `doctor`. Return the exit code from `main`.
 ///
 /// Dispatch before configuring logging or opening stores. This permanently
-/// redirects process stdout to `/dev/null` and writes the document on a saved
-/// descriptor. It is a process entry point, not an in-process query API.
+/// redirects process stdout to the null device and writes the document on a
+/// saved handle. It is a process entry point, not an in-process query API.
 /// The check callback receives [`Mode::Quick`] or [`Mode::Full`] on every
 /// call, including both rechecks for a fix.
 pub fn run(
@@ -108,7 +107,7 @@ pub fn run_with(
     hooks: Hooks<'_>,
 ) -> ExitCode {
     let entry = (hooks.now)();
-    let Ok(mut stdout) = take_stdout() else {
+    let Ok(mut stdout) = stdout::take() else {
         return ExitCode::FAILURE;
     };
     let Some(command) = Command::parse(args) else {
@@ -183,30 +182,6 @@ impl<'a> Command<'a> {
                 is_digest(digest).then_some(Self::Fix(id, digest, mode))
             }
             _ => None,
-        }
-    }
-}
-
-fn take_stdout() -> io::Result<File> {
-    // SAFETY: fcntl creates a new owned descriptor without changing fd 1.
-    let saved = retry_fd(|| unsafe { libc::fcntl(libc::STDOUT_FILENO, libc::F_DUPFD_CLOEXEC, 3) })?;
-    // SAFETY: saved came from F_DUPFD_CLOEXEC and has no other owner.
-    let saved = unsafe { File::from_raw_fd(saved) };
-    let null = OpenOptions::new().write(true).open("/dev/null")?;
-    // SAFETY: null stays open; dup2 atomically replaces process stdout.
-    retry_fd(|| unsafe { libc::dup2(null.as_raw_fd(), libc::STDOUT_FILENO) })?;
-    Ok(saved)
-}
-
-fn retry_fd(mut call: impl FnMut() -> libc::c_int) -> io::Result<libc::c_int> {
-    loop {
-        let fd = call();
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        let err = io::Error::last_os_error();
-        if err.kind() != io::ErrorKind::Interrupted {
-            return Err(err);
         }
     }
 }
