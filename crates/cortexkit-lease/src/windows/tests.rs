@@ -620,26 +620,81 @@ fn create_private_dir_drops_other_allows_without_granting_user_rights() {
 }
 
 #[test]
-fn create_private_dir_leaves_group_only_access_unchanged() {
+fn create_private_dir_makes_owned_group_only_access_user_only() {
     let root = TempDir::new();
-    set_protected_dacl(&root.0, "D:P(A;OICI;FA;;;AU)(A;OICI;FA;;;SY)");
+    let dir = root.0.join("owned");
+    create_private_dir(&dir).unwrap();
+    set_protected_dacl(&dir, "D:P(A;OICI;FA;;;AU)(A;OICI;FA;;;SY)");
     let user = current_user_sid();
-    let snapshot = read_acl(&root.0);
+    assert_eq!(owner_sid(&dir), user);
+    let snapshot = read_acl(&dir);
     assert_eq!(snapshot.aces.len(), 2);
     assert!(snapshot.aces.iter().all(|ace| ace.sid != user));
-    let probe = root.0.join("probe");
+    let probe = dir.join("probe");
     std::fs::write(&probe, b"writable through Authenticated Users").unwrap();
     std::fs::remove_file(&probe).unwrap();
-    let before = security_descriptor(&root.0);
 
-    create_private_dir(&root.0).unwrap();
+    create_private_dir(&dir).unwrap();
 
-    assert_eq!(
-        security_descriptor(&root.0),
-        before,
-        "DACL must stay intact"
+    assert_owner_only(&dir, true, true);
+    assert_eq!(owner_sid(&dir), user);
+    std::fs::write(&probe, b"still writable by the owner").unwrap();
+}
+
+#[test]
+fn narrow_dacl_refuses_group_only_access_for_a_different_owner() {
+    use std::{io::ErrorKind, ptr::null_mut};
+    use windows_sys::Win32::Security::{
+        Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, PSECURITY_DESCRIPTOR,
+    };
+
+    // Give Authenticated Users and SYSTEM access, with Guests as an unrelated
+    // owner in memory. No fixture directory needs an ownership change.
+    let sddl: Vec<u16> = "O:BGD:P(A;OICI;FA;;;AU)(A;OICI;FA;;;SY)"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let mut raw: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: sddl is NUL-terminated and raw is a writable descriptor output.
+    assert_ne!(
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut raw,
+                null_mut(),
+            )
+        },
+        0
     );
-    std::fs::write(&probe, b"still writable through Authenticated Users").unwrap();
+    let mut security = super::Security {
+        _descriptor: super::LocalAllocation(raw),
+        owner: null_mut(),
+        dacl: null_mut(),
+    };
+    let mut present = 0;
+    let mut defaulted = 0;
+    // SAFETY: raw is the live descriptor owned by security; the outputs are writable.
+    unsafe {
+        assert_ne!(
+            GetSecurityDescriptorOwner(raw, &mut security.owner, &mut defaulted),
+            0
+        );
+        assert_ne!(
+            GetSecurityDescriptorDacl(raw, &mut present, &mut security.dacl, &mut defaulted),
+            0
+        );
+    }
+    assert_ne!(present, 0);
+    assert!(!security.dacl.is_null());
+    let user = super::User::current().unwrap();
+    // SAFETY: Both SIDs point into live token or descriptor storage.
+    assert_eq!(unsafe { super::EqualSid(security.owner, user.sid()) }, 0);
+    assert!(matches!(super::narrow_dacl(&security, &user), Err(error)
+        if error.kind() == ErrorKind::PermissionDenied));
+    // SAFETY: The DACL still belongs to the live descriptor.
+    assert_eq!(unsafe { (*security.dacl).AceCount }, 2);
 }
 
 #[test]

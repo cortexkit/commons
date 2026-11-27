@@ -249,6 +249,41 @@ impl OwnerAcl {
     fn as_mut_ptr(&mut self) -> *mut ACL {
         self.0.as_mut_ptr().cast()
     }
+
+    fn append_directory_allow(&mut self, user: &User, used_bytes: usize) -> io::Result<()> {
+        // SAFETY: user owns a valid token SID. The ACL header is initialized.
+        let (sid_bytes, capacity) = unsafe {
+            (
+                GetLengthSid(user.sid()) as usize,
+                (*self.as_mut_ptr()).AclSize,
+            )
+        };
+        let bytes = used_bytes + offset_of!(ACCESS_ALLOWED_ACE, SidStart) + sid_bytes;
+        let words = bytes.div_ceil(size_of::<u32>());
+        let needed = u16::try_from(words * size_of::<u32>())
+            .map_err(|_| io::Error::other("DACL is too large to add the owner's entry"))?;
+        if needed > capacity {
+            self.0.resize(words, 0);
+            // SAFETY: The initialized ACL now has at least needed bytes of aligned storage.
+            unsafe { (*self.as_mut_ptr()).AclSize = needed };
+        }
+        let acl = self.as_mut_ptr();
+        // SAFETY: acl is initialized and has room for the new entry. The call
+        // copies the live SID and appends the allow after the retained denies.
+        if unsafe {
+            AddAccessAllowedAceEx(
+                acl,
+                u32::from((*acl).AclRevision),
+                OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE,
+                FILE_ALL_ACCESS,
+                user.sid(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
 }
 
 fn private_descriptor(acl: &mut OwnerAcl, user: &User) -> io::Result<SECURITY_DESCRIPTOR> {
@@ -716,9 +751,9 @@ fn narrow_existing_dir(dir: &Path) -> io::Result<()> {
     if !changed && security.dacl_is_protected()? {
         return Ok(());
     }
-    // Apply protection with the copied ACEs, never by resetting the owner or
-    // granting full control. The file security setter also removes discarded
-    // inherited access from existing, unprotected descendants.
+    // Apply protection with the filtered ACEs and leave the owner unchanged.
+    // The file security setter also updates inherited access on existing,
+    // unprotected descendants.
     // SAFETY: The handle has WRITE_DAC and the filtered ACL buffer is live.
     let error = unsafe {
         SetSecurityInfo(
@@ -752,6 +787,7 @@ fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)>
     // indices stable. Order matters when an allow and deny cover the same right.
     let mut changed = false;
     let mut has_own_grant = false;
+    let mut used_bytes = size_of::<ACL>();
     for index in (0..count).rev() {
         let mut raw = null_mut();
         // SAFETY: The index still exists in the live ACL and raw is writable.
@@ -770,6 +806,7 @@ fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)>
             changed = true;
             continue;
         }
+        used_bytes += ace.len();
         if matches!(entry, DirectoryAce::OwnAllow) && ace[1] & INHERIT_ONLY_ACE as u8 == 0 {
             // An entry for descendants only or with no rights does not grant
             // the user access to this directory.
@@ -784,12 +821,19 @@ fn narrow_dacl(security: &Security, user: &User) -> io::Result<(OwnerAcl, bool)>
         }
     }
     if !has_own_grant {
-        // Leave the real DACL intact: the user may get all access through a
-        // group or logon session whose grants the proposed DACL would remove.
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "no current-user grant on the directory; refusing to remove possible group access",
-        ));
+        // SAFETY: Both non-null SIDs belong to live Win32 structures.
+        if security.owner.is_null() || unsafe { EqualSid(security.owner, user.sid()) } == 0 {
+            // A non-owner may rely on access through a group or logon session.
+            // Leave the original DACL in place rather than strip that access.
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "no current-user grant on a directory owned by another principal; refusing to remove possible group access",
+            ));
+        }
+        // The owner can set the DACL. Replace group-only access with a direct
+        // grant to the owner, without allowing any other principal or removing denies.
+        acl.append_directory_allow(user, used_bytes)?;
+        changed = true;
     }
     Ok((acl, changed))
 }

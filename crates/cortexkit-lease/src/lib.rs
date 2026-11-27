@@ -312,14 +312,16 @@ pub fn protect_file(path: &std::path::Path) -> std::io::Result<()> {
 /// list (DACL) granting full control to the current user. For an existing
 /// directory, this preserves the owner, the user's grants and all denies,
 /// removes other principals' grants, and makes retained inherited entries
-/// explicit before disabling inheritance. If no entry grants the current user
-/// access to the directory directly or as its owner, the DACL is left unchanged
-/// rather than risk removing the access the user gets through a group.
+/// explicit before disabling inheritance. If no grant applies to the user
+/// directly or as owner, the function adds an inheritable full-control grant
+/// only if the user owns the directory and can already change its DACL. For a
+/// non-owner without a direct grant, it leaves the DACL unchanged rather than
+/// risk removing access the user gets through a group.
 /// A null DACL, which grants everyone full control, becomes user-only.
 ///
-/// The narrow-only guarantee covers the requested directory. Windows
-/// recomputes inherited entries on unprotected descendants when an existing
-/// non-null DACL is narrowed. If a child's inherited entries were out of sync
+/// These rules apply to the requested directory. Windows recomputes inherited
+/// entries on unprotected descendants when an existing non-null DACL is
+/// narrowed. If a child's inherited entries were out of sync
 /// with its parent's inheritable entries, this can restore a missing entry.
 /// Replacing a null DACL leaves existing descendants unchanged.
 pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
