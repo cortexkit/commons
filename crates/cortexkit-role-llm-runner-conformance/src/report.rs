@@ -1183,7 +1183,7 @@ pub const CASES: &[CaseSpec] = &[
     case("retention_run_status_expired", RETAINED,
         "run.status, if advertised, answers the same expired refusal; otherwise not applicable"),
     case("retention_no_content_served", RETAINED,
-        "prompt, tool-result and run-title markers disappear from every known read and every advertised export/list/read op, including subscription replay"),
+        "prompt and tool-result markers disappear from every known read and every advertised export/list/read op, including subscription replay"),
     case("retention_shorten_continues_history_version", RETAINED,
         "shortening an idle unexpired session preserves its history version and earlier messages, then expires after the new terminal plus shorter retention"),
     case("retention_equal_noop", RETAINED,

@@ -149,7 +149,6 @@ pub enum RetentionDefect {
     /// Moves its retention clock forward but never deletes a session's content once it expires.
     NeverPurge,
     TombstoneForgotten,
-    TitleLeak,
     PromptLeak,
     ToolLeak,
     Status,
@@ -1106,7 +1105,6 @@ struct Sess {
     last_activity: u64,
     expired_at: Option<u64>,
     deleted: bool,
-    title: Option<String>,
     owner: String,
     lineage: String,
     /// The identity of the plan the session runs under: the one the host
@@ -1455,9 +1453,6 @@ impl Module {
             .filter(|r: &Value| r["session"] != json!(session) || r["kind"] == json!("tombstone"))
             .collect();
         let mut record = json!({"kind":"deleted", "session":session, "at":self.world.now()});
-        if self.world.retention_defect == RetentionDefect::TitleLeak {
-            record["title"] = json!(state.title);
-        }
         if self.world.retention_defect == RetentionDefect::PromptLeak {
             record["leaked"] = json!(state
                 .messages
@@ -1495,8 +1490,6 @@ impl Module {
     }
 
     fn listing(&self, session: &str) -> Reply {
-        let sessions = self.sessions.lock().unwrap();
-        let title = sessions.get(session).and_then(|s| s.title.clone());
         let records: Vec<Value> = std::fs::read_to_string(&self.log)
             .unwrap_or_default()
             .lines()
@@ -1504,7 +1497,7 @@ impl Module {
             .filter(|r: &Value| r["session"] == json!(session))
             .collect();
         respond(
-            json!({"title":title, "leaked":records.iter().filter_map(|r| r.get("leaked")).collect::<Vec<_>>()}),
+            json!({"leaked":records.iter().filter_map(|r| r.get("leaked")).collect::<Vec<_>>()}),
         )
     }
 
@@ -2181,7 +2174,6 @@ impl Module {
                 sess.user_commands.clear();
                 sess.sends.clear();
                 sess.runs.clear();
-                sess.title = record["title"].as_str().map(str::to_owned);
             }
             "send" | "steer" => {
                 if let Some(accepts) = record["attachment_accepts"].as_bool() {
@@ -2192,9 +2184,6 @@ impl Module {
                 }
                 if let Some(retention) = record["retention"].as_u64() {
                     sess.retention = Some(retention);
-                }
-                if let Some(title) = record["title"].as_str() {
-                    sess.title = Some(title.into());
                 }
                 let run_id = text("run_id");
                 let mut body = if profiled(&session) {
@@ -4036,6 +4025,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if params.get("title").is_some() {
+            return Ok(invalid("title"));
+        }
         if params.get("retention_policy").is_some()
             && (params.get("retention").is_some() || !self.world.serves(groups::SESSION_RETENTION))
         {
@@ -4825,7 +4817,7 @@ impl Module {
                     "attachment_accepts": request.runner_params.get("attachment_accepts"),
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "cause": cause, "sender": stamp.principal,
-                    "retention":request.retention, "title":request.runner_params.get("title"),
+                    "retention":request.retention,
                     "retention_policy": request.retention_policy,
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
                     "directives":directives,

@@ -3234,6 +3234,40 @@ fn assert_cases_passed(report: &SuiteReport, names: &[&str]) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+#[tokio::test(start_paused = true)]
+async fn retention_no_content_passes_when_title_is_refused() {
+    use cortexkit_role_llm_runner::{errors, ops};
+    use cortexkit_role_llm_runner_conformance::{
+        harness::Harness, LlmRunnerSubject, Reply, RunnerRoute,
+    };
+    use serde_json::json;
+
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    let root = tempfile::tempdir().unwrap();
+    let handle = subject.spawn(root.path()).await.unwrap();
+    let session = "reject-unknown-title";
+    let route = subject
+        .session_route(&handle, session, &subject.owner_stamp())
+        .await
+        .unwrap();
+    let mut params = serde_json::Value::Object(subject.send_fields(session, true));
+    params["prompt"] = json!("first");
+    params["send_id"] = json!("first-send");
+    params["title"] = json!("not a send member");
+    let reply = route.request(ops::SESSION_SEND, params).await.unwrap();
+    let Reply::Error(error) = reply else {
+        panic!("send with title was not refused: {reply:?}");
+    };
+    assert_eq!(error.code, errors::INVALID_PARAMS);
+    assert_eq!(error.detail, Some(json!({"field":"title"})));
+
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.enable_retention();
+    let report = run(&subject).await;
+    assert_passed(&report, "retention_no_content_served");
+}
+
 #[tokio::test]
 async fn both_retention_groups_refuse_a_send_with_both_members() {
     use cortexkit_role_llm_runner::{errors, ops};
@@ -3403,11 +3437,6 @@ retention_violation!(
     retention_violation_restart_fails_by_name,
     TombstoneForgotten,
     "crash_at_RetentionTombstoned"
-);
-retention_violation!(
-    retention_violation_title_fails_by_name,
-    TitleLeak,
-    "retention_no_content_served"
 );
 retention_violation!(
     retention_violation_prompt_fails_by_name,

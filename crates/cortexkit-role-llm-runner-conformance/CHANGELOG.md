@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.4
+
+- `retention_no_content_served` no longer sends a `title` member, which the
+  contract doesn't define; a runner that refuses unknown send members passes it.
+
 ## 0.18.3
 
 - Preserve explicit legacy `retention` on sends and reuse the original send
