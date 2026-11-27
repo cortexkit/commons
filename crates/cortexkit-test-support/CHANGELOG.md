@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.16
+
+- Fenced children reuse the parent's `ckdev-*` executable cache instead of
+  copying builds into their private temporary directories. The fence sets
+  `CORTEXKIT_CKDEV_ROOT` to the parent's cache; an invalid override is refused.
+
 ## 0.1.15
 
 - `cargo_profile_dir()` and `cargo_profile_bin(name)` work with a Cargo build

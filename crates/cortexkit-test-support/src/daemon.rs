@@ -46,8 +46,8 @@ impl TestDaemonCommand {
     /// Redirect an additional directory variable into a plain subdirectory of
     /// scratch. It is reapplied at spawn, so `.env` and `.env_remove` cannot
     /// bypass it. Panics for a variable the fence already sets (HOME, the XDG
-    /// directories, TMPDIR) and for a directory name that is not a single plain
-    /// path component.
+    /// directories, TMPDIR, CORTEXKIT_CKDEV_ROOT) and for a directory name that
+    /// is not a single plain path component.
     pub fn fenced_root(&mut self, variable: &str, directory: &str) -> &mut Self {
         fenced_env_with_roots(&self.scratch, &[(variable, directory)]);
         if let Some((_, current)) = self
@@ -102,10 +102,8 @@ impl TestDaemonCommand {
                 "test daemon program must be named ckdev-*",
             ));
         }
-        // Set HOME, the XDG directories, TMPDIR and caller-selected roots last,
-        // just before spawn. These are the variables the daemon reads to decide
-        // where it writes, so a later value always wins over anything a caller
-        // set through `.env`, and the daemon writes only under its scratch tree.
+        // Reapply the fence at spawn so caller overrides cannot redirect the
+        // daemon's scratch writes or replace the parent's executable cache.
         let roots: Vec<_> = self
             .extra_roots
             .iter()
@@ -265,6 +263,28 @@ mod tests {
             .join("\n")
             + "\n";
         assert_eq!(std::fs::read_to_string(output).unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn fenced_publish_cache_reaches_the_daemon() {
+        use crate::binaries::{fenced_publish_root, CKDEV_ROOT_ENV};
+
+        let scratch = crate::ScratchDir::new("daemon-publish-cache");
+        let output = scratch.join("publish-root");
+        let program = crate::stable_executable(
+            "ckdev-publish-root-probe",
+            b"#!/bin/sh\nprintf '%s' \"$CORTEXKIT_CKDEV_ROOT\" > \"$1\"\n",
+        );
+        let mut command = TestDaemonCommand::new(&program, &scratch);
+        command
+            .arg(&output)
+            .env(CKDEV_ROOT_ENV, scratch.join("bogus"));
+        let mut daemon = command.spawn().unwrap();
+        assert!(daemon.wait().await.unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(output).unwrap(),
+            fenced_publish_root().display().to_string()
+        );
     }
 
     #[tokio::test]

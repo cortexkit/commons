@@ -45,10 +45,14 @@ an executable from its build folder. `ckdev_file_name` maps `ck-example` to `ckd
 `stage_test_binary` is the narrower compatibility helper: only `ck-*` names
 are staged; other names pass through.
 
-Unix staging uses a per-user root under the selected temporary base described
-above; Windows uses the system temp directory. A `cp` child writes Unix staging
-files so the test process holds no writable descriptor to an executable.
-Windows uses `fs::copy`.
+By default, Unix staging uses a per-user root under the selected temporary base
+described above; Windows uses the system temp directory. Fenced children use
+`CORTEXKIT_CKDEV_ROOT` to share the parent's executable cache without sharing
+its `TMPDIR`. The override must name an existing, absolute directory, not a
+symlink. On Unix, the directory must belong to the current user and not be
+writable by anyone else; Windows does not check ownership or ACLs.
+A `cp` child writes Unix staging files so the test process holds no writable
+descriptor to an executable. Windows uses `fs::copy`.
 A private staging directory is atomically renamed into its content address;
 concurrent requests reuse one published file. Digests are checked before use,
 including reuse. Within a process, the source digest and successful published-copy
@@ -99,11 +103,11 @@ content-addressed fake executable files in the exempt stable-bin directory.
 
 `TestDaemonCommand` refuses programs not named `ckdev-*` at spawn and refuses
 `kill_on_drop(false)`. It clears inherited credentials and module identity,
-allows only tool/locale variables, and redirects HOME, all XDG roots, and TMPDIR
-into scratch. Call `.fenced_root("EXAMPLE_STORAGE_ROOT", "storage")` to add a
+inherits only allowlisted variables, and redirects HOME, all XDG roots, and
+TMPDIR into scratch. Call `.fenced_root("EXAMPLE_STORAGE_ROOT", "storage")` to add a
 caller-selected directory variable; fixed roots never name a consuming repository.
-These roots, including caller additions, are reapplied immediately
-before spawning: `.env` and `.env_remove` cannot bypass the daemon fence.
+These roots, including caller additions and the shared executable cache, are
+reapplied at spawn: `.env` and `.env_remove` cannot bypass the daemon fence.
 
 Unix consumers require **`python3` on PATH** for lifecycle supervision, plus `ps`
 and `cp`. If `python3` cannot be spawned, the error names that requirement.

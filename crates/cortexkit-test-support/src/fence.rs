@@ -1,3 +1,4 @@
+use crate::binaries::{fenced_publish_root, CKDEV_ROOT_ENV};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -44,6 +45,8 @@ pub fn fenced_subc_env_dir(scratch: &Path, var: &str) -> PathBuf {
 /// Create directories beneath scratch and return their environment assignments.
 /// HOME, all five XDG directory variables, and TMPDIR point into this test tree
 /// so a daemon and its children do not write to the user's normal directories.
+/// The executable publish cache is shared with the parent so children do not
+/// copy large test binaries into their private temporary directories.
 pub fn fenced_subc_daemon_env(scratch: &Path) -> Vec<(OsString, OsString)> {
     fenced_env_with_roots(scratch, &[])
 }
@@ -61,9 +64,10 @@ pub(crate) fn fenced_env_with_roots(
             "extra root must have a valid environment variable name"
         );
         assert!(
-            !ROOTS
-                .iter()
-                .any(|(builtin, _)| name.eq_ignore_ascii_case(builtin)),
+            !name.eq_ignore_ascii_case(CKDEV_ROOT_ENV)
+                && !ROOTS
+                    .iter()
+                    .any(|(builtin, _)| name.eq_ignore_ascii_case(builtin)),
             "extra roots cannot replace a built-in directory variable"
         );
         assert!(
@@ -85,14 +89,21 @@ pub(crate) fn fenced_env_with_roots(
             );
             (OsString::from(name), path.into_os_string())
         })
+        .chain(std::iter::once_with(|| {
+            (
+                OsString::from(CKDEV_ROOT_ENV),
+                fenced_publish_root().into_os_string(),
+            )
+        }))
         .collect()
 }
 
 /// Build a command with no inherited environment except the allowlisted PATH,
 /// locale, timezone, user-name, and backtrace variables. Inherited API keys,
 /// tokens, and module identity variables are removed; HOME, XDG directories,
-/// and TMPDIR instead point beneath scratch. A `ck-*` program is copied to a
-/// reusable `ckdev-*` executable before the command is constructed.
+/// and TMPDIR instead point beneath scratch. The child shares the parent's
+/// executable publish cache. A `ck-*` program is copied to a reusable `ckdev-*`
+/// executable before the command is constructed.
 /// Use [`crate::TestDaemonCommand`] when roots must also resist later overrides
 /// and the child must terminate with the test harness.
 pub fn fenced_command(program: impl AsRef<OsStr>, scratch: &Path) -> Command {
@@ -295,6 +306,7 @@ mod tests {
         for roots in [
             vec![("XDG_DATA_HOME", "other")],
             vec![("xdg_data_home", "other")],
+            vec![("cortexkit_ckdev_root", "other")],
             vec![("EXTRA_ROOT", "..")],
             vec![("EXTRA_ROOT", "/outside")],
             vec![("EXTRA_ROOT", "../outside")],
@@ -340,6 +352,7 @@ mod tests {
             assert!(
                 ROOTS.iter().any(|(root, _)| *root == name)
                     || PASSTHROUGH.contains(&name)
+                    || name == CKDEV_ROOT_ENV
                     || name == "EXPLICIT",
                 "unexpected variable {name}"
             );

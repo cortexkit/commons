@@ -14,6 +14,8 @@ use std::{
 };
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 static CACHE_PRUNER: CachePruner = CachePruner::new();
+pub(crate) const CKDEV_ROOT_ENV: &str = "CORTEXKIT_CKDEV_ROOT";
+const PUBLISH_ROOT_FORBIDDEN_ACCESS: u32 = 0o022;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct FileIdentity {
@@ -310,7 +312,23 @@ pub fn ckdev_binary(built: impl AsRef<Path>) -> PathBuf {
 
 /// Where published `ckdev-` binaries live. macOS can delay launches of fresh
 /// copies from `/var/folders`, so valid worker temp roots take precedence over it.
+/// A child started by the environment fence uses `CORTEXKIT_CKDEV_ROOT` rather
+/// than its scratch `TMPDIR`.
+/// The override must name an existing, absolute directory, not a symlink. On
+/// Unix it must also be owned by the current user and not writable by others;
+/// Windows checks the directory, but not its owner or ACL.
 fn publish_root() -> PathBuf {
+    if let Some(root) = std::env::var_os(CKDEV_ROOT_ENV).map(PathBuf::from) {
+        assert!(
+            root.is_absolute(),
+            "{CKDEV_ROOT_ENV} must be an absolute path: {}",
+            root.display()
+        );
+        validate_root(&root, PUBLISH_ROOT_FORBIDDEN_ACCESS).unwrap_or_else(|error| {
+            panic!("invalid {CKDEV_ROOT_ENV} ({}): {error}", root.display());
+        });
+        return root;
+    }
     #[cfg(unix)]
     {
         crate::private_temp_base(std::env::var_os("TMPDIR").as_deref()).join(format!(
@@ -322,6 +340,19 @@ fn publish_root() -> PathBuf {
     {
         std::env::temp_dir().join("cortexkit-ckdev")
     }
+}
+
+// The child validates the directory before using it, even if the parent has
+// not published anything yet.
+pub(crate) fn fenced_publish_root() -> PathBuf {
+    let root = publish_root();
+    prepare_root(&root, PUBLISH_ROOT_FORBIDDEN_ACCESS).unwrap_or_else(|error| {
+        panic!(
+            "could not prepare ckdev publish root {}: {error}",
+            root.display()
+        );
+    });
+    root
 }
 
 fn ckdev_binary_at(built: &Path, root: &Path) -> PathBuf {
@@ -508,7 +539,7 @@ fn publish_with_pruner(
     prune: impl FnOnce(&Path),
 ) -> io::Result<PathBuf> {
     let (digest, publication) = memoized_source_address(built, dev_name)?;
-    prepare_root(root, 0o022)?;
+    prepare_root(root, PUBLISH_ROOT_FORBIDDEN_ACCESS)?;
     // Shared locks cover lookup, publication and the use marker. An exclusive
     // prune cannot delete an entry between verifying it and recording its use.
     let cache_lock = CacheLock::shared(root);
@@ -759,6 +790,10 @@ fn prepare_root(root: &Path, forbidden_access: u32) -> io::Result<()> {
             fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
         }
     }
+    validate_root(root, forbidden_access)
+}
+
+fn validate_root(root: &Path, forbidden_access: u32) -> io::Result<()> {
     let metadata = fs::symlink_metadata(root)?;
     if !metadata.is_dir() || metadata.is_symlink() {
         return Err(io::Error::other("root must be a real directory"));
@@ -767,7 +802,7 @@ fn prepare_root(root: &Path, forbidden_access: u32) -> io::Result<()> {
     {
         use std::os::unix::fs::MetadataExt;
         let uid = rustix::process::getuid().as_raw();
-        if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & forbidden_access != 0 {
+        if metadata.uid() != uid || metadata.mode() & forbidden_access != 0 {
             return Err(io::Error::other(format!(
                 "{} must be a directory owned by uid {uid} and writable by no one else, with no group or other permission bits in mask {forbidden_access:#o}",
                 root.display()
@@ -2093,6 +2128,128 @@ mod tests {
                     let _ = remove_published(&entry.path());
                 }
             }
+        }
+    }
+
+    const PUBLISH_CACHE_PROBE_ARGS: &[&str] = &[
+        "--exact",
+        "binaries::tests::publish_cache_probe",
+        "--ignored",
+        "--nocapture",
+    ];
+
+    #[test]
+    #[ignore = "subprocess probe"]
+    fn publish_cache_probe() {
+        let _ = publish_root();
+        if let Some(built) = std::env::var_os("CKDEV_PROBE_BUILT") {
+            let expected = PathBuf::from(std::env::var_os("CKDEV_PROBE_PUBLISHED").unwrap());
+            let placed = ckdev_binary(&built);
+            assert_eq!(placed, expected);
+            assert_eq!(fs::read(&placed).unwrap(), fs::read(built).unwrap());
+            if std::env::var_os("CKDEV_PROBE_REUSE").is_some() {
+                assert_eq!(HASH_COUNTS.with(std::cell::Cell::get).3, 0, "staged a copy");
+            }
+            println!("checked the complete published file");
+        }
+    }
+
+    fn fenced_publish_probe(scratch: &Path, built: &Path, expected: &Path) -> Command {
+        let mut command = crate::fenced_command(std::env::current_exe().unwrap(), scratch);
+        command
+            .args(PUBLISH_CACHE_PROBE_ARGS)
+            .env("CKDEV_PROBE_BUILT", built)
+            .env("CKDEV_PROBE_PUBLISHED", expected);
+        command
+    }
+
+    fn assert_publish_probe_succeeded(output: Output) {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("checked the complete published file"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn fenced_publish_cache_child_reuses_the_parents_file() {
+        let scratch = crate::ScratchDir::new("ckdev-parent-cache");
+        let built = scratch.join("ck-parent-cache-probe");
+        fs::write(&built, b"parent cache test bytes").unwrap();
+        let placed = ckdev_binary(&built);
+        let identity = file_identity(&placed).unwrap();
+
+        let output = fenced_publish_probe(&scratch, &built, &placed)
+            .env("CKDEV_PROBE_REUSE", "1")
+            .output()
+            .unwrap();
+        assert_publish_probe_succeeded(output);
+        assert_eq!(file_identity(&placed).unwrap(), identity);
+    }
+
+    #[test]
+    fn fenced_publish_cache_refuses_unsafe_roots() {
+        let scratch = crate::ScratchDir::new("ckdev-unsafe-root");
+        let file = scratch.join("file");
+        fs::write(&file, b"not a directory").unwrap();
+        #[cfg(unix)]
+        let writable = {
+            use std::os::unix::fs::PermissionsExt;
+
+            let writable = scratch.join("shared");
+            fs::create_dir(&writable).unwrap();
+            fs::set_permissions(&writable, fs::Permissions::from_mode(0o722)).unwrap();
+            writable
+        };
+        for (root, expected) in [
+            (PathBuf::from("relative"), "must be an absolute path"),
+            (scratch.join("missing"), "invalid CORTEXKIT_CKDEV_ROOT"),
+            (file, "root must be a real directory"),
+            #[cfg(unix)]
+            (writable, "writable by no one else"),
+        ] {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(PUBLISH_CACHE_PROBE_ARGS)
+                .env(CKDEV_ROOT_ENV, &root)
+                .env_remove("CKDEV_PROBE_BUILT")
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                !output.status.success()
+                    && stderr.contains(CKDEV_ROOT_ENV)
+                    && stderr.contains(expected),
+                "accepted or incorrectly rejected {root:?}: {stderr}\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+        assert!(!scratch.join("missing").exists());
+    }
+
+    #[test]
+    fn concurrent_fenced_publish_cache_children_get_one_complete_file() {
+        let scratch = crate::ScratchDir::new("ckdev-concurrent-build");
+        let built = scratch.join("ck-concurrent-probe.exe");
+        // Give each run a fresh content address so neither child starts with
+        // a cached copy left by a previous run.
+        let mut bytes = vec![0x5a; 1024 * 1024];
+        bytes.extend_from_slice(built.as_os_str().as_encoded_bytes());
+        fs::write(&built, &bytes).unwrap();
+        let name = "ckdev-concurrent-probe.exe";
+        let digest = content_digest(&built, name).unwrap();
+        let expected = fenced_publish_root().join(digest).join(name);
+        assert!(!expected.exists());
+
+        let children = ["first", "second"].map(|label| {
+            fenced_publish_probe(&scratch.join(label), &built, &expected)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        });
+        for child in children {
+            assert_publish_probe_succeeded(child.wait_with_output().unwrap());
         }
     }
 
