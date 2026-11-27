@@ -1015,6 +1015,7 @@ struct SendRec {
     admitted: bool,
     resend_count: usize,
     client_message_id: Option<String>,
+    retention_policy: Option<cortexkit_role_llm_runner::session_retention::RetentionPolicy>,
     marks: serde_json::Map<String, Value>,
 }
 
@@ -2232,6 +2233,10 @@ impl Module {
                         admitted: record["admitted"] == json!(true),
                         resend_count: 0,
                         client_message_id: record["client_message_id"].as_str().map(str::to_owned),
+                        retention_policy: serde_json::from_value(
+                            record["retention_policy"].clone(),
+                        )
+                        .unwrap(),
                         marks: record["retry_marks"]
                             .as_object()
                             .cloned()
@@ -3762,6 +3767,11 @@ impl Module {
         if self.world.serves(groups::RETENTION) {
             describe = describe.with_retention(RETENTION_MAX, self.world.retention_delete_ms);
         }
+        if self.world.serves(groups::SESSION_RETENTION) {
+            describe = describe.with_session_retention(
+                cortexkit_role_llm_runner::describe::SessionRetention::new(3650, 10, false),
+            );
+        }
         if self.world.serves(groups::RUN_CANCEL) && self.world.cancel_step_boundary {
             describe = describe.with_run_cancel(vec!["now".into(), "step_boundary".into()]);
         }
@@ -4026,6 +4036,11 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if params.get("retention_policy").is_some()
+            && (params.get("retention").is_some() || !self.world.serves(groups::SESSION_RETENTION))
+        {
+            return Ok(invalid("retention_policy"));
+        }
         let notice = params.get("notice") == Some(&Value::Bool(true));
         if let Some(reply) = not_delivered::intercept(self, stamp, session, &params)? {
             return Ok(reply);
@@ -4576,6 +4591,12 @@ impl Module {
                         Some(json!({ "field": CLIENT_MESSAGE_ID_FIELD })),
                     ));
                 }
+                if send.retention_policy != request.retention_policy {
+                    return Ok(refuse(
+                        errors::SEND_ID_REUSE,
+                        Some(json!({ "field": "retention_policy" })),
+                    ));
+                }
                 let mut sessions = self.sessions.lock().unwrap();
                 let sess = sessions.get_mut(session).unwrap();
                 let send = sess.sends.get_mut(&request.send_id).unwrap();
@@ -4638,6 +4659,7 @@ impl Module {
                             "stored_as": stored_as,
                             "prompt": request.prompt_text(), "delivery": delivery,
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
+                            "retention_policy": request.retention_policy,
                             "sender": stamp.principal,
                             "session_structured_output_jcs": session_structured_output_jcs,
                             "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
@@ -4804,6 +4826,7 @@ impl Module {
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
                     "cause": cause, "sender": stamp.principal,
                     "retention":request.retention, "title":request.runner_params.get("title"),
+                    "retention_policy": request.retention_policy,
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
                     "directives":directives,
                     "max_steps":max_steps, "max_output_tokens":max_output_tokens,

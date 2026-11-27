@@ -1081,6 +1081,31 @@ async fn session_retention_legacy_required() {
 }
 
 #[tokio::test]
+async fn call_leaves_explicit_legacy_retention_unchanged() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = Fake::new("none", true);
+    let mut driver = CrashDriver::new(&fake);
+    let handle = driver.spawn(temp.path()).await.unwrap();
+    let route = fake
+        .session_route(handle.inner(), "explicit-legacy", &fake.owner_stamp())
+        .await
+        .unwrap();
+    let reply = crate::drive::call(
+        &route,
+        ops::SESSION_SEND,
+        json!({"send_id":"s1","prompt":"p","retention":5}),
+    )
+    .await
+    .unwrap();
+    let e = expect_error(
+        "explicit legacy retention on a policy-required runner",
+        reply,
+    )
+    .unwrap();
+    assert_eq!(e.code, errors::RETENTION_REQUIRED);
+}
+
+#[tokio::test]
 async fn session_retention_starter_rollout() {
     for (fault, required) in [("none", false), ("none", true), ("undeclared", false)] {
         let temp = tempfile::tempdir().unwrap();
@@ -1112,24 +1137,6 @@ async fn session_retention_starter_rollout() {
             }
         );
         if fault != "undeclared" {
-            let legacy = fake
-                .session_route(handle.inner(), "prefer-new", &fake.owner_stamp())
-                .await
-                .unwrap();
-            expect_ok(
-                "prefer new",
-                crate::drive::call(
-                    &legacy,
-                    ops::SESSION_SEND,
-                    json!({"send_id":"s1","prompt":"p","retention":5}),
-                )
-                .await
-                .unwrap(),
-            )
-            .unwrap();
-            state(&legacy, &policy(json!("forever"), false), "starter")
-                .await
-                .unwrap();
             let hosted = fake
                 .session_route(handle.inner(), "hosted", &fake.owner_stamp())
                 .await

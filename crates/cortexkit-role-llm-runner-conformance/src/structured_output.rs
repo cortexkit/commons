@@ -21,8 +21,8 @@ use serde_json::{json, Map, Value};
 use crate::{
     cases::{Case, Ending, Session},
     drive::{
-        call, decode, expect_error, expect_field, expect_ok, head, read_all, result_marker,
-        run_result, wait_run_end, Mint, MAX_POLLS,
+        self, call, decode, expect_error, expect_field, expect_ok, head, prepare_send, read_all,
+        result_marker, run_result, wait_run_end, Mint, MAX_POLLS,
     },
     route::RunnerRoute,
     subject::{
@@ -1108,11 +1108,15 @@ where
         .session_route(handle.inner(), &name, &owner)
         .await
         .map_err(|e| format!("opening the route of {name}: {e}"))?;
+    let first = prepare_send(&route, first).await?;
     let trigger: Trigger<'_> = {
         let route = &route;
         let params = first.clone();
         Box::pin(async move {
-            if route.request(ops::SESSION_SEND, params).await.is_err() {
+            if drive::request(route, ops::SESSION_SEND, params)
+                .await
+                .is_err()
+            {
                 return;
             }
             for _ in 0..MAX_POLLS {
@@ -1149,7 +1153,7 @@ where
         "the retried send",
         expect_ok(
             "the first send, retried after the restart",
-            call(&route, ops::SESSION_SEND, first).await?,
+            drive::request(&route, ops::SESSION_SEND, first).await?,
         )?,
     )?;
     let end = wait_run_end(subject, &route, declared, None, &retry).await?;

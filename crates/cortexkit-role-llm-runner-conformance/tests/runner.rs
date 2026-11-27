@@ -3168,6 +3168,102 @@ fn stderr_lines_fit_suite_options() -> SuiteOptions {
 
 // Retention tests use the fake's explicit clock hook and can therefore run with
 // Tokio time paused; real subjects may use the same hook or short real waits.
+fn with_both_retention_groups() -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        // This fake's parked queue requires an existing session. The policy
+        // lifecycle tests use a separate fixture that can park the first send.
+        not_delivered: Some("no_fixture"),
+        ..Defects::default()
+    });
+    subject.enable_retention();
+    subject.capabilities.insert(Capability::SessionRetention);
+    subject
+}
+
+#[tokio::test(start_paused = true)]
+async fn both_retention_groups_preserve_legacy_retention() {
+    let mut subject = with_both_retention_groups();
+    subject.capabilities.insert(Capability::RunStatus);
+    subject.claim_process_kill = true;
+    let report = run(&subject).await;
+    assert_cases_passed(
+        &report,
+        &[
+            "retention_honoured",
+            "retention_run_status_expired",
+            "retention_no_content_served",
+            "retention_shorten_continues_history_version",
+            "retention_equal_noop",
+            "retention_active_run_never_expires",
+            "crash_at_RetentionTombstoned",
+        ],
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn both_retention_groups_preserve_send_params_across_restart() {
+    let mut subject = with_both_retention_groups();
+    subject
+        .capabilities
+        .extend([Capability::StructuredOutput, Capability::SendStatus]);
+    let report = run(&subject).await;
+    assert_cases_passed(
+        &report,
+        &[
+            "crash_at_Admitted",
+            "crash_at_SendRecorded",
+            "crash_at_StepRecorded",
+            "crash_at_DispatchIntent",
+            "crash_at_ToolResultRecorded",
+            "crash_at_Terminal",
+            "structured_output_frozen_across_restart",
+            RESEND_CASE,
+            STATUS_CASE,
+        ],
+    );
+}
+
+fn assert_cases_passed(report: &SuiteReport, names: &[&str]) {
+    let failures: Vec<_> = names
+        .iter()
+        .filter_map(|name| {
+            let outcome = report.outcome(name);
+            (outcome != Some(&CaseOutcome::Passed)).then(|| format!("{name}: {outcome:?}"))
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[tokio::test]
+async fn both_retention_groups_refuse_a_send_with_both_members() {
+    use cortexkit_role_llm_runner::{errors, ops};
+    use cortexkit_role_llm_runner_conformance::{
+        harness::Harness, LlmRunnerSubject, Reply, RunnerRoute,
+    };
+    use serde_json::json;
+
+    let subject = with_both_retention_groups();
+    let root = tempfile::tempdir().unwrap();
+    let handle = subject.spawn(root.path()).await.unwrap();
+    let session = "both-retention-members";
+    let route = subject
+        .session_route(&handle, session, &subject.owner_stamp())
+        .await
+        .unwrap();
+    let mut params = serde_json::Value::Object(subject.send_fields(session, true));
+    params["prompt"] = json!("first");
+    params["send_id"] = json!("first-send");
+    params["retention"] = json!(1);
+    params["retention_policy"] =
+        json!({"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":false});
+    let reply = route.request(ops::SESSION_SEND, params).await.unwrap();
+    let Reply::Error(error) = reply else {
+        panic!("send with both retention members was not refused: {reply:?}");
+    };
+    assert_eq!(error.code, errors::INVALID_PARAMS);
+    assert_eq!(error.detail, Some(json!({"field":"retention_policy"})));
+}
+
 async fn retention_break(defect: RetentionDefect, expected: &str, paused: bool) {
     let mut subject = FakeSubject::new(Defects::default());
     subject.enable_retention();

@@ -27,8 +27,9 @@ use cortexkit_role_llm_runner::{
 use crate::{
     cases::entries_for,
     drive::{
-        call, check_unique, decode, expect_code, expect_ok, head, holding, read_all, read_refusal,
-        result_marker, run_result, send_params, wait_run_end, Mint, MAX_POLLS,
+        call, check_unique, decode, expect_code, expect_ok, head, holding, prepare_send, read_all,
+        read_refusal, request, result_marker, run_result, send_params, wait_run_end, Mint,
+        MAX_POLLS,
     },
     route::RunnerRoute,
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn},
@@ -198,12 +199,13 @@ where
         &mint.next("send"),
         None,
     );
+    let params_b = prepare_send(&route_b, params_b).await?;
     let trigger: Trigger<'_> = {
         let route_b = &route_b;
         let params = params_b.clone();
         let earlier_run = earlier_run.clone();
         Box::pin(async move {
-            if route_b.request(ops::SESSION_SEND, params).await.is_err() {
+            if request(route_b, ops::SESSION_SEND, params).await.is_err() {
                 return;
             }
             for _ in 0..MAX_POLLS {
@@ -246,7 +248,7 @@ where
         "the retried send",
         expect_ok(
             "B's first send, retried after the restart",
-            call(&route_b, ops::SESSION_SEND, params_b).await?,
+            request(&route_b, ops::SESSION_SEND, params_b).await?,
         )?,
     )?;
     let recovered_run =

@@ -25,8 +25,8 @@ use crate::{
     cases::{Case, Session},
     delivery_order::delivered_once,
     drive::{
-        call, decode, expect_code, expect_error, expect_field, expect_ok, head, read_all,
-        wait_run_end, Mint, MAX_POLLS,
+        call, decode, expect_code, expect_error, expect_field, expect_ok, head, prepare_send,
+        read_all, request, wait_run_end, Mint, MAX_POLLS,
     },
     route::{Reply, RunnerRoute},
     send_helpers::{params, require_declared, send_and_wait},
@@ -68,7 +68,10 @@ async fn resend<R: RunnerRoute>(
 ) -> Result<SendReply, String> {
     decode(
         what,
-        expect_ok(what, call(route, ops::SESSION_SEND, params.clone()).await?)?,
+        expect_ok(
+            what,
+            request(route, ops::SESSION_SEND, params.clone()).await?,
+        )?,
     )
 }
 
@@ -195,6 +198,7 @@ where
     let send_id = case.mint.next("send");
     let members = DeliveryOrder::new(vec![Mode::Steer]).to_send_members();
     let send = params(case, &session, None, &marker, &send_id, &members);
+    let send = prepare_send(&session.route, send).await?;
     let first = resend(&session.route, "a [steer] list behind a held run", &send).await?;
     if first.send_state() != SendState::Pending || first.submission_id.is_none() {
         return Err(format!(
@@ -332,6 +336,7 @@ where
         &send_id,
         &Map::new(),
     );
+    let send = prepare_send(&session.route, send).await?;
     let before = head(&session.route).await?.last_run_state.map(|l| l.run_id);
     let reply = resend(&session.route, "a send", &send).await?;
     wait_run_end(

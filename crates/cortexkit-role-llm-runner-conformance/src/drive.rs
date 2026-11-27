@@ -7,7 +7,7 @@ use std::{
 };
 
 use cortexkit_role_llm_runner::{
-    errors, ops,
+    capabilities, errors, ops,
     read::{HeadMeta, HeadModel, ReadMessage, ReadPage, ReadRequest},
     run::{RunResult, RunResultRequest, RunState},
     send::SendReply,
@@ -66,17 +66,19 @@ pub fn result_marker(call: &ScriptedToolCall) -> String {
         .to_owned()
 }
 
-pub async fn call<R: RunnerRoute>(
-    route: &R,
-    method: &str,
-    mut params: Value,
-) -> Result<Reply, String> {
-    // Ordinary suite sends repeat the frozen starter policy, or add a default
-    // when session_retention is declared. Policy cases call route.request directly
-    // instead of this helper, so omission or bad input reaches the runner unchanged.
-    if matches!(method, ops::SESSION_SEND | ops::SESSION_ADOPT)
-        && params.get("retention_policy").is_none()
-    {
+pub async fn call<R: RunnerRoute>(route: &R, method: &str, params: Value) -> Result<Reply, String> {
+    let params = if matches!(method, ops::SESSION_SEND | ops::SESSION_ADOPT) {
+        prepare_send(route, params).await?
+    } else {
+        params
+    };
+    request(route, method, params).await
+}
+
+/// Resolve the retention policy before a send. Retry cases can keep these
+/// params and resend them unchanged even if the session's head has changed.
+pub async fn prepare_send<R: RunnerRoute>(route: &R, mut params: Value) -> Result<Value, String> {
+    if params.get("retention").is_none() && params.get("retention_policy").is_none() {
         let describe = route
             .request(ops::ROLE_DESCRIBE, json!({}))
             .await
@@ -84,9 +86,8 @@ pub async fn call<R: RunnerRoute>(
         if let Reply::Response(value) = describe {
             if value["capabilities"]
                 .as_array()
-                .is_some_and(|groups| groups.iter().any(|g| g == "session_retention"))
+                .is_some_and(|groups| groups.iter().any(|g| g == capabilities::SESSION_RETENTION))
             {
-                params.as_object_mut().unwrap().remove("retention");
                 let mut policy = json!({"keep":"forever","archive_after_days":0,"backup":false,"request_dumps":false});
                 if let Ok(Reply::Response(head)) = route.request(ops::SESSION_HEAD, json!({})).await
                 {
@@ -100,6 +101,14 @@ pub async fn call<R: RunnerRoute>(
             }
         }
     }
+    Ok(params)
+}
+
+pub async fn request<R: RunnerRoute>(
+    route: &R,
+    method: &str,
+    params: Value,
+) -> Result<Reply, String> {
     route
         .request(method, params)
         .await

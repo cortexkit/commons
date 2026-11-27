@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.18.3
+
+- Preserve explicit legacy `retention` on sends and reuse the original send
+  parameters across crash and restart when `session_retention` is declared.
+
 ## 0.18.2
 
 - Pin `cortexkit-role-llm-runner =0.10.2`. Check restoration after note delivery,
