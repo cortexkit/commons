@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.21
+
+- Use the latest JWT for the same key when a credential renews while NATS nonce signing is in flight.
+
 ## 0.1.20
 
 - A disconnect immediately after `User Authentication Expired` and a recovery within 60 seconds log at

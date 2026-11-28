@@ -625,16 +625,18 @@ async fn connect_current(
             let signing_diagnostics = diagnostics.clone();
             let task = tokio::spawn(async move {
                 let stale = &signing_diagnostics.stale;
-                let credential = manager.credential().await;
-                if credential.credential_public != public {
-                    stale.store(true, Ordering::Relaxed);
-                    return Err(Error::Reply(REPLACED_CREDENTIAL));
-                }
                 let signature = manager.sign(&public, nonce).await.inspect_err(|error| {
                     if matches!(error, Error::Reply(REPLACED_CREDENTIAL)) {
                         stale.store(true, Ordering::Relaxed);
                     }
                 })?;
+                // Renewal keeps the signing key but can replace the JWT while
+                // the nonce-signing request is in flight.
+                let credential = manager.credential().await;
+                if credential.credential_public != public {
+                    stale.store(true, Ordering::Relaxed);
+                    return Err(Error::Reply(REPLACED_CREDENTIAL));
+                }
                 if stale.load(Ordering::Relaxed) {
                     return Err(Error::Reply(REPLACED_CREDENTIAL));
                 }

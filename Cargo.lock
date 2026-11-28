@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-client"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-nats",
  "async-trait",
@@ -631,7 +631,7 @@ checksum = "d4c715d7f249b2abdde1adab7bc8b11573e25bafbe339bb98b5baa547219a8ad"
 dependencies = [
  "async-trait",
  "base64",
- "cortexkit-test-support 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cortexkit-test-support 0.1.15",
  "nkeys",
  "serde_json",
  "sha2 0.10.9",
@@ -1215,7 +1215,9 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-test-support"
-version = "0.1.16"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1d14a955c592b89c73f26223ebc562deac3df564504789e54887458b9e96c24"
 dependencies = [
  "file-id",
  "rustix",
@@ -1226,9 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-test-support"
-version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1d14a955c592b89c73f26223ebc562deac3df564504789e54887458b9e96c24"
+version = "0.1.16"
 dependencies = [
  "file-id",
  "rustix",

@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -8,6 +11,7 @@ use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
+    sync::Notify,
 };
 
 use super::FakeSubc;
@@ -266,6 +270,65 @@ async fn renewal_uses_dynamic_jwt_and_reissue_replaces_inbox() {
         .subscriptions
         .iter()
         .any(|subject| subject.starts_with("_INBOX.UKEY1.")));
+}
+
+#[tokio::test]
+async fn reconnect_at_first_expiry_uses_jwt_renewed_during_nonce_signing() {
+    struct SigningGate {
+        transport: Arc<FakeSubc>,
+        hold_next_sign: AtomicBool,
+        started: Notify,
+        release: Notify,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::credentials::CredentialTransport for SigningGate {
+        async fn call(&self, method: &str, params: Value) -> crate::Result<Value> {
+            if method == "ckbus.nonce_sign" && self.hold_next_sign.swap(false, Ordering::Relaxed) {
+                self.started.notify_one();
+                self.release.notified().await;
+            }
+            self.transport.call(method, params).await
+        }
+    }
+
+    let server = Server::start().await;
+    let subc = Arc::new(SigningGate {
+        transport: FakeSubc::new(&server.url),
+        hold_next_sign: AtomicBool::new(false),
+        started: Notify::new(),
+        release: Notify::new(),
+    });
+    let manager = CredentialManager::start(subc.clone()).await.unwrap();
+    let initial = manager.credential().await;
+    let outages = Arc::new(crate::OutageLog::new());
+    // Drive renewal explicitly to order the reply against signing without
+    // relying on the maintenance timer or the issuer's wall clock.
+    let (connection, _lifetime) =
+        crate::connect_current(manager.clone(), &initial, Duration::from_secs(5), &outages)
+            .await
+            .unwrap();
+    assert_eq!(server.observed.lock().unwrap().auth[0]["jwt"], "jwt-0");
+
+    // The fixture's first lease lasts 900 seconds. Force the reconnect that
+    // NATS would initiate by closing the old connection at expiry.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(900)).await;
+    tokio::time::resume();
+    subc.hold_next_sign.store(true, Ordering::Relaxed);
+    connection.client().force_reconnect().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), subc.started.notified())
+        .await
+        .expect("the reconnect requested a nonce signature");
+    manager.renew().await.unwrap();
+    subc.release.notify_one();
+
+    server.wait_for(|seen| seen.auth.len() >= 2).await;
+    assert_eq!(
+        server.observed.lock().unwrap().auth[1]["jwt"],
+        "renewed-jwt",
+        "the first reconnect sent the expired JWT despite a completed renewal"
+    );
 }
 
 #[tokio::test]
