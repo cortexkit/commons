@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.10
+
+- Report `Closed` when async-nats exhausts its reconnect attempts, so a
+  pending register watch returns an error instead of waiting forever.
+
 ## 0.5.9
 
 - Add `NatsConnection::connect_observed` to observe NATS events and initial

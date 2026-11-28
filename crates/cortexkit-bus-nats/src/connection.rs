@@ -2,7 +2,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::{Client, ConnectError, ConnectOptions, Event, Subscriber, ToServerAddrs};
+use async_nats::{
+    Client, ClientError, ConnectError, ConnectOptions, Event, Subscriber, ToServerAddrs,
+};
 use async_trait::async_trait;
 use cortexkit_bus_trait::{
     AsyncPermissionViolation, BusError, BusResult, PermissionViolationSource,
@@ -80,6 +82,20 @@ pub enum NatsConnectionEvent<'a> {
 
 type EventObserver = Arc<dyn Fn(NatsConnectionEvent<'_>) + Send + Sync>;
 
+struct CloseStateOnDrop(watch::Sender<NatsConnectionState>);
+
+impl Drop for CloseStateOnDrop {
+    fn drop(&mut self) {
+        self.0.send_if_modified(|state| {
+            if *state == NatsConnectionState::Closed {
+                return false;
+            }
+            *state = NatsConnectionState::Closed;
+            true
+        });
+    }
+}
+
 #[derive(Clone)]
 pub struct NatsConnection {
     client: Client,
@@ -155,11 +171,14 @@ impl NatsConnection {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let event_sender = events.clone();
         let (connection_state, _) = watch::channel(NatsConnectionState::Connected);
-        let state_sender = connection_state.clone();
+        // async-nats drops its event callback after the handler exits and the
+        // event queue drains. It doesn't emit Closed on reconnect exhaustion,
+        // and the bounded queue can drop even the MaxReconnects event.
+        let close_state = Arc::new(CloseStateOnDrop(connection_state.clone()));
         let event_observer = observer.clone();
         let options = options.event_callback(move |event| {
             let event_sender = event_sender.clone();
-            let state_sender = state_sender.clone();
+            let close_state = close_state.clone();
             let observer = event_observer.clone();
             async move {
                 if let Some(observer) = observer {
@@ -167,13 +186,15 @@ impl NatsConnection {
                 }
                 match &event {
                     Event::Connected => {
-                        state_sender.send_replace(NatsConnectionState::Connected);
+                        close_state.0.send_replace(NatsConnectionState::Connected);
                     }
                     Event::Disconnected => {
-                        state_sender.send_replace(NatsConnectionState::Disconnected);
+                        close_state
+                            .0
+                            .send_replace(NatsConnectionState::Disconnected);
                     }
-                    Event::Closed => {
-                        state_sender.send_replace(NatsConnectionState::Closed);
+                    Event::Closed | Event::ClientError(ClientError::MaxReconnects) => {
+                        close_state.0.send_replace(NatsConnectionState::Closed);
                     }
                     _ => {}
                 }
@@ -215,7 +236,8 @@ impl NatsConnection {
     /// server and is the initial state after connecting. A lost connection sets
     /// [`NatsConnectionState::Disconnected`], followed by `Connected` when
     /// async-nats reconnects on its own. [`NatsConnectionState::Closed`] means
-    /// the connection has ended; it is final and will not reconnect.
+    /// the connection has ended, for example by draining or exhausting its
+    /// configured reconnect attempts. It is final and will not reconnect.
     ///
     /// Slow readers retain the latest state, but may skip intermediate states.
     /// Await [`watch::Receiver::changed`] to observe updates, including while

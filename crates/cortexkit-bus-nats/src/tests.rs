@@ -1,9 +1,13 @@
 use async_nats::{Event, ServerError};
 use cortexkit_bus_trait::{BusError, ConnectionFailure};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 
 use crate::error::{map_connect_error, permission_violation};
-use crate::{ConnectConfig, NatsConnection, NatsConnectionEvent, ASYNC_NATS_VERSION_FLOOR};
+use crate::{
+    ConnectConfig, NatsConnection, NatsConnectionEvent, NatsConnectionState,
+    ASYNC_NATS_VERSION_FLOOR,
+};
 
 #[test]
 fn declared_async_nats_floor_is_not_below_the_specification() {
@@ -47,29 +51,34 @@ async fn custom_inbox_prefix_refuses_invalid_subjects_before_connecting() {
     }
 }
 
+async fn fake_nats_handshake(socket: TcpStream) -> BufReader<TcpStream> {
+    let mut socket = BufReader::new(socket);
+    socket.get_mut().write_all(b"INFO {}\r\n").await.unwrap();
+    let mut line = String::new();
+    socket.read_line(&mut line).await.unwrap();
+    assert!(line.starts_with("CONNECT "));
+    line.clear();
+    socket.read_line(&mut line).await.unwrap();
+    assert_eq!(line, "PING\r\n");
+    socket.get_mut().write_all(b"PONG\r\n").await.unwrap();
+    socket
+}
+
 #[tokio::test]
 async fn observed_connection_delivers_first_disconnect_without_a_late_subscription() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
+        let (socket, _) = listener.accept().await.unwrap();
         drop(listener);
-        socket.write_all(b"INFO {}\r\n").await.unwrap();
-        let mut incoming = BufReader::new(&mut socket);
-        let mut line = String::new();
-        incoming.read_line(&mut line).await.unwrap();
-        assert!(line.starts_with("CONNECT "));
-        line.clear();
-        incoming.read_line(&mut line).await.unwrap();
-        assert_eq!(line, "PING\r\n");
-        socket.write_all(b"PONG\r\n").await.unwrap();
         // Close immediately after the handshake; the caller has not attached
         // any watcher or event receiver to the returned connection.
+        drop(fake_nats_handshake(socket).await);
     });
     let (send, mut events) = tokio::sync::mpsc::unbounded_channel();
     let connection = NatsConnection::connect_observed(
         format!("nats://{address}"),
-        async_nats::ConnectOptions::new().max_reconnects(1),
+        async_nats::ConnectOptions::new(),
         ConnectConfig::new("UABC234").unwrap(),
         None,
         move |event| {
@@ -92,8 +101,92 @@ async fn observed_connection_delivers_first_disconnect_without_a_late_subscripti
     );
     assert_eq!(
         *connection.connection_state().borrow(),
-        crate::NatsConnectionState::Disconnected
+        NatsConnectionState::Disconnected
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reconnect_exhaustion_closes_state_when_terminal_event_is_lost() {
+    use std::sync::{mpsc, Mutex};
+    use std::time::Duration;
+
+    const QUEUE_CAPACITY: usize = 128; // async-nats' event queue, not our broadcast.
+    let timeout = Duration::from_secs(5);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (flood, start_flood) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = fake_nats_handshake(socket).await;
+        start_flood.await.unwrap();
+        let mut frames = b"-ERR 'test event'\r\n".repeat(QUEUE_CAPACITY);
+        frames.extend_from_slice(b"PING\r\n");
+        socket.get_mut().write_all(&frames).await.unwrap();
+        // The PONG proves the handler parsed every error before the outage.
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert_ne!(socket.read_line(&mut line).await.unwrap(), 0);
+            match line.as_str() {
+                "PONG\r\n" => break,
+                "PING\r\n" => socket.get_mut().write_all(b"PONG\r\n").await.unwrap(),
+                _ => panic!("unexpected client frame: {line:?}"),
+            }
+        }
+        drop(socket);
+        // Keep the listening port reserved through the one allowed retry.
+        let (retry, _) = listener.accept().await.unwrap();
+        drop(retry);
+    });
+    let (send, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let (release, blocked) = mpsc::channel();
+    let blocked = Mutex::new(blocked);
+    let connection = NatsConnection::connect_observed(
+        format!("nats://{address}"),
+        async_nats::ConnectOptions::new().max_reconnects(1),
+        ConnectConfig::new("UABC234").unwrap(),
+        None,
+        move |event| {
+            if let NatsConnectionEvent::Event(event) = event {
+                send.send(event.clone()).unwrap();
+                if *event == Event::Connected {
+                    // Hold the event dispatch task while the handler fills
+                    // its queue and exits without delivering MaxReconnects.
+                    let _ = blocked.lock().unwrap().recv();
+                }
+            }
+        },
+    )
+    .await
+    .unwrap();
+    let mut states = connection.connection_state();
+    assert_eq!(
+        tokio::time::timeout(timeout, events.recv()).await.unwrap(),
+        Some(Event::Connected)
+    );
+    flood.send(()).unwrap();
+    tokio::time::timeout(timeout, server)
+        .await
+        .expect("the server accepts the one reconnect attempt")
+        .unwrap();
+    assert!(tokio::time::timeout(timeout, connection.client().flush())
+        .await
+        .expect("the capped handler stops processing commands")
+        .is_err());
+    release.send(()).unwrap();
+
+    tokio::time::timeout(
+        timeout,
+        states.wait_for(|state| *state == NatsConnectionState::Closed),
+    )
+    .await
+    .expect("handler exit ends the wait even without a terminal event")
+    .expect("the state watch retains the final state");
+    let delivered: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert_eq!(delivered.len(), QUEUE_CAPACITY);
+    assert!(delivered
+        .iter()
+        .all(|event| matches!(event, Event::ServerError(_))));
 }
 
 #[tokio::test]

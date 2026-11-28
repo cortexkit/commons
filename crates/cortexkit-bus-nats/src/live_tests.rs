@@ -1964,17 +1964,12 @@ async fn connection_state_watches_disconnect_and_reconnect() {
     let Some(server) = TestServer::open().await else {
         return;
     };
-    let url = server.url.clone();
-    let port = url
-        .rsplit(':')
-        .next()
-        .and_then(|port| port.parse::<u16>().ok())
-        .expect("server port");
-    let connection = connect(&url, "USTATE").await;
+    let proxy = OutageProxy::to(&server.url).await;
+    let connection = connect(&proxy.url, "USTATE").await;
     let mut states = connection.connection_state();
     assert_eq!(*states.borrow(), NatsConnectionState::Connected);
 
-    drop(server);
+    proxy.cut();
     tokio::time::timeout(
         Duration::from_secs(5),
         states.wait_for(|state| *state == NatsConnectionState::Disconnected),
@@ -1983,20 +1978,96 @@ async fn connection_state_watches_disconnect_and_reconnect() {
     .expect("watch reports Disconnected without polling the client")
     .expect("state watch remains open");
 
-    let restarted = TestServer::start_on(None, Some(port))
-        .await
-        .expect("restart available server");
-    assert_eq!(restarted.url, url, "restart uses the same port");
-    tokio::time::timeout(
+    proxy.restore();
+    let resumed = tokio::time::timeout(
         Duration::from_secs(5),
-        states.wait_for(|state| *state == NatsConnectionState::Connected),
+        states.wait_for(|state| *state != NatsConnectionState::Disconnected),
     )
     .await
-    .expect("watch reports Connected after automatic reconnect")
+    .expect("watch reports the end of the outage")
     .expect("state watch remains open");
+    assert_eq!(*resumed, NatsConnectionState::Connected);
     assert_eq!(
         *connection.clone().connection_state().borrow(),
         NatsConnectionState::Connected
+    );
+}
+
+#[tokio::test]
+async fn register_watch_ends_after_reconnect_exhaustion() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let proxy = OutageProxy::to(&server.url).await;
+    let timeout = Duration::from_secs(5);
+    let reconnect = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let options = ConnectOptions::new()
+        .max_reconnects(1)
+        .reconnect_to_server_callback({
+            let reconnect = reconnect.clone();
+            move |_, _| {
+                let reconnect = reconnect.clone();
+                async move {
+                    // Only the initial dial can proceed until the watch sees
+                    // Disconnected and enters its recovery wait.
+                    if let Ok(permit) = reconnect.acquire().await {
+                        permit.forget();
+                    }
+                    None
+                }
+            }
+        });
+    let connection = NatsConnection::connect(
+        &proxy.url,
+        options,
+        ConnectConfig::new("UWATCHEXHAUSTED").unwrap(),
+    )
+    .await
+    .unwrap();
+    connection
+        .jetstream()
+        .create_key_value(kv::Config {
+            bucket: "WATCH_EXHAUSTION".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let register = connection.register("WATCH_EXHAUSTION").await.unwrap();
+    let mut watch = register.watch("module.").await.unwrap();
+    assert!(matches!(
+        watch.next().await,
+        Ok(WatchEvent::Snapshot { .. })
+    ));
+
+    let mut states = connection.connection_state();
+    let next = watch.next();
+    tokio::pin!(next);
+    assert!(futures_util::poll!(&mut next).is_pending());
+    proxy.cut();
+    tokio::time::timeout(
+        timeout,
+        states.wait_for(|state| *state == NatsConnectionState::Disconnected),
+    )
+    .await
+    .expect("the outage reaches the state watch")
+    .expect("the state watch remains open");
+    assert!(futures_util::poll!(&mut next).is_pending());
+    reconnect.close();
+
+    assert!(tokio::time::timeout(timeout, connection.client().flush())
+        .await
+        .expect("the capped handler stops processing commands")
+        .is_err());
+    let error = tokio::time::timeout(timeout, next)
+        .await
+        .expect("the pending register watch ends after reconnect exhaustion")
+        .expect_err("the ended watch reports an error");
+    assert!(
+        matches!(error, BusError::Unavailable { reason, .. } if reason == "register watch ended")
+    );
+    assert_eq!(
+        *connection.connection_state().borrow(),
+        NatsConnectionState::Closed
     );
 }
 
